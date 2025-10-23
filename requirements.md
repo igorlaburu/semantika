@@ -1,4 +1,3 @@
-````markdown
 # Documento de Arquitectura: semantika
 
 **Versión:** 1.0
@@ -265,21 +264,19 @@ La información genérica (noticias, tuits) caduca para mantener la base de dato
 
 ### 9.2. Estructura de Ficheros
 
-````
-
+```
 /semantika/
-├── .env                  \# Fichero de secretos (Supabase URL/Key)
-├── docker-compose.yml    \# Orquestador de todos los servicios
-├── Dockerfile            \# Define la imagen de la aplicación semantika
-├── requirements.txt      \# Dependencias de Python
-├── server.py             \# Demonio API (FastAPI)
-├── scheduler.py          \# Demonio Cron (APScheduler)
-├── core\_ingest.py        \# Lógica de ingesta (Guardrails, Dedupe, Carga)
-├── cli.py                \# Herramienta de admin (crear clientes/tareas en Supabase)
-├── /qdrant\_storage/      \# (Directorio para datos persistentes de Qdrant)
-└── /ollama\_storage/      \# (Directorio para modelos persistentes de Ollama)
-
-````
+├── .env                  # Fichero de secretos (Supabase URL/Key)
+├── docker-compose.yml    # Orquestador de todos los servicios
+├── Dockerfile            # Define la imagen de la aplicación semantika
+├── requirements.txt      # Dependencias de Python
+├── server.py             # Demonio API (FastAPI)
+├── scheduler.py          # Demonio Cron (APScheduler)
+├── core_ingest.py        # Lógica de ingesta (Guardrails, Dedupe, Carga)
+├── cli.py                # Herramienta de admin (crear clientes/tareas en Supabase)
+├── /qdrant_storage/      # (Directorio para datos persistentes de Qdrant)
+└── /ollama_storage/      # (Directorio para modelos persistentes de Ollama)
+```
 
 ### 9.3. Ficheros de Configuración
 
@@ -301,7 +298,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # (CMD se define en docker-compose)
-````
+```
 
 #### `requirements.txt`
 
@@ -393,8 +390,8 @@ services:
 3.  **Configurar Entorno:**
       * Crear el fichero `.env`: `nano .env`
       * Añadir las claves:
-        ```
-        SUPABASE_URL="[https://tu-proyecto.supabase.co](https://tu-proyecto.supabase.co)"
+        ```env
+        SUPABASE_URL="https://tu-proyecto.supabase.co"
         SUPABASE_KEY="tu-supabase-service-role-key"
         ```
 4.  **Lanzar Servicios:**
@@ -412,12 +409,7 @@ services:
       * (El CLI te devolverá la API Key).
       * Añadir una tarea de prueba:
         ```bash
-        docker exec -it semantika-api python cli.py add-task --client-id "uuid-del-cliente" --type "web_llm" --target "[https://un-blog.com](https://un-blog.com)" --freq 60
+        docker exec -it semantika-api python cli.py add-task --client-id "uuid-del-cliente" --type "web_llm" --target "https://un-blog.com" --freq 60
         ```
 7.  **Monitorizar:**
       * Acceder al visor de logs en `http://[IP_DEL_VPS]:8081` para ver el sistema en funcionamiento.
-
-<!-- end list -->
-
-```
-```
