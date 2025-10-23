@@ -255,13 +255,22 @@ La información genérica (noticias, tuits) caduca para mantener la base de dato
 
 ---
 
-## 9. Despliegue e Instalación (Docker)
+## 9. Despliegue e Instalación
 
 ### 9.1. Prerrequisitos
 
-* Un VPS (Linux) con **Docker** y **Docker Compose** instalados.
-* Un proyecto creado en **Supabase** (anotar URL y Service Key).
-* (Opcional) Cuentas en APIs externas (scraper.tech, EFE...).
+#### Desarrollo Local (MacBook Air M1)
+* **Docker Desktop** para Mac (con soporte Apple Silicon)
+* **Git** instalado
+* Mínimo 8GB RAM (16GB recomendado)
+* ~5GB espacio en disco
+
+#### Producción (VPS)
+* Un VPS (Linux) con **Docker** y **Docker Compose** instalados
+* Acceso SSH con clave pública configurada
+* Un proyecto creado en **Supabase** (anotar URL y Service Key)
+* (Opcional) Cuentas en APIs externas (scraper.tech, EFE...)
+* GitHub configurado con secretos para CI/CD
 
 ### 9.2. Estructura de Ficheros
 
@@ -401,3 +410,71 @@ services:
         ```
 7.  **Monitorizar:**
       * Acceder al visor de logs en `http://[IP_DEL_VPS]:8081` para ver el sistema en funcionamiento.
+
+### 9.5. Despliegue Continuo (CI/CD)
+
+El proyecto utiliza **GitHub Actions** para despliegue automático al VPS de producción.
+
+#### Configuración Inicial
+
+1.  **Generar clave SSH en el VPS** (si no existe):
+    ```bash
+    ssh-keygen -t ed25519 -C "github-actions"
+    cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
+    ```
+
+2.  **Configurar GitHub Secrets** (Settings → Secrets → Actions):
+    * `VPS_HOST`: IP o dominio del VPS
+    * `VPS_USER`: Usuario SSH (ej. `root` o `deploy`)
+    * `VPS_SSH_KEY`: Contenido de `~/.ssh/id_ed25519` (clave privada)
+    * `VPS_PORT`: Puerto SSH (por defecto `22`)
+
+3.  **Copiar `.env` al VPS**:
+    ```bash
+    scp .env usuario@VPS:/ruta/semantika/.env
+    ```
+
+#### Workflow de Despliegue
+
+El archivo `.github/workflows/deploy.yml` automatiza:
+
+1.  **Trigger:** Al hacer `git push` a la rama `main`
+2.  **Acciones:**
+    * Conecta al VPS por SSH
+    * Hace `git pull` del repositorio
+    * Ejecuta `docker-compose down` (detiene servicios)
+    * Ejecuta `docker-compose up -d --build` (reconstruye y despliega)
+    * Verifica que los servicios estén corriendo
+3.  **Tiempo:** ~2-3 minutos
+4.  **Rollback:** Si falla, mantiene la versión anterior corriendo
+
+#### Uso
+
+```bash
+# Desde tu Mac
+git add .
+git commit -m "Update feature X"
+git push  # ← Esto dispara el despliegue automático
+```
+
+Monitoriza el despliegue en: `https://github.com/igorlaburu/semantika/actions`
+
+#### Despliegue Manual (Alternativo)
+
+Si necesitas desplegar manualmente sin GitHub Actions:
+
+```bash
+# Conectar al VPS
+ssh usuario@VPS
+
+# Actualizar código
+cd /ruta/semantika
+git pull
+
+# Reconstruir y desplegar
+docker-compose down
+docker-compose up -d --build
+
+# Verificar logs
+docker-compose logs -f
+```
