@@ -19,7 +19,7 @@ El sistema está diseñado para un despliegue de dependencias mínimas en un VPS
 
 El sistema es capaz de ingerir datos de las siguientes fuentes, asociando cada dato a un `client_id`:
 
-* **Scrapers Web (con LLM):** Ingiere el contenido de una URL y utiliza un LLM (Ollama) para extraer *múltiples* unidades de información (noticias, eventos) de una sola página.
+* **Scrapers Web (con LLM):** Ingiere el contenido de una URL y utiliza un LLM (OpenRouter) para extraer *múltiples* unidades de información (noticias, eventos) de una sola página.
 * **APIs de Agencias:** Conectores específicos para APIs de noticias (ej. Reuters, EFE), configurables por cliente.
 * **Twitter (scraper.tech):** Ingiere tuits o resultados de búsqueda de la API de `scraper.tech`.
 * **Audio (Whisper):** Transcribe archivos de audio a texto usando un modelo local de Whisper.
@@ -48,7 +48,7 @@ El sistema es capaz de ingerir datos de las siguientes fuentes, asociando cada d
     1.  Recibe una consulta (`query`) y un umbral de similitud.
     2.  Recupera los `k` documentos más relevantes.
     3.  Filtra los que superan el umbral.
-    4.  Concatena sus textos y utiliza un LLM (Ollama) para generar un resumen coherente o una unidad de texto agregada.
+    4.  Concatena sus textos y utiliza un LLM (OpenRouter) para generar un resumen coherente o una unidad de texto agregada.
 
 ### 2.4. Orquestación y Multi-Tenancy
 
@@ -74,7 +74,7 @@ El sistema es capaz de ingerir datos de las siguientes fuentes, asociando cada d
 * **Base de Datos Vectorial:** Qdrant (Corriendo en Docker)
 * **Cliente Vectorial:** `qdrant-client`
 * **Modelo de Embeddings:** `fastembed` (Integrado en Qdrant)
-* **Motor LLM:** Modelo a determinar, mediante Openrouter 
+* **Motor LLM:** OpenRouter (Claude 3.5 Sonnet, GPT-4o-mini) 
 * **Librería de Flujo:** LangChain
 * **Transcripción:** `openai-whisper` (modelo local)
 * **Visor de Logs:** `dozzle`
@@ -84,8 +84,8 @@ El sistema es capaz de ingerir datos de las siguientes fuentes, asociando cada d
 
 * **Supabase Cloud:** (Crítico) Aloja la configuración de clientes, tareas y credenciales de APIs externas.
 * **Qdrant:** (Crítico) El núcleo del almacenamiento. Se ejecuta como un contenedor Docker local o se conecta a Qdrant Cloud.
-* **Modelos llm:** (Crítico) mediante Openrouter, en (`web_llm`) y resumen (`/aggregate`).
-* **APIs de Terceros:** `scraper.tech`, `API EFE`, `API Reuters` (configuradas por cliente).
+* **OpenRouter:** (Crítico) Servicio de LLMs para extracción web (`web_llm`) y resumen (`/aggregate`).
+* **APIs de Terceros:** `scraper.tech` (Twitter), `API EFE`, `API Reuters` (configuradas por cliente).
 
 ---
 
@@ -117,9 +117,10 @@ El sistema se despliega como un conjunto de servicios gestionados por `docker-co
 * **Descripción:** Contenedor oficial de Qdrant.
 * **Función:** Almacena los vectores y sus *payloads*. Expone su API en el puerto `6333` (solo a la red interna de Docker).
 
-### 4.4. `openrouter` (Motor LLM)
+### 4.4. OpenRouter (Servicio LLM Externo)
 
-* **Función:** Sirve los modelos LLM (ej. `phi-3-mini`) para que `semantika-api` (resúmenes) y `semantika-scheduler` (extracción web) los consuman. POSIBILIDAD DE EJECUCIÓN DE MODELOS LOCALES CON OLLAMA
+* **Función:** Servicio cloud que proporciona acceso a múltiples modelos LLM (Claude 3.5 Sonnet, GPT-4o-mini) para `semantika-api` (resúmenes) y `semantika-scheduler` (extracción web).
+* **Nota:** Se utiliza OpenRouter en lugar de Ollama local para reducir requisitos de hardware del VPS.
 
 ### 4.5. `dozzle` (Visor de Logs)
 
@@ -201,7 +202,7 @@ Una única colección (`semantika_prod`) almacena los vectores.
 
 Integrados en el `core_ingest.py`, se ejecutan antes de la desduplicación.
 
-* **Detección de PII (Datos Personales):** Se implementa una cadena de LangChain que utiliza un LLM (Ollama) con un prompt de *few-shot* para detectar DNI, teléfonos, emails privados, etc.
+* **Detección de PII (Datos Personales):** Se implementa una cadena de LangChain que utiliza un LLM (OpenRouter) con un prompt de *few-shot* para detectar DNI, teléfonos, emails privados, etc.
     * **Acción:** Anonimización. El texto se modifica (`[EMAIL_REDACTED]`) antes de la vectorización.
     * **Log:** Se registra un `WARN` con `action: "pii_anonymized"`.
 * **Detección de Copyright:** Una cadena LLM busca patrones de copyright explícitos ("Todos los derechos reservados", "Copyright © 2025...").
@@ -266,7 +267,8 @@ La información genérica (noticias, tuits) caduca para mantener la base de dato
 
 ```
 /semantika/
-├── .env                  # Fichero de secretos (Supabase URL/Key)
+├── .env                  # Fichero de secretos (Supabase, OpenRouter, APIs)
+├── .env.example          # Plantilla de variables de entorno
 ├── docker-compose.yml    # Orquestador de todos los servicios
 ├── Dockerfile            # Define la imagen de la aplicación semantika
 ├── requirements.txt      # Dependencias de Python
@@ -275,7 +277,7 @@ La información genérica (noticias, tuits) caduca para mantener la base de dato
 ├── core_ingest.py        # Lógica de ingesta (Guardrails, Dedupe, Carga)
 ├── cli.py                # Herramienta de admin (crear clientes/tareas en Supabase)
 ├── /qdrant_storage/      # (Directorio para datos persistentes de Qdrant)
-└── /ollama_storage/      # (Directorio para modelos persistentes de Ollama)
+└── .gitignore            # Excluir .env y directorios de datos
 ```
 
 ### 9.3. Ficheros de Configuración
@@ -310,10 +312,14 @@ supabase-py
 qdrant-client
 fastembed
 langchain
-langchain-ollama
+langchain-openai
 openai-whisper
+openai
 requests
 beautifulsoup4
+python-dotenv
+pydantic
+pydantic-settings
 ```
 
 #### `docker-compose.yml`
@@ -328,28 +334,20 @@ services:
     command: "uvicorn server:app --host 0.0.0.0 --port 8000"
     ports:
       - "8000:8000"
-    environment:
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_KEY=${SUPABASE_KEY}
-      - QDRANT_URL=http://qdrant:6333
-      - OLLAMA_HOST=http://ollama:11434
+    env_file:
+      - .env
     depends_on:
       - qdrant
-      - ollama
     restart: always
 
   semantika-scheduler:
     build: .
     container_name: semantika-scheduler
     command: "python scheduler.py"
-    environment:
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_KEY=${SUPABASE_KEY}
-      - QDRANT_URL=http://qdrant:6333
-      - OLLAMA_HOST=http://ollama:11434
+    env_file:
+      - .env
     depends_on:
       - qdrant
-      - ollama
     restart: always
 
   qdrant:
@@ -359,14 +357,7 @@ services:
       - "6333:6333"
     volumes:
       - ./qdrant_storage:/qdrant/storage # Persistencia de datos
-
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ./ollama_storage:/root/.ollama # Persistencia de modelos
+    restart: always
 
   dozzle:
     image: amir20/dozzle:latest
@@ -388,20 +379,17 @@ services:
       * Clonar este repositorio: `git clone ...`
       * `cd semantika`
 3.  **Configurar Entorno:**
-      * Crear el fichero `.env`: `nano .env`
-      * Añadir las claves:
+      * Copiar el archivo de ejemplo: `cp .env.example .env`
+      * Editar `.env` y configurar tus claves:
         ```env
         SUPABASE_URL="https://tu-proyecto.supabase.co"
         SUPABASE_KEY="tu-supabase-service-role-key"
+        OPENROUTER_API_KEY="sk-or-v1-tu-clave-aqui"
+        SCRAPERTECH_API_KEY="tu-clave-scrapertech-aqui"
         ```
 4.  **Lanzar Servicios:**
       * Ejecutar: `docker-compose up -d --build`
-5.  **Configuración Post-Instalación (Ollama):**
-      * Descargar el modelo LLM que usará la aplicación (ej. `phi-3-mini`):
-        ```bash
-        docker exec -it ollama ollama pull phi-3-mini
-        ```
-6.  **Configurar Clientes y Tareas:**
+5.  **Configurar Clientes y Tareas:**
       * Ejecutar el CLI dentro del contenedor para añadir tu primer cliente:
         ```bash
         docker exec -it semantika-api python cli.py add-client --name "Mi Primer Cliente"
