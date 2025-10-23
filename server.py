@@ -4,16 +4,20 @@ Handles all HTTP requests for document ingestion, search, and aggregation.
 """
 
 from datetime import datetime
-from typing import Dict
+from typing import Dict, Optional
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Header, HTTPException, Depends
 from fastapi.responses import JSONResponse
 
 from utils.logger import get_logger
 from utils.config import settings
+from utils.supabase_client import get_supabase_client
 
 # Initialize logger
 logger = get_logger("api")
+
+# Initialize Supabase client
+supabase_client = get_supabase_client()
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -55,6 +59,45 @@ async def log_requests(request: Request, call_next):
 
     return response
 
+
+# ============================================
+# AUTHENTICATION
+# ============================================
+
+async def get_api_key(x_api_key: Optional[str] = Header(None)) -> str:
+    """Extract API key from header."""
+    if not x_api_key:
+        logger.warn("missing_api_key")
+        raise HTTPException(status_code=401, detail="Missing API Key")
+    return x_api_key
+
+
+async def get_current_client(api_key: str = Depends(get_api_key)) -> Dict:
+    """
+    Get current authenticated client from API key.
+
+    Args:
+        api_key: API key from header
+
+    Returns:
+        Client data
+
+    Raises:
+        HTTPException: If API key is invalid
+    """
+    client = await supabase_client.get_client_by_api_key(api_key)
+
+    if not client:
+        logger.warn("invalid_api_key", api_key_prefix=api_key[:10])
+        raise HTTPException(status_code=403, detail="Invalid API Key")
+
+    logger.debug("client_authenticated", client_id=client["client_id"])
+    return client
+
+
+# ============================================
+# STARTUP/SHUTDOWN
+# ============================================
 
 @app.on_event("startup")
 async def startup_event():
@@ -103,6 +146,25 @@ async def root() -> Dict[str, str]:
         "description": "Semantic data pipeline with multi-tenant support",
         "docs": "/docs",
         "health": "/health"
+    }
+
+
+@app.get("/me")
+async def get_me(client: Dict = Depends(get_current_client)) -> Dict:
+    """
+    Get current authenticated client information.
+
+    Requires: X-API-Key header
+
+    Returns:
+        Client information
+    """
+    return {
+        "client_id": client["client_id"],
+        "client_name": client["client_name"],
+        "email": client.get("email"),
+        "is_active": client["is_active"],
+        "created_at": client["created_at"]
     }
 
 
