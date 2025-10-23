@@ -1,0 +1,41 @@
+# FastAPI and server
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# Scheduling
+apscheduler==3.10.4
+
+# Database clients
+supabase==2.3.4
+qdrant-client==1.7.3
+
+# Embeddings
+fastembed==0.2.2
+
+# LangChain
+langchain==0.1.9
+langchain-community==0.0.20
+langchain-core==0.1.23
+langchain-openai==0.0.5
+langchain-text-splitters==0.0.1
+
+# OpenAI/OpenRouter
+openai==1.12.0
+
+# Audio transcription (optional - heavy)
+openai-whisper==20231117
+
+# Web scraping
+requests==2.31.0
+beautifulsoup4==4.12.3
+lxml==5.1.0
+urllib3==2.1.0
+
+# Configuration
+python-dotenv==1.0.1
+pydantic==2.6.1
+pydantic-settings==2.1.0
+
+# Utilities
+tiktoken==0.6.0
