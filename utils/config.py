@@ -19,6 +19,10 @@ class Settings(BaseSettings):
         default="http://qdrant:6333",
         description="Qdrant server URL"
     )
+    qdrant_api_key: str = Field(
+        default="",
+        description="Qdrant API key (for Qdrant Cloud)"
+    )
     qdrant_collection_name: str = Field(
         default="semantika_prod",
         description="Qdrant collection name"
