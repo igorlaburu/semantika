@@ -135,6 +135,33 @@ async def list_tasks(client_id: Optional[str] = None):
         sys.exit(1)
 
 
+async def delete_task(task_id: str):
+    """Delete a task."""
+    try:
+        supabase = get_supabase_client()
+
+        # Verify task exists
+        task = await supabase.get_task_by_id(task_id)
+        if not task:
+            print(f"\n❌ Task not found: {task_id}\n")
+            sys.exit(1)
+
+        # Delete task
+        await supabase.delete_task(task_id)
+
+        print(f"\n✅ Task deleted successfully!")
+        print(f"Task ID: {task_id}")
+        print(f"Type: {task['source_type']}")
+        print(f"Target: {task['target']}\n")
+
+        logger.info("cli_task_deleted", task_id=task_id)
+
+    except Exception as e:
+        print(f"\n❌ Error deleting task: {str(e)}\n")
+        logger.error("cli_delete_task_error", error=str(e))
+        sys.exit(1)
+
+
 async def qdrant_info():
     """Show Qdrant collection information."""
     try:
@@ -186,6 +213,10 @@ def main():
     list_tasks_parser = subparsers.add_parser("list-tasks", help="List tasks")
     list_tasks_parser.add_argument("--client-id", help="Filter by client ID (optional)")
 
+    # delete-task
+    delete_task_parser = subparsers.add_parser("delete-task", help="Delete a task")
+    delete_task_parser.add_argument("--task-id", required=True, help="Task UUID to delete")
+
     # qdrant-info
     subparsers.add_parser("qdrant-info", help="Show Qdrant collection information")
 
@@ -204,6 +235,8 @@ def main():
         asyncio.run(add_task(args.client_id, args.type, args.target, args.freq))
     elif args.command == "list-tasks":
         asyncio.run(list_tasks(args.client_id if hasattr(args, 'client_id') else None))
+    elif args.command == "delete-task":
+        asyncio.run(delete_task(args.task_id))
     elif args.command == "qdrant-info":
         asyncio.run(qdrant_info())
 

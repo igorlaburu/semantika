@@ -228,6 +228,71 @@ class QdrantClient:
             logger.error("delete_by_filter_error", error=str(e))
             return False
 
+    def delete_old_points(self, cutoff_timestamp: int, exclude_special: bool = True) -> int:
+        """
+        Delete old points based on TTL.
+
+        Args:
+            cutoff_timestamp: Unix timestamp - delete points older than this
+            exclude_special: If True, don't delete points with special=true
+
+        Returns:
+            Number of points deleted
+        """
+        try:
+            from qdrant_client.models import Range, FieldCondition, Filter
+
+            # Build filter for old points
+            must_conditions = [
+                # Points with timestamp < cutoff_timestamp
+                FieldCondition(
+                    key="timestamp",
+                    range=Range(lt=cutoff_timestamp)
+                )
+            ]
+
+            must_not_conditions = []
+            if exclude_special:
+                # Exclude points with special=true
+                must_not_conditions.append(
+                    FieldCondition(
+                        key="special",
+                        match=MatchValue(value=True)
+                    )
+                )
+
+            qdrant_filter = Filter(
+                must=must_conditions,
+                must_not=must_not_conditions if must_not_conditions else None
+            )
+
+            # Count points before deletion (for logging)
+            count_result = self.client.count(
+                collection_name=self.collection_name,
+                count_filter=qdrant_filter,
+                exact=True
+            )
+            count_to_delete = count_result.count
+
+            if count_to_delete > 0:
+                # Delete old points
+                self.client.delete(
+                    collection_name=self.collection_name,
+                    points_selector=qdrant_filter
+                )
+
+                logger.info(
+                    "old_points_deleted",
+                    count=count_to_delete,
+                    cutoff_timestamp=cutoff_timestamp
+                )
+
+            return count_to_delete
+
+        except Exception as e:
+            logger.error("delete_old_points_error", error=str(e))
+            return 0
+
 
 # Global Qdrant client instance
 _qdrant_client: Optional[QdrantClient] = None

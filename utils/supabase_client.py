@@ -180,6 +180,30 @@ class SupabaseClient:
             logger.error("create_task_error", error=str(e), client_id=client_id)
             raise
 
+    async def get_task_by_id(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """Get task by ID."""
+        try:
+            response = self.client.table("tasks").select("*").eq("task_id", task_id).execute()
+            return response.data[0] if response.data else None
+        except Exception as e:
+            logger.error("get_task_by_id_error", error=str(e), task_id=task_id)
+            return None
+
+    async def delete_task(self, task_id: str) -> bool:
+        """Delete a task (soft delete - sets is_active to False)."""
+        try:
+            response = self.client.table("tasks").update({"is_active": False}).eq("task_id", task_id).execute()
+
+            if response.data and len(response.data) > 0:
+                logger.info("task_deleted", task_id=task_id)
+                return True
+            else:
+                raise Exception("Failed to delete task")
+
+        except Exception as e:
+            logger.error("delete_task_error", error=str(e), task_id=task_id)
+            raise
+
     # ============================================
     # API CREDENTIALS
     # ============================================
