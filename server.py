@@ -215,6 +215,13 @@ class AggregateRequest(BaseModel):
     threshold: float = 0.7
 
 
+class IngestURLRequest(BaseModel):
+    """Request model for URL ingestion."""
+    url: str
+    extract_multiple: bool = False
+    skip_guardrails: bool = False
+
+
 # ============================================
 # INGESTION ENDPOINTS
 # ============================================
@@ -252,6 +259,43 @@ async def ingest_text(
 
     except Exception as e:
         logger.error("ingest_text_endpoint_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ingest/url")
+async def ingest_url(
+    request: IngestURLRequest,
+    client: Dict = Depends(get_current_client)
+) -> Dict[str, Any]:
+    """
+    Scrape URL and ingest content.
+
+    Requires: X-API-Key header
+
+    Body:
+        - url: URL to scrape (required)
+        - extract_multiple: Extract multiple articles from page (default: false)
+        - skip_guardrails: Skip PII/Copyright checks (default: false)
+
+    Returns:
+        Scraping and ingestion results
+    """
+    try:
+        from sources.web_scraper import WebScraper
+
+        scraper = WebScraper()
+
+        result = await scraper.scrape_and_ingest(
+            url=request.url,
+            client_id=client["client_id"],
+            extract_multiple=request.extract_multiple,
+            skip_guardrails=request.skip_guardrails
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error("ingest_url_endpoint_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 

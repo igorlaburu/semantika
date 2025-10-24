@@ -78,6 +78,50 @@ class Settings(BaseSettings):
     api_port: int = Field(default=8000, description="API port")
     log_level: str = Field(default="INFO", description="Logging level")
 
+    # File Monitor Configuration
+    file_monitor_enabled: bool = Field(
+        default=False,
+        description="Enable file monitor"
+    )
+    file_monitor_watch_dir: str = Field(
+        default="/app/data/watch",
+        description="Directory to watch for new files"
+    )
+    file_monitor_processed_dir: str = Field(
+        default="/app/data/processed",
+        description="Directory for processed files"
+    )
+    file_monitor_interval: int = Field(
+        default=30,
+        description="Check interval in seconds"
+    )
+
+    # Email Monitor Configuration
+    email_monitor_enabled: bool = Field(
+        default=False,
+        description="Enable email monitor"
+    )
+    email_imap_server: str = Field(
+        default="",
+        description="IMAP server address"
+    )
+    email_imap_port: int = Field(
+        default=993,
+        description="IMAP port (usually 993 for SSL)"
+    )
+    email_address: str = Field(
+        default="",
+        description="Email address to monitor"
+    )
+    email_password: str = Field(
+        default="",
+        description="Email password or app password"
+    )
+    email_monitor_interval: int = Field(
+        default=60,
+        description="Check interval in seconds"
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
