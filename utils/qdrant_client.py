@@ -7,7 +7,7 @@ document insertion, and semantic search.
 from typing import Optional, List, Dict, Any
 from qdrant_client import QdrantClient as QClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
-from qdrant_client.models import Filter, FieldCondition, MatchValue
+from qdrant_client.models import Filter, FieldCondition, MatchValue, PayloadSchemaType
 
 from .config import settings
 from .logger import get_logger
@@ -63,6 +63,15 @@ class QdrantClient:
                 )
 
                 logger.info("collection_created", name=self.collection_name)
+
+                # Create payload index for client_id filtering
+                self.client.create_payload_index(
+                    collection_name=self.collection_name,
+                    field_name="client_id",
+                    field_schema=PayloadSchemaType.KEYWORD
+                )
+
+                logger.info("index_created", field="client_id")
             else:
                 logger.info("collection_exists", name=self.collection_name)
 
@@ -75,10 +84,10 @@ class QdrantClient:
         try:
             info = self.client.get_collection(self.collection_name)
             return {
-                "name": info.name,
-                "vectors_count": info.vectors_count,
-                "points_count": info.points_count,
-                "status": info.status
+                "name": self.collection_name,
+                "vectors_count": info.vectors_count if hasattr(info, 'vectors_count') else 0,
+                "points_count": info.points_count if hasattr(info, 'points_count') else 0,
+                "status": info.status if hasattr(info, 'status') else 'unknown'
             }
         except Exception as e:
             logger.error("get_collection_info_error", error=str(e))

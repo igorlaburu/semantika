@@ -144,8 +144,8 @@ async def qdrant_info():
         print(f"\n📊 Qdrant Collection Information:\n")
         print(f"Collection: {info.get('name', 'N/A')}")
         print(f"Status: {info.get('status', 'N/A')}")
-        print(f"Vectors: {info.get('vectors_count', 0):,}")
-        print(f"Points: {info.get('points_count', 0):,}")
+        print(f"Vectors: {info.get('vectors_count') or 0:,}")
+        print(f"Points: {info.get('points_count') or 0:,}")
         print()
 
     except Exception as e:

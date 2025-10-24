@@ -4,14 +4,16 @@ Handles all HTTP requests for document ingestion, search, and aggregation.
 """
 
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Optional, Any, List
 
 from fastapi import FastAPI, Request, Header, HTTPException, Depends
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from utils.logger import get_logger
 from utils.config import settings
 from utils.supabase_client import get_supabase_client
+from core_ingest import IngestPipeline
 
 # Initialize logger
 logger = get_logger("api")
@@ -185,6 +187,152 @@ async def global_exception_handler(request: Request, exc: Exception):
             "path": request.url.path
         }
     )
+
+
+# ============================================
+# PYDANTIC MODELS
+# ============================================
+
+class IngestTextRequest(BaseModel):
+    """Request model for text ingestion."""
+    text: str
+    title: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    skip_guardrails: bool = False
+
+
+class SearchRequest(BaseModel):
+    """Request model for search."""
+    query: str
+    limit: int = 5
+    filters: Optional[Dict[str, Any]] = None
+
+
+class AggregateRequest(BaseModel):
+    """Request model for aggregation."""
+    query: str
+    limit: int = 10
+    threshold: float = 0.7
+
+
+# ============================================
+# INGESTION ENDPOINTS
+# ============================================
+
+@app.post("/ingest/text")
+async def ingest_text(
+    request: IngestTextRequest,
+    client: Dict = Depends(get_current_client)
+) -> Dict[str, Any]:
+    """
+    Ingest text document.
+
+    Requires: X-API-Key header
+
+    Body:
+        - text: Document text (required)
+        - title: Document title (optional)
+        - metadata: Custom metadata (optional)
+        - skip_guardrails: Skip PII/Copyright checks (default: false)
+
+    Returns:
+        Ingestion result with stats
+    """
+    try:
+        pipeline = IngestPipeline(client_id=client["client_id"])
+
+        result = await pipeline.ingest_text(
+            text=request.text,
+            title=request.title,
+            metadata=request.metadata,
+            skip_guardrails=request.skip_guardrails
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error("ingest_text_endpoint_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# SEARCH ENDPOINTS
+# ============================================
+
+@app.get("/search")
+async def search(
+    query: str,
+    limit: int = 5,
+    source: Optional[str] = None,
+    client: Dict = Depends(get_current_client)
+) -> List[Dict[str, Any]]:
+    """
+    Semantic search in documents.
+
+    Requires: X-API-Key header
+
+    Query params:
+        - query: Search query (required)
+        - limit: Maximum results (default: 5)
+        - source: Filter by source (optional)
+
+    Returns:
+        List of matching documents with scores
+    """
+    try:
+        pipeline = IngestPipeline(client_id=client["client_id"])
+
+        filters = {}
+        if source:
+            filters["source"] = source
+
+        results = await pipeline.search(
+            query=query,
+            limit=limit,
+            filters=filters if filters else None
+        )
+
+        return results
+
+    except Exception as e:
+        logger.error("search_endpoint_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/aggregate")
+async def aggregate(
+    query: str,
+    limit: int = 10,
+    threshold: float = 0.7,
+    client: Dict = Depends(get_current_client)
+) -> Dict[str, Any]:
+    """
+    Search and aggregate documents with LLM summary.
+
+    Requires: X-API-Key header
+
+    Query params:
+        - query: Search query (required)
+        - limit: Maximum documents to retrieve (default: 10)
+        - threshold: Minimum similarity score (default: 0.7)
+
+    Returns:
+        Summary and source documents
+    """
+    try:
+        pipeline = IngestPipeline(client_id=client["client_id"])
+
+        result = await pipeline.aggregate(
+            query=query,
+            limit=limit,
+            threshold=threshold
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error("aggregate_endpoint_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
