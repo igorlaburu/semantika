@@ -2,6 +2,14 @@ services:
   semantika-api:
     build: .
     command: "uvicorn server:app --host 0.0.0.0 --port 8000 --workers 2"
+    environment:
+      - SUPABASE_URL
+      - SUPABASE_KEY
+      - QDRANT_URL
+      - QDRANT_API_KEY
+      - OPENROUTER_API_KEY
+      - QDRANT_COLLECTION_NAME=semantika_prod
+      - LOG_LEVEL=INFO
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health', timeout=5)"]
@@ -13,6 +21,14 @@ services:
   semantika-scheduler:
     build: .
     command: "python scheduler.py"
+    environment:
+      - SUPABASE_URL
+      - SUPABASE_KEY
+      - QDRANT_URL
+      - QDRANT_API_KEY
+      - OPENROUTER_API_KEY
+      - QDRANT_COLLECTION_NAME=semantika_prod
+      - LOG_LEVEL=INFO
     restart: unless-stopped
     depends_on:
       - semantika-api
