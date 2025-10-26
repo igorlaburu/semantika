@@ -84,6 +84,9 @@ async def execute_task(task: Dict[str, Any]):
         target=target
     )
 
+    supabase = get_supabase_client()
+    execution_time = datetime.utcnow().isoformat() + "Z"
+
     try:
         if source_type == "web_llm":
             # Web scraping with LLM extraction
@@ -108,8 +111,13 @@ async def execute_task(task: Dict[str, Any]):
         else:
             logger.error("unknown_source_type", task_id=task_id, source_type=source_type)
 
+        # Update last_run timestamp in Supabase
+        await supabase.update_task_last_run(task_id, execution_time)
+
     except Exception as e:
         logger.error("task_execution_error", task_id=task_id, error=str(e))
+        # Still update last_run even on error to track execution attempts
+        await supabase.update_task_last_run(task_id, execution_time)
 
 
 async def cleanup_old_data():

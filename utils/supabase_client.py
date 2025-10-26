@@ -204,6 +204,22 @@ class SupabaseClient:
             logger.error("delete_task_error", error=str(e), task_id=task_id)
             raise
 
+    async def update_task_last_run(self, task_id: str, last_run_timestamp: str) -> bool:
+        """Update task's last_run timestamp."""
+        try:
+            response = self.client.table("tasks").update({"last_run": last_run_timestamp}).eq("task_id", task_id).execute()
+
+            if response.data and len(response.data) > 0:
+                logger.debug("task_last_run_updated", task_id=task_id, last_run=last_run_timestamp)
+                return True
+            else:
+                logger.warn("task_last_run_update_failed", task_id=task_id)
+                return False
+
+        except Exception as e:
+            logger.error("update_task_last_run_error", error=str(e), task_id=task_id)
+            return False
+
     # ============================================
     # API CREDENTIALS
     # ============================================
