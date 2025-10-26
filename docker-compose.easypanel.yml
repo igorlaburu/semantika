@@ -4,50 +4,50 @@ services:
     command: "uvicorn server:app --host 0.0.0.0 --port 8000 --workers 2"
     environment:
       # Supabase Configuration
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_KEY=${SUPABASE_KEY}
+      - SUPABASE_URL=https://vasuydxhaldvpphkkarh.supabase.co
+      - SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZhc3V5ZHhoYWxkdnBwaGtrYXJoIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MTA0NjMyOCwiZXhwIjoyMDc2NjIyMzI4fQ.tZu-Qr_sJ4vxU1JnLTxZJrNQOZd461yXnq_SKckdSMc
 
       # Qdrant Configuration
-      - QDRANT_URL=${QDRANT_URL}
-      - QDRANT_API_KEY=${QDRANT_API_KEY}
-      - QDRANT_COLLECTION_NAME=${QDRANT_COLLECTION_NAME:-semantika_prod}
+      - QDRANT_URL=https://badc88ac-b9fd-4632-af9b-637acd47a3da.eu-central-1-0.aws.cloud.qdrant.io:6333
+      - QDRANT_API_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIn0.2tbbm2yFz317zB2LeScaq6yEHGhFDhN7wdLFG9VxAVY
+      - QDRANT_COLLECTION_NAME=semantika_prod
 
       # OpenRouter Configuration
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
-      - OPENROUTER_DEFAULT_MODEL=${OPENROUTER_DEFAULT_MODEL:-anthropic/claude-3.5-sonnet}
-      - OPENROUTER_FAST_MODEL=${OPENROUTER_FAST_MODEL:-openai/gpt-4o-mini}
+      - OPENROUTER_API_KEY=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
+      - OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+      - OPENROUTER_DEFAULT_MODEL=anthropic/claude-3.5-sonnet
+      - OPENROUTER_FAST_MODEL=openai/gpt-4o-mini
 
       # ScraperTech Configuration
-      - SCRAPERTECH_API_KEY=${SCRAPERTECH_API_KEY:-}
-      - SCRAPERTECH_BASE_URL=${SCRAPERTECH_BASE_URL:-https://api.scraper.tech}
+      - SCRAPERTECH_API_KEY=
+      - SCRAPERTECH_BASE_URL=https://api.scraper.tech
 
       # Text Processing Configuration
-      - CHUNK_SIZE=${CHUNK_SIZE:-1000}
-      - CHUNK_OVERLAP=${CHUNK_OVERLAP:-200}
-      - SIMILARITY_THRESHOLD=${SIMILARITY_THRESHOLD:-0.98}
+      - CHUNK_SIZE=1000
+      - CHUNK_OVERLAP=200
+      - SIMILARITY_THRESHOLD=0.98
 
       # TTL Configuration
-      - DATA_TTL_DAYS=${DATA_TTL_DAYS:-30}
+      - DATA_TTL_DAYS=30
 
       # Server Configuration
-      - API_HOST=${API_HOST:-0.0.0.0}
-      - API_PORT=${API_PORT:-8000}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - LOG_LEVEL=INFO
 
       # File Monitor Configuration
-      - FILE_MONITOR_ENABLED=${FILE_MONITOR_ENABLED:-false}
-      - FILE_MONITOR_WATCH_DIR=${FILE_MONITOR_WATCH_DIR:-/app/data/watch}
-      - FILE_MONITOR_PROCESSED_DIR=${FILE_MONITOR_PROCESSED_DIR:-/app/data/processed}
-      - FILE_MONITOR_INTERVAL=${FILE_MONITOR_INTERVAL:-30}
+      - FILE_MONITOR_ENABLED=false
+      - FILE_MONITOR_WATCH_DIR=/app/data/watch
+      - FILE_MONITOR_PROCESSED_DIR=/app/data/processed
+      - FILE_MONITOR_INTERVAL=30
 
       # Email Monitor Configuration
-      - EMAIL_MONITOR_ENABLED=${EMAIL_MONITOR_ENABLED:-false}
-      - EMAIL_IMAP_SERVER=${EMAIL_IMAP_SERVER:-}
-      - EMAIL_IMAP_PORT=${EMAIL_IMAP_PORT:-993}
-      - EMAIL_ADDRESS=${EMAIL_ADDRESS:-}
-      - EMAIL_PASSWORD=${EMAIL_PASSWORD:-}
-      - EMAIL_MONITOR_INTERVAL=${EMAIL_MONITOR_INTERVAL:-60}
+      - EMAIL_MONITOR_ENABLED=false
+      - EMAIL_IMAP_SERVER=
+      - EMAIL_IMAP_PORT=993
+      - EMAIL_ADDRESS=
+      - EMAIL_PASSWORD=
+      - EMAIL_MONITOR_INTERVAL=60
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health', timeout=5)"]
@@ -61,32 +61,32 @@ services:
     command: "python scheduler.py"
     environment:
       # Same environment variables as API
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_KEY=${SUPABASE_KEY}
-      - QDRANT_URL=${QDRANT_URL}
-      - QDRANT_API_KEY=${QDRANT_API_KEY}
-      - QDRANT_COLLECTION_NAME=${QDRANT_COLLECTION_NAME:-semantika_prod}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
-      - OPENROUTER_DEFAULT_MODEL=${OPENROUTER_DEFAULT_MODEL:-anthropic/claude-3.5-sonnet}
-      - OPENROUTER_FAST_MODEL=${OPENROUTER_FAST_MODEL:-openai/gpt-4o-mini}
-      - SCRAPERTECH_API_KEY=${SCRAPERTECH_API_KEY:-}
-      - SCRAPERTECH_BASE_URL=${SCRAPERTECH_BASE_URL:-https://api.scraper.tech}
-      - CHUNK_SIZE=${CHUNK_SIZE:-1000}
-      - CHUNK_OVERLAP=${CHUNK_OVERLAP:-200}
-      - SIMILARITY_THRESHOLD=${SIMILARITY_THRESHOLD:-0.98}
-      - DATA_TTL_DAYS=${DATA_TTL_DAYS:-30}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - FILE_MONITOR_ENABLED=${FILE_MONITOR_ENABLED:-false}
-      - FILE_MONITOR_WATCH_DIR=${FILE_MONITOR_WATCH_DIR:-/app/data/watch}
-      - FILE_MONITOR_PROCESSED_DIR=${FILE_MONITOR_PROCESSED_DIR:-/app/data/processed}
-      - FILE_MONITOR_INTERVAL=${FILE_MONITOR_INTERVAL:-30}
-      - EMAIL_MONITOR_ENABLED=${EMAIL_MONITOR_ENABLED:-false}
-      - EMAIL_IMAP_SERVER=${EMAIL_IMAP_SERVER:-}
-      - EMAIL_IMAP_PORT=${EMAIL_IMAP_PORT:-993}
-      - EMAIL_ADDRESS=${EMAIL_ADDRESS:-}
-      - EMAIL_PASSWORD=${EMAIL_PASSWORD:-}
-      - EMAIL_MONITOR_INTERVAL=${EMAIL_MONITOR_INTERVAL:-60}
+      - SUPABASE_URL=https://vasuydxhaldvpphkkarh.supabase.co
+      - SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZhc3V5ZHhoYWxkdnBwaGtrYXJoIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MTA0NjMyOCwiZXhwIjoyMDc2NjIyMzI4fQ.tZu-Qr_sJ4vxU1JnLTxZJrNQOZd461yXnq_SKckdSMc
+      - QDRANT_URL=https://badc88ac-b9fd-4632-af9b-637acd47a3da.eu-central-1-0.aws.cloud.qdrant.io:6333
+      - QDRANT_API_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIn0.2tbbm2yFz317zB2LeScaq6yEHGhFDhN7wdLFG9VxAVY
+      - QDRANT_COLLECTION_NAME=semantika_prod
+      - OPENROUTER_API_KEY=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
+      - OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+      - OPENROUTER_DEFAULT_MODEL=anthropic/claude-3.5-sonnet
+      - OPENROUTER_FAST_MODEL=openai/gpt-4o-mini
+      - SCRAPERTECH_API_KEY=
+      - SCRAPERTECH_BASE_URL=https://api.scraper.tech
+      - CHUNK_SIZE=1000
+      - CHUNK_OVERLAP=200
+      - SIMILARITY_THRESHOLD=0.98
+      - DATA_TTL_DAYS=30
+      - LOG_LEVEL=INFO
+      - FILE_MONITOR_ENABLED=false
+      - FILE_MONITOR_WATCH_DIR=/app/data/watch
+      - FILE_MONITOR_PROCESSED_DIR=/app/data/processed
+      - FILE_MONITOR_INTERVAL=30
+      - EMAIL_MONITOR_ENABLED=false
+      - EMAIL_IMAP_SERVER=
+      - EMAIL_IMAP_PORT=993
+      - EMAIL_ADDRESS=
+      - EMAIL_PASSWORD=
+      - EMAIL_MONITOR_INTERVAL=60
     restart: unless-stopped
     depends_on:
       - semantika-api
