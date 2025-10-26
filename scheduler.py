@@ -90,12 +90,17 @@ async def execute_task(task: Dict[str, Any]):
     try:
         if source_type == "web_llm":
             # Web scraping with LLM extraction
+            # Get config values, use defaults if not specified
+            config = task.get("config", {})
+            extract_multiple = config.get("extract_multiple", True)
+            skip_guardrails = config.get("skip_guardrails", False)
+
             scraper = WebScraper()
             result = await scraper.scrape_and_ingest(
                 url=target,
                 client_id=client_id,
-                extract_multiple=True,
-                skip_guardrails=False
+                extract_multiple=extract_multiple,
+                skip_guardrails=skip_guardrails
             )
             logger.info("task_completed", task_id=task_id, result=result)
 
