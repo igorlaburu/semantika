@@ -2,8 +2,8 @@ services:
   semantika-api:
     build: .
     command: "uvicorn server:app --host 0.0.0.0 --port 8000 --workers 2"
-    expose:
-      - "8000"
+    ports:
+      - "8000:8000"
     environment:
       # Supabase Configuration
       - SUPABASE_URL=${SUPABASE_URL}
@@ -95,8 +95,8 @@ services:
 
   dozzle:
     image: amir20/dozzle:latest
-    expose:
-      - "8080"
+    ports:
+      - "8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
