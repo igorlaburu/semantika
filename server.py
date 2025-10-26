@@ -222,6 +222,14 @@ class IngestURLRequest(BaseModel):
     skip_guardrails: bool = False
 
 
+class CreateTaskRequest(BaseModel):
+    """Request model for creating a task."""
+    source_type: str
+    target: str
+    frequency_min: int
+    config: Optional[Dict[str, Any]] = None
+
+
 # ============================================
 # INGESTION ENDPOINTS
 # ============================================
@@ -376,6 +384,113 @@ async def aggregate(
 
     except Exception as e:
         logger.error("aggregate_endpoint_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# TASK MANAGEMENT ENDPOINTS
+# ============================================
+
+@app.post("/tasks")
+async def create_task(
+    request: CreateTaskRequest,
+    client: Dict = Depends(get_current_client)
+) -> Dict[str, Any]:
+    """
+    Create a new scheduled task.
+
+    Requires: X-API-Key header
+
+    Body:
+        - source_type: Type of source (web_llm, twitter, api_efe, etc.)
+        - target: URL, query, or endpoint to scrape
+        - frequency_min: Frequency in minutes
+        - config: Optional configuration (optional)
+
+    Returns:
+        Created task information
+    """
+    try:
+        task = await supabase_client.create_task(
+            client_id=client["client_id"],
+            source_type=request.source_type,
+            target=request.target,
+            frequency_min=request.frequency_min,
+            config=request.config
+        )
+
+        return {
+            "status": "ok",
+            "task_id": task["task_id"],
+            "source_type": task["source_type"],
+            "target": task["target"],
+            "frequency_min": task["frequency_min"],
+            "is_active": task["is_active"],
+            "created_at": task["created_at"]
+        }
+
+    except Exception as e:
+        logger.error("create_task_endpoint_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/tasks")
+async def list_tasks(
+    client: Dict = Depends(get_current_client)
+) -> List[Dict[str, Any]]:
+    """
+    List all tasks for authenticated client.
+
+    Requires: X-API-Key header
+
+    Returns:
+        List of tasks
+    """
+    try:
+        tasks = await supabase_client.get_tasks_by_client(client["client_id"])
+        return tasks
+
+    except Exception as e:
+        logger.error("list_tasks_endpoint_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/tasks/{task_id}")
+async def delete_task(
+    task_id: str,
+    client: Dict = Depends(get_current_client)
+) -> Dict[str, str]:
+    """
+    Delete a task.
+
+    Requires: X-API-Key header
+
+    Path params:
+        - task_id: UUID of the task to delete
+
+    Returns:
+        Status message
+    """
+    try:
+        # Verify task belongs to client
+        task = await supabase_client.get_task_by_id(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        if task["client_id"] != client["client_id"]:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this task")
+
+        await supabase_client.delete_task(task_id)
+
+        return {
+            "status": "ok",
+            "message": "Task deleted successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("delete_task_endpoint_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
