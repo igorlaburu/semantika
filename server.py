@@ -24,7 +24,7 @@ supabase_client = get_supabase_client()
 # Initialize FastAPI app
 app = FastAPI(
     title="semantika API",
-    description="Semantic data pipeline with multi-tenant support",
+    description="Semantic data pipeline with multi-tenant support and task scheduling",
     version="0.1.0",
     docs_url="/docs",
     redoc_url="/redoc"
