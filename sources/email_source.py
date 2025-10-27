@@ -193,6 +193,9 @@ class EmailSource(BaseSource):
                 for part in msg.walk():
                     content_type = part.get_content_type()
                     content_disposition = str(part.get("Content-Disposition", ""))
+                    filename = part.get_filename()
+
+                    logger.debug("email_part", content_type=content_type, disposition=content_disposition, filename=filename)
 
                     # Body text
                     if content_type == "text/plain" and "attachment" not in content_disposition:
@@ -200,15 +203,15 @@ class EmailSource(BaseSource):
                     elif content_type == "text/html" and "attachment" not in content_disposition:
                         body_html = part.get_payload(decode=True).decode("utf-8", errors="ignore")
 
-                    # Attachments
-                    elif "attachment" in content_disposition:
-                        filename = part.get_filename()
+                    # Attachments - check both disposition and filename
+                    elif "attachment" in content_disposition or filename:
                         if filename:
                             attachments.append({
                                 "filename": self._decode_header(filename),
                                 "content_type": content_type,
                                 "data": part.get_payload(decode=True)
                             })
+                            logger.debug("attachment_found", filename=filename, content_type=content_type)
             else:
                 # Single part message
                 content_type = msg.get_content_type()
@@ -216,6 +219,8 @@ class EmailSource(BaseSource):
                     body_text = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
                 elif content_type == "text/html":
                     body_html = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
+
+            logger.debug("email_parsed", message_id=message_id, attachments_count=len(attachments))
 
             return {
                 "message_id": message_id,
@@ -247,6 +252,8 @@ class EmailSource(BaseSource):
             "body": email_data.get("body_text") or self._strip_html(email_data.get("body_html", "")),
             "attachments": []
         }
+
+        logger.debug("aggregate_start", attachments_count=len(email_data.get("attachments", [])))
 
         # Process attachments
         for attachment in email_data.get("attachments", []):
