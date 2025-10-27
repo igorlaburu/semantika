@@ -34,8 +34,8 @@ urllib3==2.1.0
 
 # Configuration
 python-dotenv==1.0.1
-pydantic==2.6.1
-pydantic-settings==2.1.0
+pydantic>=2.7.4,<3.0
+pydantic-settings>=2.1.0
 
 # Utilities
 tiktoken==0.6.0
