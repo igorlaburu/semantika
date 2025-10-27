@@ -19,12 +19,19 @@ class ContextUnitGenerator:
         self.openrouter = get_openrouter_client()
         logger.debug("context_unit_generator_initialized")
 
-    async def generate(self, source_content: SourceContent) -> Dict[str, Any]:
+    async def generate(
+        self,
+        source_content: SourceContent,
+        organization_id: str = None,
+        context_unit_id: str = None
+    ) -> Dict[str, Any]:
         """
         Generate context unit from source content.
 
         Args:
             source_content: Unified content from any source
+            organization_id: Organization UUID (for usage tracking)
+            context_unit_id: Context unit UUID (for usage tracking)
 
         Returns:
             Dict with title, summary, tags, atomic_statements
@@ -41,8 +48,12 @@ class ContextUnitGenerator:
 
             logger.debug("prompt_built", text_length=len(prompt_text))
 
-            # 2. Call LLM to generate context unit
-            result = await self.openrouter.generate_context_unit(prompt_text)
+            # 2. Call LLM to generate context unit (with usage tracking)
+            result = await self.openrouter.generate_context_unit(
+                text=prompt_text,
+                organization_id=organization_id,
+                context_unit_id=context_unit_id
+            )
 
             logger.info(
                 "context_unit_generated",

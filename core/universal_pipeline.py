@@ -38,7 +38,7 @@ class UniversalPipeline:
 
         Steps:
         1. Get organization configuration
-        2. Generate context unit (LLM)
+        2. Generate context unit (LLM) with usage tracking
         3. Store in context_units table
         4. Optionally store in Qdrant
 
@@ -61,12 +61,20 @@ class UniversalPipeline:
             if not org:
                 raise ValueError(f"Organization not found: {source_content.organization_slug}")
 
-            # 2. Generate context unit using LLM
-            logger.info("generating_context_unit", org=org["slug"])
-            context_unit = await self.generator.generate(source_content)
+            # 2. Generate context unit ID first (needed for usage tracking)
+            cu_id = str(uuid.uuid4())
 
-            # 3. Store in database
-            cu_id = await self._store_context_unit(
+            # 3. Generate context unit using LLM (with usage tracking)
+            logger.info("generating_context_unit", org=org["slug"])
+            context_unit = await self.generator.generate(
+                source_content=source_content,
+                organization_id=org["id"],
+                context_unit_id=cu_id
+            )
+
+            # 4. Store in database
+            await self._store_context_unit(
+                cu_id=cu_id,
                 organization_id=org["id"],
                 source_type=source_content.source_type,
                 source_id=source_content.source_id,
@@ -121,28 +129,25 @@ class UniversalPipeline:
 
     async def _store_context_unit(
         self,
+        cu_id: str,
         organization_id: str,
         source_type: str,
         source_id: str,
         source_metadata: Dict,
         context_unit: Dict[str, Any]
-    ) -> str:
+    ) -> None:
         """
         Store context unit in database.
 
         Args:
+            cu_id: Pre-generated context unit UUID
             organization_id: Organization UUID
             source_type: Source type (email, api, etc.)
             source_id: Source identifier
             source_metadata: Source metadata
             context_unit: Generated context unit
-
-        Returns:
-            Context unit UUID
         """
         try:
-            cu_id = str(uuid.uuid4())
-
             data = {
                 "id": cu_id,
                 "organization_id": organization_id,
@@ -162,7 +167,6 @@ class UniversalPipeline:
                 .execute()
 
             logger.info("context_unit_inserted", cu_id=cu_id)
-            return cu_id
 
         except Exception as e:
             logger.error("store_context_unit_error", error=str(e))

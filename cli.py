@@ -400,6 +400,51 @@ async def list_context_units(org: Optional[str] = None, limit: int = 20):
         sys.exit(1)
 
 
+async def get_usage(org: Optional[str] = None, days: int = 30):
+    """Get LLM usage statistics."""
+    try:
+        from utils.usage_tracker import get_usage_tracker
+
+        tracker = get_usage_tracker()
+
+        # Get organization ID if slug provided
+        organization_id = None
+        if org:
+            supabase = get_supabase_client()
+            org_result = supabase.client.table("organizations").select("id, name").eq("slug", org).single().execute()
+            if not org_result.data:
+                print(f"\n❌ Organization not found: {org}\n")
+                sys.exit(1)
+            organization_id = org_result.data["id"]
+            print(f"\n📊 LLM Usage for: {org_result.data['name']} (last {days} days)\n")
+        else:
+            print(f"\n📊 LLM Usage - All organizations (last {days} days)\n")
+
+        summary = await tracker.get_usage_summary(organization_id, days)
+
+        if not summary or summary.get("total_calls", 0) == 0:
+            print("No usage data found.\n")
+            return
+
+        # Overall stats
+        print(f"Total API calls: {summary['total_calls']:,}")
+        print(f"Total tokens: {summary['total_tokens']:,}")
+        print(f"Total cost: ${summary['total_cost_usd']:.2f}\n")
+
+        # By operation
+        if summary.get("by_operation"):
+            print(f"{'Operation':<20} {'Calls':<10} {'Tokens':<15} {'Cost (USD)'}")
+            print("-" * 60)
+            for op, stats in summary["by_operation"].items():
+                print(f"{op:<20} {stats['calls']:<10} {stats['tokens']:,<15} ${stats['cost']:.2f}")
+            print()
+
+    except Exception as e:
+        print(f"\n❌ Error getting usage: {str(e)}\n")
+        logger.error("cli_get_usage_error", error=str(e))
+        sys.exit(1)
+
+
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -468,6 +513,11 @@ def main():
     list_cu_parser.add_argument("--org", help="Filter by organization slug (optional)")
     list_cu_parser.add_argument("--limit", type=int, default=20, help="Number of results")
 
+    # usage
+    usage_parser = subparsers.add_parser("usage", help="Show LLM usage statistics")
+    usage_parser.add_argument("--org", help="Filter by organization slug (optional)")
+    usage_parser.add_argument("--days", type=int, default=30, help="Number of days to look back (default: 30)")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -499,6 +549,8 @@ def main():
         asyncio.run(list_users(args.org if hasattr(args, 'org') else None))
     elif args.command == "list-context-units":
         asyncio.run(list_context_units(args.org if hasattr(args, 'org') else None, args.limit))
+    elif args.command == "usage":
+        asyncio.run(get_usage(args.org if hasattr(args, 'org') else None, args.days))
 
 
 if __name__ == "__main__":

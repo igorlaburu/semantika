@@ -4,6 +4,7 @@ Handles LLM interactions for guardrails, extraction, and aggregation using LangC
 """
 
 from typing import Optional, List, Dict, Any
+import json
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
@@ -11,6 +12,7 @@ from langchain_core.runnables import RunnableSequence
 
 from .config import settings
 from .logger import get_logger
+from .usage_tracker import get_usage_tracker
 
 logger = get_logger("openrouter_client")
 
@@ -560,7 +562,12 @@ Use specific, concrete examples extracted from the actual articles. Be detailed 
             logger.error("style_guide_generation_error", error=str(e))
             return f"# Error generating style guide\n\nError: {str(e)}"
 
-    async def generate_context_unit(self, text: str) -> Dict[str, Any]:
+    async def generate_context_unit(
+        self,
+        text: str,
+        organization_id: Optional[str] = None,
+        context_unit_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Generate structured context unit from any content source.
 
@@ -572,6 +579,8 @@ Use specific, concrete examples extracted from the actual articles. Be detailed 
 
         Args:
             text: Aggregated content from any source
+            organization_id: Organization UUID (for usage tracking)
+            context_unit_id: Context unit UUID (for usage tracking)
 
         Returns:
             Dict with title, summary, tags, atomic_statements
@@ -624,11 +633,28 @@ Respond in JSON:
 }}""")
             ])
 
-            context_chain = RunnableSequence(
-                context_unit_prompt | self.llm_sonnet | JsonOutputParser()
-            )
+            # Format prompt
+            messages = await context_unit_prompt.ainvoke({"text": text[:12000]})
 
-            result = await context_chain.ainvoke({"text": text[:12000]})
+            # Invoke LLM and capture response with usage metadata
+            response = await self.llm_sonnet.ainvoke(messages)
+
+            # Parse JSON from response
+            result = json.loads(response.content)
+
+            # Track usage if response has token metadata
+            if hasattr(response, 'response_metadata') and 'token_usage' in response.response_metadata:
+                usage = response.response_metadata['token_usage']
+                tracker = get_usage_tracker()
+                await tracker.track(
+                    model="anthropic/claude-3.5-sonnet",
+                    operation="context_unit",
+                    input_tokens=usage.get('prompt_tokens', 0),
+                    output_tokens=usage.get('completion_tokens', 0),
+                    organization_id=organization_id,
+                    context_unit_id=context_unit_id,
+                    metadata={"source": "email"}
+                )
 
             logger.debug(
                 "context_unit_generated",
