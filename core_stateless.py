@@ -128,7 +128,7 @@ class StatelessPipeline:
         Returns:
             Processing result
         """
-        logger.info("process_url_start", url=url, action=action)
+        logger.info("process_url_start", url=url, process_action=action)
 
         try:
             # Scrape URL
@@ -161,7 +161,7 @@ class StatelessPipeline:
             else:
                 raise ValueError(f"Unknown action: {action}")
 
-            logger.info("process_url_completed", url=url, action=action)
+            logger.info("process_url_completed", url=url, process_action=action)
             return result
 
         except Exception as e:
