@@ -106,7 +106,7 @@ class UniversalPipeline:
     async def _get_organization(self, slug: str) -> Dict[str, Any]:
         """Get organization by slug."""
         try:
-            result = self.supabase.table("organizations") \
+            result = self.supabase.client.table("organizations") \
                 .select("*") \
                 .eq("slug", slug) \
                 .eq("is_active", True) \
@@ -157,7 +157,7 @@ class UniversalPipeline:
                 "processed_at": datetime.utcnow().isoformat()
             }
 
-            result = self.supabase.table("context_units") \
+            result = self.supabase.client.table("context_units") \
                 .insert(data) \
                 .execute()
 
@@ -222,7 +222,7 @@ class UniversalPipeline:
             )
 
             # Update context_unit with qdrant_point_id
-            self.supabase.table("context_units") \
+            self.supabase.client.table("context_units") \
                 .update({"qdrant_point_id": point_id}) \
                 .eq("id", cu_id) \
                 .execute()
