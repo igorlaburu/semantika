@@ -131,15 +131,15 @@ class StatelessPipeline:
         logger.info("process_url_start", url=url, process_action=action)
 
         try:
-            # Scrape URL
+            # Scrape URL (returns list of documents)
             scraper = WebScraper()
-            html = await scraper.fetch_url(url)
+            documents = await scraper.scrape_url(url, extract_multiple=False)
 
-            if not html:
-                raise ValueError("Failed to fetch URL")
+            if not documents or len(documents) == 0:
+                raise ValueError("No content extracted from URL")
 
-            # Extract text with BeautifulSoup
-            text = scraper.extract_text_simple(html)
+            # Get first document text
+            text = documents[0].get("text", "")
 
             if not text or len(text) < 100:
                 raise ValueError("Insufficient content extracted from URL")
@@ -196,9 +196,9 @@ class StatelessPipeline:
             articles = []
             for url in urls[:20]:  # Limit to 20 articles
                 try:
-                    html = await scraper.fetch_url(url)
-                    if html:
-                        text = scraper.extract_text_simple(html)
+                    documents = await scraper.scrape_url(url, extract_multiple=False)
+                    if documents and len(documents) > 0:
+                        text = documents[0].get("text", "")
                         if text and len(text) > 200:
                             articles.append({
                                 "url": url,
