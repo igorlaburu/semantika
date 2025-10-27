@@ -703,16 +703,16 @@ async def generate_style_guide(
         from core_stateless import StatelessPipeline
         from datetime import datetime
 
-        if len(request.urls) < 3:
+        if len(request.urls) < 1:
             raise HTTPException(
                 status_code=400,
-                detail="At least 3 URLs required for style analysis"
+                detail="At least 1 URL required for style analysis"
             )
 
-        if len(request.urls) > 20:
+        if len(request.urls) > 10:
             raise HTTPException(
                 status_code=400,
-                detail="Maximum 20 URLs allowed"
+                detail="Maximum 10 URLs allowed"
             )
 
         pipeline = StatelessPipeline()
