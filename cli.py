@@ -11,6 +11,8 @@ import argparse
 from utils.supabase_client import get_supabase_client
 from utils.qdrant_client import get_qdrant_client
 from utils.logger import get_logger
+import re
+import json
 
 logger = get_logger("cli")
 
@@ -181,6 +183,223 @@ async def qdrant_info():
         sys.exit(1)
 
 
+async def add_org(slug: str, name: str):
+    """Add a new organization."""
+    try:
+        # Validate slug format
+        if not re.match(r'^[a-zA-Z0-9\-\.]+$', slug):
+            print(f"\n❌ Invalid slug format. Use only alphanumeric, hyphens, and dots.\n")
+            sys.exit(1)
+
+        if len(slug) < 3 or len(slug) > 100:
+            print(f"\n❌ Slug must be 3-100 characters.\n")
+            sys.exit(1)
+
+        supabase = get_supabase_client()
+
+        data = {
+            "slug": slug,
+            "name": name,
+            "is_active": True,
+            "channels": {},
+            "settings": {"language": "es", "store_in_qdrant": False}
+        }
+
+        result = supabase.table("organizations").insert(data).execute()
+
+        print(f"\n✅ Organization created successfully!")
+        print(f"Slug: {slug}")
+        print(f"Name: {name}")
+        print(f"ID: {result.data[0]['id']}\n")
+
+        logger.info("cli_org_created", slug=slug)
+
+    except Exception as e:
+        print(f"\n❌ Error creating organization: {str(e)}\n")
+        logger.error("cli_create_org_error", error=str(e))
+        sys.exit(1)
+
+
+async def list_orgs():
+    """List all organizations."""
+    try:
+        supabase = get_supabase_client()
+        result = supabase.table("organizations").select("*").execute()
+
+        if not result.data:
+            print("\nNo organizations found.\n")
+            return
+
+        print(f"\n📋 {len(result.data)} organization(s) found:\n")
+        print(f"{'Slug':<20} {'Name':<30} {'Active':<8} {'Channels'}")
+        print("-" * 80)
+
+        for org in result.data:
+            email_channels = org.get("channels", {}).get("email", {}).get("addresses", [])
+            email_str = ", ".join(email_channels) if email_channels else "None"
+            active = "✓" if org["is_active"] else "✗"
+
+            print(f"{org['slug']:<20} {org['name']:<30} {active:<8} {email_str}")
+
+        print()
+
+    except Exception as e:
+        print(f"\n❌ Error listing organizations: {str(e)}\n")
+        logger.error("cli_list_orgs_error", error=str(e))
+        sys.exit(1)
+
+
+async def add_org_channel(slug: str, emails: str):
+    """Add email channel to organization."""
+    try:
+        supabase = get_supabase_client()
+
+        # Get organization
+        org_result = supabase.table("organizations").select("*").eq("slug", slug).single().execute()
+
+        if not org_result.data:
+            print(f"\n❌ Organization not found: {slug}\n")
+            sys.exit(1)
+
+        # Parse emails
+        email_list = [e.strip() for e in emails.split(",")]
+
+        # Update channels
+        channels = org_result.data.get("channels", {})
+        channels["email"] = {
+            "addresses": email_list,
+            "enabled": True
+        }
+
+        supabase.table("organizations").update({"channels": channels}).eq("slug", slug).execute()
+
+        print(f"\n✅ Email channel added to {slug}!")
+        print(f"Emails: {', '.join(email_list)}\n")
+
+        logger.info("cli_org_channel_added", slug=slug, emails=email_list)
+
+    except Exception as e:
+        print(f"\n❌ Error adding channel: {str(e)}\n")
+        logger.error("cli_add_channel_error", error=str(e))
+        sys.exit(1)
+
+
+async def add_user(email: str, org: str, name: Optional[str] = None, role: str = "member"):
+    """Add user to organization."""
+    try:
+        supabase = get_supabase_client()
+
+        # Get organization
+        org_result = supabase.table("organizations").select("id").eq("slug", org).single().execute()
+
+        if not org_result.data:
+            print(f"\n❌ Organization not found: {org}\n")
+            sys.exit(1)
+
+        org_id = org_result.data["id"]
+
+        data = {
+            "email": email,
+            "name": name,
+            "organization_id": org_id,
+            "role": role,
+            "is_active": True
+        }
+
+        result = supabase.table("users").insert(data).execute()
+
+        print(f"\n✅ User added successfully!")
+        print(f"Email: {email}")
+        print(f"Organization: {org}")
+        print(f"Role: {role}\n")
+
+        logger.info("cli_user_added", email=email, org=org)
+
+    except Exception as e:
+        print(f"\n❌ Error adding user: {str(e)}\n")
+        logger.error("cli_add_user_error", error=str(e))
+        sys.exit(1)
+
+
+async def list_users(org: Optional[str] = None):
+    """List users."""
+    try:
+        supabase = get_supabase_client()
+
+        if org:
+            # Get organization ID
+            org_result = supabase.table("organizations").select("id").eq("slug", org).single().execute()
+            if not org_result.data:
+                print(f"\n❌ Organization not found: {org}\n")
+                sys.exit(1)
+
+            result = supabase.table("users").select("*").eq("organization_id", org_result.data["id"]).execute()
+        else:
+            result = supabase.table("users").select("*").execute()
+
+        if not result.data:
+            print("\nNo users found.\n")
+            return
+
+        print(f"\n📋 {len(result.data)} user(s) found:\n")
+        print(f"{'Email':<35} {'Name':<25} {'Role':<10} {'Active'}")
+        print("-" * 80)
+
+        for user in result.data:
+            name = user.get("name") or "N/A"
+            active = "✓" if user["is_active"] else "✗"
+            print(f"{user['email']:<35} {name:<25} {user['role']:<10} {active}")
+
+        print()
+
+    except Exception as e:
+        print(f"\n❌ Error listing users: {str(e)}\n")
+        logger.error("cli_list_users_error", error=str(e))
+        sys.exit(1)
+
+
+async def list_context_units(org: Optional[str] = None, limit: int = 20):
+    """List context units."""
+    try:
+        supabase = get_supabase_client()
+
+        query = supabase.table("context_units").select("*").order("created_at", desc=True).limit(limit)
+
+        if org:
+            # Get organization ID
+            org_result = supabase.table("organizations").select("id").eq("slug", org).single().execute()
+            if not org_result.data:
+                print(f"\n❌ Organization not found: {org}\n")
+                sys.exit(1)
+
+            query = query.eq("organization_id", org_result.data["id"])
+
+        result = query.execute()
+
+        if not result.data:
+            print("\nNo context units found.\n")
+            return
+
+        print(f"\n📋 {len(result.data)} context unit(s) found:\n")
+        print(f"{'Title':<50} {'Source':<10} {'Status':<12} {'Statements'}")
+        print("-" * 90)
+
+        for cu in result.data:
+            title = (cu.get("title") or "N/A")[:47] + "..." if len(cu.get("title") or "") > 50 else (cu.get("title") or "N/A")
+            source = cu.get("source_type", "N/A")
+            status = cu.get("status", "N/A")
+            statements_count = len(cu.get("atomic_statements", []))
+
+            print(f"{title:<50} {source:<10} {status:<12} {statements_count}")
+
+        print()
+
+    except Exception as e:
+        print(f"\n❌ Error listing context units: {str(e)}\n")
+        logger.error("cli_list_context_units_error", error=str(e))
+        sys.exit(1)
+
+
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -220,6 +439,35 @@ def main():
     # qdrant-info
     subparsers.add_parser("qdrant-info", help="Show Qdrant collection information")
 
+    # add-org
+    add_org_parser = subparsers.add_parser("add-org", help="Create a new organization")
+    add_org_parser.add_argument("--slug", required=True, help="Organization slug (alphanumeric, -, .)")
+    add_org_parser.add_argument("--name", required=True, help="Organization name")
+
+    # list-orgs
+    subparsers.add_parser("list-orgs", help="List all organizations")
+
+    # add-org-channel
+    add_channel_parser = subparsers.add_parser("add-org-channel", help="Add email channel to organization")
+    add_channel_parser.add_argument("--slug", required=True, help="Organization slug")
+    add_channel_parser.add_argument("--emails", required=True, help="Comma-separated email addresses")
+
+    # add-user
+    add_user_parser = subparsers.add_parser("add-user", help="Add user to organization")
+    add_user_parser.add_argument("--email", required=True, help="User email")
+    add_user_parser.add_argument("--name", help="User name (optional)")
+    add_user_parser.add_argument("--org", required=True, help="Organization slug")
+    add_user_parser.add_argument("--role", default="member", choices=["admin", "editor", "member"], help="User role")
+
+    # list-users
+    list_users_parser = subparsers.add_parser("list-users", help="List users")
+    list_users_parser.add_argument("--org", help="Filter by organization slug (optional)")
+
+    # list-context-units
+    list_cu_parser = subparsers.add_parser("list-context-units", help="List context units")
+    list_cu_parser.add_argument("--org", help="Filter by organization slug (optional)")
+    list_cu_parser.add_argument("--limit", type=int, default=20, help="Number of results")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -239,6 +487,18 @@ def main():
         asyncio.run(delete_task(args.task_id))
     elif args.command == "qdrant-info":
         asyncio.run(qdrant_info())
+    elif args.command == "add-org":
+        asyncio.run(add_org(args.slug, args.name))
+    elif args.command == "list-orgs":
+        asyncio.run(list_orgs())
+    elif args.command == "add-org-channel":
+        asyncio.run(add_org_channel(args.slug, args.emails))
+    elif args.command == "add-user":
+        asyncio.run(add_user(args.email, args.org, args.name if hasattr(args, 'name') else None, args.role))
+    elif args.command == "list-users":
+        asyncio.run(list_users(args.org if hasattr(args, 'org') else None))
+    elif args.command == "list-context-units":
+        asyncio.run(list_context_units(args.org if hasattr(args, 'org') else None, args.limit))
 
 
 if __name__ == "__main__":

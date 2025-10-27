@@ -20,7 +20,9 @@ from utils.supabase_client import get_supabase_client
 from utils.qdrant_client import get_qdrant_client
 from sources.file_monitor import FileMonitor
 from sources.email_monitor import EmailMonitor
+from sources.email_source import EmailSource
 from sources.web_scraper import WebScraper
+from core.universal_pipeline import UniversalPipeline
 
 logger = get_logger("scheduler")
 
@@ -46,8 +48,54 @@ async def run_file_monitor():
         logger.error("file_monitor_error", error=str(e))
 
 
+async def email_listener_job():
+    """
+    IMAP email listener job for multi-org context units.
+
+    Fetches emails from IMAP, matches to organizations, and processes via UniversalPipeline.
+    """
+    if not settings.imap_listener_enabled:
+        return
+
+    logger.info("email_listener_job_start")
+
+    try:
+        email_source = EmailSource()
+        pipeline = UniversalPipeline()
+
+        # Fetch new emails
+        source_contents = await email_source.fetch()
+        logger.info("emails_fetched", count=len(source_contents))
+
+        # Process each email
+        for source_content in source_contents:
+            try:
+                # Process through universal pipeline
+                result = await pipeline.process_source_content(source_content)
+
+                logger.info(
+                    "email_processed",
+                    org=source_content.organization_slug,
+                    cu_id=result["context_unit_id"]
+                )
+
+                # Acknowledge email (mark as read)
+                await email_source.acknowledge(source_content.source_id)
+
+            except Exception as e:
+                logger.error(
+                    "email_processing_error",
+                    org=source_content.organization_slug,
+                    source_id=source_content.source_id,
+                    error=str(e)
+                )
+
+    except Exception as e:
+        logger.error("email_listener_job_error", error=str(e))
+
+
 async def run_email_monitor():
-    """Run email monitor in background."""
+    """Run email monitor in background (LEGACY)."""
     try:
         if not settings.email_monitor_enabled:
             logger.info("email_monitor_disabled")
@@ -152,6 +200,17 @@ async def schedule_tasks(scheduler: AsyncIOScheduler):
     logger.info("loading_tasks")
 
     try:
+        # Schedule IMAP email listener
+        if settings.imap_listener_enabled:
+            scheduler.add_job(
+                email_listener_job,
+                trigger=IntervalTrigger(seconds=settings.imap_listener_interval),
+                id='imap_email_listener',
+                name='IMAP Email Listener',
+                replace_existing=True
+            )
+            logger.info("imap_listener_scheduled", interval=settings.imap_listener_interval)
+
         supabase = get_supabase_client()
         tasks = await supabase.get_all_active_tasks()
 

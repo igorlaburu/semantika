@@ -96,30 +96,82 @@ class Settings(BaseSettings):
         description="Check interval in seconds"
     )
 
-    # Email Monitor Configuration
+    # Email Monitor Configuration (DEPRECATED - use IMAP Listener)
     email_monitor_enabled: bool = Field(
         default=False,
-        description="Enable email monitor"
+        description="Enable email monitor (legacy)"
     )
     email_imap_server: str = Field(
         default="",
-        description="IMAP server address"
+        description="IMAP server address (legacy)"
     )
     email_imap_port: int = Field(
         default=993,
-        description="IMAP port (usually 993 for SSL)"
+        description="IMAP port (legacy)"
     )
     email_address: str = Field(
         default="",
-        description="Email address to monitor"
+        description="Email address to monitor (legacy)"
     )
     email_password: str = Field(
         default="",
-        description="Email password or app password"
+        description="Email password (legacy)"
     )
     email_monitor_interval: int = Field(
         default=60,
+        description="Check interval in seconds (legacy)"
+    )
+
+    # IMAP Listener Configuration (NEW - multi-org email source)
+    imap_listener_enabled: bool = Field(
+        default=False,
+        description="Enable IMAP listener for organization emails"
+    )
+    imap_host: str = Field(
+        default="ssl0.ovh.net",
+        description="IMAP server host"
+    )
+    imap_port: int = Field(
+        default=993,
+        description="IMAP port (993 for SSL)"
+    )
+    imap_user: str = Field(
+        default="",
+        description="IMAP username/email"
+    )
+    imap_password: str = Field(
+        default="",
+        description="IMAP password"
+    )
+    imap_listener_interval: int = Field(
+        default=60,
         description="Check interval in seconds"
+    )
+    imap_inbox_folder: str = Field(
+        default="INBOX",
+        description="IMAP folder to monitor"
+    )
+
+    # SMTP Configuration (for sending emails - optional)
+    smtp_host: str = Field(
+        default="ssl0.ovh.net",
+        description="SMTP server host"
+    )
+    smtp_port: int = Field(
+        default=465,
+        description="SMTP port (465 for SSL)"
+    )
+    smtp_secure: bool = Field(
+        default=True,
+        description="Use SSL for SMTP"
+    )
+    smtp_user: str = Field(
+        default="",
+        description="SMTP username/email"
+    )
+    smtp_password: str = Field(
+        default="",
+        description="SMTP password"
     )
 
     model_config = SettingsConfigDict(

@@ -560,6 +560,91 @@ Use specific, concrete examples extracted from the actual articles. Be detailed 
             logger.error("style_guide_generation_error", error=str(e))
             return f"# Error generating style guide\n\nError: {str(e)}"
 
+    async def generate_context_unit(self, text: str) -> Dict[str, Any]:
+        """
+        Generate structured context unit from any content source.
+
+        Analyzes content and extracts:
+        - Title (clear, concise)
+        - Summary (2-3 sentences)
+        - Tags (3-7 keywords)
+        - Atomic statements (ordered facts, questions, answers, quotes)
+
+        Args:
+            text: Aggregated content from any source
+
+        Returns:
+            Dict with title, summary, tags, atomic_statements
+        """
+        try:
+            context_unit_prompt = ChatPromptTemplate.from_messages([
+                ("system", """You are an expert content analyzer and structurer.
+
+Extract a structured context unit from the provided content. The content may be:
+- A news article with facts
+- An interview with questions and answers
+- A primary news source
+- Mixed content (email with attachments, transcriptions, etc.)
+
+Your task:
+1. Extract a clear TITLE (concise, informative)
+2. Write a SUMMARY (2-3 sentences capturing essence)
+3. Generate TAGS (3-7 relevant keywords)
+4. Extract ATOMIC STATEMENTS in strict source order:
+   - Each statement is ONE fact, question, answer, or quote
+   - Preserve original order from source
+   - If interview: identify speakers, mark questions/answers
+   - If news: extract factual statements
+   - Type each statement: fact, question, answer, quote, context
+
+IMPORTANT:
+- Maintain STRICT chronological order from source
+- Each statement is independent and complete
+- Include speaker attribution when identifiable
+- Do NOT invent information
+- NO advertisement blocks or meta-content"""),
+                ("user", """Analyze this content and generate a context unit:
+
+{text}
+
+Respond in JSON:
+{{
+  "title": "Clear, concise title",
+  "summary": "2-3 sentence summary",
+  "tags": ["tag1", "tag2", ...],
+  "atomic_statements": [
+    {{
+      "order": 1,
+      "type": "fact|question|answer|quote|context",
+      "speaker": "Name or null",
+      "text": "Complete statement"
+    }},
+    ...
+  ]
+}}""")
+            ])
+
+            context_chain = RunnableSequence(
+                context_unit_prompt | self.llm_sonnet | JsonOutputParser()
+            )
+
+            result = await context_chain.ainvoke({"text": text[:12000]})
+
+            logger.debug(
+                "context_unit_generated",
+                statements_count=len(result.get("atomic_statements", []))
+            )
+            return result
+
+        except Exception as e:
+            logger.error("context_unit_generation_error", error=str(e))
+            return {
+                "title": "",
+                "summary": "",
+                "tags": [],
+                "atomic_statements": []
+            }
+
 
 # Global OpenRouter client instance
 _openrouter_client: Optional[OpenRouterClient] = None
