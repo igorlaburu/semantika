@@ -425,6 +425,9 @@ Requirements:
 - Create an engaging, accurate title
 - Write a brief summary (2-3 sentences)
 - Generate 3-5 relevant tags
+- Format article with clear paragraph breaks (use \\n\\n between paragraphs)
+- Each paragraph should be 2-4 sentences
+- NO advertisement blocks or meta-content
 
 Respond in JSON:
 {{"article": "Full article text...", "title": "...", "summary": "...", "tags": [...]}}""")
