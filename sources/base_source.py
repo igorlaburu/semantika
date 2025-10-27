@@ -99,8 +99,8 @@ class BaseSource(ABC):
             supabase = get_supabase_client()
 
             # Query organizations where email_address is in channels.email.addresses array
-            # Supabase syntax: channels->email->addresses @> '["email@domain.com"]'
-            result = supabase.table("organizations").select("slug").eq("is_active", True).execute()
+            # Use supabase.client.table() - the actual Supabase client
+            result = supabase.client.table("organizations").select("slug, channels").eq("is_active", True).execute()
 
             # Filter in Python (Supabase JSONB queries can be tricky)
             for org in result.data:
@@ -109,8 +109,10 @@ class BaseSource(ABC):
                 addresses = email_config.get("addresses", [])
 
                 if email_address.lower() in [addr.lower() for addr in addresses]:
+                    self.logger.info("org_matched", email=email_address, slug=org["slug"])
                     return org["slug"]
 
+            self.logger.warn("no_org_matched", email=email_address)
             return None
 
         except Exception as e:
