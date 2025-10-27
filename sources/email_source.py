@@ -261,16 +261,21 @@ class EmailSource(BaseSource):
             filename = attachment.get("filename", "unknown")
             data = attachment.get("data")
 
+            # Check if audio by content_type OR file extension
+            audio_extensions = ('.m4a', '.mp3', '.wav', '.ogg', '.flac', '.aac', '.wma', '.opus')
+            is_audio = content_type.startswith("audio/") or filename.lower().endswith(audio_extensions)
+
             # Audio files - transcribe
-            if content_type.startswith("audio/"):
+            if is_audio:
                 try:
+                    logger.info("audio_transcribe_start", filename=filename, content_type=content_type)
                     transcription = await self._transcribe_audio(data)
                     content["attachments"].append({
                         "type": "audio",
                         "filename": filename,
                         "transcription": transcription
                     })
-                    logger.info("audio_transcribed", filename=filename)
+                    logger.info("audio_transcribed", filename=filename, transcription_length=len(transcription))
                 except Exception as e:
                     logger.error("audio_transcription_error", filename=filename, error=str(e))
 
