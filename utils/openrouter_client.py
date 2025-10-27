@@ -482,6 +482,13 @@ Respond in JSON:
                 ("system", "You are an expert editor creating detailed writing style guides."),
                 ("user", """Based on analysis of {article_count} articles, generate a comprehensive style guide in Markdown format for: {style_name}
 
+IMPORTANT: Focus ONLY on editorial content. IGNORE and EXCLUDE:
+- Advertisement blocks (e.g., "PUBLICIDAD", "SIGUE LEYENDO")
+- Navigation elements (menus, headers, footers)
+- Social media sharing buttons
+- Related article links
+- Any non-editorial metadata
+
 Statistical Analysis:
 {statistics}
 
