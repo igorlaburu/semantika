@@ -116,6 +116,74 @@ Generate a well-structured, informative summary that directly answers the query.
             aggregation_prompt | self.llm_sonnet | StrOutputParser()
         )
 
+        # 5. Analyze Chain (title + summary + tags)
+        analyze_prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are a content analyst. Extract key information from text."),
+            ("user", """Analyze this content and extract:
+- A clear, concise title
+- A summary (2-3 sentences)
+- 3-5 relevant tags
+
+Text:
+{text}
+
+Respond in JSON:
+{{"title": "...", "summary": "...", "tags": ["tag1", "tag2", ...]}}""")
+        ])
+
+        self.analyze_chain = RunnableSequence(
+            analyze_prompt | self.llm_sonnet | JsonOutputParser()
+        )
+
+        # 6. Analyze Atomic Chain (title + summary + tags + atomic facts)
+        analyze_atomic_prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are a content analyst specializing in fact extraction."),
+            ("user", """Analyze this content and extract:
+1. A clear, concise title
+2. A summary (2-3 sentences)
+3. 3-5 relevant tags
+4. Atomic facts: self-contained statements of facts. Each fact should:
+   - Be a complete sentence
+   - Contain one single fact
+   - Be independently understandable
+   - Be factual and verifiable
+
+Text:
+{text}
+
+Respond in JSON:
+{{"title": "...", "summary": "...", "tags": [...], "atomic_facts": ["fact 1", "fact 2", ...]}}""")
+        ])
+
+        self.analyze_atomic_chain = RunnableSequence(
+            analyze_atomic_prompt | self.llm_sonnet | JsonOutputParser()
+        )
+
+        # 7. Article Structure Analyzer Chain
+        article_structure_prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are a structural analyst for news articles."),
+            ("user", """Analyze the structure of this article:
+
+Article:
+{text}
+
+Extract and respond in JSON:
+{{
+  "title": "exact title from article",
+  "title_length_words": 10,
+  "paragraph_count": 8,
+  "avg_paragraph_length_words": 45,
+  "has_quotes": true,
+  "quote_percentage": 25,
+  "lead_paragraph": "exact first paragraph",
+  "closing_paragraph": "exact last paragraph"
+}}""")
+        ])
+
+        self.article_structure_chain = RunnableSequence(
+            article_structure_prompt | self.llm_sonnet | JsonOutputParser()
+        )
+
     async def detect_pii(self, text: str) -> Dict[str, Any]:
         """
         Detect PII in text using LangChain chain.
@@ -239,6 +307,248 @@ Generate a well-structured, informative summary that directly answers the query.
         except Exception as e:
             logger.error("aggregation_error", error=str(e))
             return "Error generating summary."
+
+    async def analyze(self, text: str) -> Dict[str, Any]:
+        """
+        Analyze text and extract title, summary, tags.
+
+        Args:
+            text: Text to analyze
+
+        Returns:
+            Dict with title, summary, tags
+        """
+        try:
+            result = await self.analyze_chain.ainvoke({
+                "text": text[:8000]
+            })
+
+            logger.debug("analyze_completed", title_length=len(result.get("title", "")))
+            return result
+
+        except Exception as e:
+            logger.error("analyze_error", error=str(e))
+            return {"title": "", "summary": "", "tags": []}
+
+    async def analyze_atomic(self, text: str) -> Dict[str, Any]:
+        """
+        Analyze text and extract title, summary, tags, atomic facts.
+
+        Args:
+            text: Text to analyze
+
+        Returns:
+            Dict with title, summary, tags, atomic_facts
+        """
+        try:
+            result = await self.analyze_atomic_chain.ainvoke({
+                "text": text[:8000]
+            })
+
+            logger.debug(
+                "analyze_atomic_completed",
+                atomic_facts=len(result.get("atomic_facts", []))
+            )
+            return result
+
+        except Exception as e:
+            logger.error("analyze_atomic_error", error=str(e))
+            return {"title": "", "summary": "", "tags": [], "atomic_facts": []}
+
+    async def analyze_article_structure(self, text: str) -> Dict[str, Any]:
+        """
+        Analyze article structure for style guide generation.
+
+        Args:
+            text: Article text
+
+        Returns:
+            Dict with structural analysis
+        """
+        try:
+            result = await self.article_structure_chain.ainvoke({
+                "text": text[:6000]
+            })
+
+            logger.debug("article_structure_analyzed", paragraphs=result.get("paragraph_count", 0))
+            return result
+
+        except Exception as e:
+            logger.error("article_structure_error", error=str(e))
+            return {}
+
+    async def redact_news(
+        self,
+        text: str,
+        style_guide: Optional[str] = None,
+        language: str = "es"
+    ) -> Dict[str, Any]:
+        """
+        Generate news article from text/facts with specific style.
+
+        Args:
+            text: Source text or atomic facts
+            style_guide: Markdown style guide (optional)
+            language: Target language
+
+        Returns:
+            Dict with article, title, summary, tags
+        """
+        try:
+            # Build dynamic system prompt based on style guide
+            if style_guide:
+                system_prompt = f"""You are a professional journalist. Write news articles following this style guide:
+
+{style_guide[:4000]}
+
+Follow the style guide precisely in your writing."""
+            else:
+                system_prompt = f"""You are a professional journalist. Write clear, objective news articles in {language}.
+
+Use:
+- Inverted pyramid structure
+- Active voice
+- Short paragraphs (2-3 sentences)
+- Neutral, professional tone
+- Clear, specific titles"""
+
+            # Create dynamic chain
+            redact_prompt = ChatPromptTemplate.from_messages([
+                ("system", system_prompt),
+                ("user", """Based on this source content, write a professional news article.
+
+Source content:
+{text}
+
+Requirements:
+- Write a complete, well-structured article
+- Create an engaging, accurate title
+- Write a brief summary (2-3 sentences)
+- Generate 3-5 relevant tags
+
+Respond in JSON:
+{{"article": "Full article text...", "title": "...", "summary": "...", "tags": [...]}}""")
+            ])
+
+            redact_chain = RunnableSequence(
+                redact_prompt | self.llm_sonnet | JsonOutputParser()
+            )
+
+            result = await redact_chain.ainvoke({"text": text[:8000]})
+
+            logger.debug(
+                "redact_news_completed",
+                article_length=len(result.get("article", ""))
+            )
+            return result
+
+        except Exception as e:
+            logger.error("redact_news_error", error=str(e))
+            return {"article": "", "title": "", "summary": "", "tags": []}
+
+    async def generate_style_guide(
+        self,
+        style_name: str,
+        statistics: Dict[str, Any],
+        sample_articles: List[str],
+        article_count: int
+    ) -> str:
+        """
+        Generate comprehensive style guide in Markdown.
+
+        Args:
+            style_name: Name of the style
+            statistics: Aggregate statistics from articles
+            sample_articles: 3-5 representative articles
+            article_count: Total number of articles analyzed
+
+        Returns:
+            Style guide in Markdown format
+        """
+        try:
+            # Prepare statistics text
+            stats_text = f"""
+- Average article length: {statistics.get('avg_paragraph_count', 0)} paragraphs
+- Average paragraph length: {statistics.get('avg_paragraph_length_words', 0)} words
+- Average title length: {statistics.get('avg_title_length_words', 0)} words
+- Articles with quotes: {statistics.get('articles_with_quotes_percentage', 0)}%
+- Sample size: {statistics.get('sample_size', 0)} articles
+"""
+
+            # Prepare sample articles (limited)
+            samples_text = "\n\n---ARTICLE---\n\n".join(sample_articles[:3])
+
+            style_guide_prompt = ChatPromptTemplate.from_messages([
+                ("system", "You are an expert editor creating detailed writing style guides."),
+                ("user", """Based on analysis of {article_count} articles, generate a comprehensive style guide in Markdown format for: {style_name}
+
+Statistical Analysis:
+{statistics}
+
+Sample Articles (use these for extracting real examples):
+{samples}
+
+Create a detailed style guide with these sections:
+
+# Estilo: {style_name}
+
+## Características Generales
+(length, tone, perspective, based on statistics)
+
+## Estructura del Titular
+(length, style, active/passive voice)
+- Include 2-3 REAL examples from the sample articles
+
+## Apertura / Lead
+(structure, length, what it answers)
+- Include 1-2 REAL examples from sample articles
+
+## Desarrollo del Cuerpo
+(paragraph structure, progression)
+- Include 1 REAL example paragraph with quote if available
+
+## Tratamiento de Fuentes
+(how sources are cited)
+- Include REAL example if available
+
+## Uso de Datos y Cifras
+(how numbers are integrated)
+- Include REAL example if available
+
+## Cierre del Artículo
+(closing style, last paragraph purpose)
+- Include 1 REAL example from samples
+
+## Vocabulario Característico
+(typical verbs, terms, what to avoid)
+
+## Ejemplo Completo de Artículo
+(Include ONE complete article from the samples - choose the most representative one)
+
+Use specific, concrete examples extracted from the actual articles. Be detailed and prescriptive.""")
+            ])
+
+            style_guide_chain = RunnableSequence(
+                style_guide_prompt | self.llm_sonnet | StrOutputParser()
+            )
+
+            result = await style_guide_chain.ainvoke({
+                "style_name": style_name,
+                "article_count": article_count,
+                "statistics": stats_text,
+                "samples": samples_text[:15000]  # Limit to avoid token overflow
+            })
+
+            logger.info(
+                "style_guide_generated",
+                style_name=style_name,
+                guide_length=len(result)
+            )
+            return result
+
+        except Exception as e:
+            logger.error("style_guide_generation_error", error=str(e))
+            return f"# Error generating style guide\n\nError: {str(e)}"
 
 
 # Global OpenRouter client instance
