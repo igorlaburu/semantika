@@ -75,7 +75,11 @@ curl "https://tu-api.easypanel.app/search?query=machine%20learning&limit=5" \
 - **[Plan de Desarrollo](./PLAN.md)** - Arquitectura y fases
 - **[Arquitectura Técnica](./requirements.md)** - Detalles completos
 
-### API Endpoints
+### API
+
+- **[API Stateless](./API_STATELESS.md)** - Procesamiento sin almacenamiento (análisis, generación de artículos, guías de estilo)
+
+### API Endpoints (con almacenamiento en Qdrant)
 
 #### **POST /ingest/text**
 Ingesta texto con guardrails automáticos.
