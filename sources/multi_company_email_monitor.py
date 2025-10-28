@@ -139,7 +139,7 @@ class MultiCompanyEmailMonitor:
                 .select("*")\
                 .eq("company_code", company_code)\
                 .eq("is_active", True)\
-                .single()\
+                .maybe_single()\
                 .execute()
             
             if not company_result.data:
