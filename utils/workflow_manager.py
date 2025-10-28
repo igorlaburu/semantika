@@ -265,8 +265,8 @@ def workflow_wrapper(workflow_code: str):
                 client_id=client_id,
                 tier=tier,
                 workflow_function=func,
-                client,
                 *args,
+                client=client,
                 **kwargs
             )
         
