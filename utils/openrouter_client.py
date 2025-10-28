@@ -792,11 +792,7 @@ Respond in JSON:
 }}""")
             ])
 
-            context_chain = RunnableSequence(
-                context_unit_prompt | self.llm_sonnet | JsonOutputParser()
-            )
-
-            # Build tracking config if organization_id provided
+            # Build tracking config FIRST
             config = {}
             if organization_id:
                 config['tracking'] = {
@@ -805,8 +801,48 @@ Respond in JSON:
                     'context_unit_id': context_unit_id,
                     'client_id': client_id
                 }
+                logger.debug("tracking_config_created", 
+                    organization_id=organization_id,
+                    context_unit_id=context_unit_id,
+                    config=config
+                )
+            else:
+                logger.warning("no_tracking_config_created",
+                    organization_id=organization_id,
+                    context_unit_id=context_unit_id
+                )
 
-            result = await context_chain.ainvoke({"text": text[:12000]}, config=config)
+            # IMPORTANT: Call LLM directly with tracking, then parse JSON manually
+            # This avoids JsonOutputParser interfering with usage metadata
+            logger.debug("calling_llm_directly_for_tracking", config=config)
+            
+            # Call LLM directly with tracking
+            llm_response = await self.llm_sonnet.ainvoke(
+                context_unit_prompt.format_messages(text=text[:12000]),
+                config=config
+            )
+            
+            logger.debug("llm_response_received", 
+                response_type=type(llm_response).__name__,
+                has_content=hasattr(llm_response, 'content')
+            )
+            
+            # Parse JSON manually from LLM response
+            try:
+                import json
+                result = json.loads(llm_response.content)
+                logger.debug("json_parsing_success", result_keys=list(result.keys()) if isinstance(result, dict) else "not_dict")
+            except Exception as e:
+                logger.error("json_parsing_failed", 
+                    error=str(e),
+                    content=llm_response.content[:500]
+                )
+                # Fallback to original chain method
+                logger.warning("falling_back_to_chain_method")
+                context_chain = RunnableSequence(
+                    context_unit_prompt | self.llm_sonnet | JsonOutputParser()
+                )
+                result = await context_chain.ainvoke({"text": text[:12000]}, config=config)
 
             logger.debug(
                 "context_unit_generated",
