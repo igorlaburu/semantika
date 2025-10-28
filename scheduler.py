@@ -120,7 +120,7 @@ async def run_email_monitor():
 async def run_multi_company_email_monitor():
     """Run multi-company email monitor with p.{company}@ekimen.ai routing."""
     try:
-        if not settings.email_monitor_enabled:
+        if not settings.imap_listener_enabled:
             logger.info("multi_company_email_monitor_disabled")
             return
 
@@ -295,7 +295,7 @@ async def main():
         if settings.file_monitor_enabled:
             monitor_tasks.append(asyncio.create_task(run_file_monitor()))
 
-        if settings.email_monitor_enabled:
+        if settings.imap_listener_enabled:
             # Use new multi-company email monitor instead of legacy version
             monitor_tasks.append(asyncio.create_task(run_multi_company_email_monitor()))
 
