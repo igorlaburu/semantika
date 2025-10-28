@@ -925,11 +925,8 @@ Respond in JSON:
                 user_parts.append(f"Contexto: {context}")
 
             user_parts.append("""
-Responde en JSON con este formato exacto:
-{
-  "edited_text": "texto editado siguiendo la instrucción",
-  "explanation": "breve explicación de los cambios realizados"
-}""")
+Responde SOLO con JSON válido, sin texto adicional:
+{"edited_text": "texto editado siguiendo la instrucción", "explanation": "breve explicación de los cambios realizados"}""")
 
             user_prompt = "\n\n".join(user_parts)
 
