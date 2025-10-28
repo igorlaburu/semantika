@@ -252,6 +252,14 @@ class GenerateStyleRequest(BaseModel):
     urls: List[str]
 
 
+class MicroEditRequest(BaseModel):
+    """Request model for micro-editing."""
+    text: str
+    command: str
+    context: Optional[str] = None
+    params: Optional[Dict[str, Any]] = {}
+
+
 # ============================================
 # INGESTION ENDPOINTS
 # ============================================
@@ -747,6 +755,94 @@ async def generate_style_guide(
         raise
     except Exception as e:
         logger.error("generate_style_guide_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/process/micro-edit")
+async def micro_edit(
+    request: MicroEditRequest,
+    client: Dict = Depends(get_current_client)
+) -> Dict[str, Any]:
+    """
+    Perform micro-editing on text using LLM.
+
+    Requires: X-API-Key header
+
+    Args:
+        request: Micro-edit request data
+        client: Authenticated client
+
+    Returns:
+        Dict with original_text, edited_text, explanation, word_count_change
+    """
+    try:
+        logger.info(
+            "micro_edit_request",
+            client_id=client["client_id"],
+            text_length=len(request.text),
+            command=request.command[:100]
+        )
+
+        # Import here to avoid circular imports
+        from utils.openrouter_client import get_openrouter_client
+
+        # Get organization from client
+        organization = await supabase_client.get_organization_by_client_id(client["client_id"])
+        if not organization:
+            raise HTTPException(status_code=404, detail="Organization not found")
+
+        # Extract parameters
+        params = request.params or {}
+        language = params.get("language", "es")
+        preserve_meaning = params.get("preserve_meaning", True)
+        style_guide_id = params.get("style_guide_id")
+        max_length = params.get("max_length")
+
+        # Get style guide if provided
+        style_guide = None
+        if style_guide_id:
+            try:
+                style_result = supabase_client.client.table("styles") \
+                    .select("style_guide_markdown") \
+                    .eq("id", style_guide_id) \
+                    .eq("is_active", True) \
+                    .single() \
+                    .execute()
+                
+                if style_result.data:
+                    style_guide = style_result.data["style_guide_markdown"]
+            except Exception as e:
+                logger.warn("style_guide_not_found", style_guide_id=style_guide_id, error=str(e))
+
+        # Get OpenRouter client and perform micro-edit
+        openrouter = get_openrouter_client()
+        result = await openrouter.micro_edit(
+            text=request.text,
+            command=request.command,
+            context=request.context,
+            language=language,
+            preserve_meaning=preserve_meaning,
+            style_guide=style_guide,
+            max_length=max_length,
+            organization_id=organization["id"],
+            client_id=client["client_id"]
+        )
+
+        logger.info(
+            "micro_edit_completed",
+            client_id=client["client_id"],
+            word_count_change=result.get("word_count_change", 0)
+        )
+
+        return {
+            "success": True,
+            "data": result
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("micro_edit_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 

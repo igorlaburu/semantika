@@ -868,6 +868,138 @@ Respond in JSON:
                 "atomic_statements": []
             }
 
+    async def micro_edit(
+        self,
+        text: str,
+        command: str,
+        context: Optional[str] = None,
+        language: str = "es",
+        preserve_meaning: bool = True,
+        style_guide: Optional[str] = None,
+        max_length: Optional[int] = None,
+        organization_id: Optional[str] = None,
+        client_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Perform micro-editing on text using LLM.
+
+        Args:
+            text: Original text to edit
+            command: Specific editing instruction
+            context: Optional context about the text
+            language: Target language (default: es)
+            preserve_meaning: Whether to preserve original meaning
+            style_guide: Optional style guide in markdown
+            max_length: Optional maximum length for output
+            organization_id: Organization UUID (for usage tracking)
+            client_id: Client UUID (for usage tracking)
+
+        Returns:
+            Dict with original_text, edited_text, explanation, word_count_change
+        """
+        try:
+            # Build system prompt
+            system_parts = [
+                f"Eres un editor experto de textos en {language}.",
+                "Tu tarea es realizar micro-ediciones siguiendo las instrucciones específicas del usuario."
+            ]
+
+            if preserve_meaning:
+                system_parts.append("IMPORTANTE: Preserva siempre el significado original del texto.")
+
+            if style_guide:
+                system_parts.append(f"Sigue esta guía de estilo:\n\n{style_guide[:2000]}")
+
+            if max_length:
+                system_parts.append(f"El texto editado no debe exceder {max_length} caracteres.")
+
+            system_prompt = "\n\n".join(system_parts)
+
+            # Build user prompt
+            user_parts = [
+                f"Texto original:\n{text}",
+                f"Instrucción: {command}"
+            ]
+
+            if context:
+                user_parts.append(f"Contexto: {context}")
+
+            user_parts.append("""
+Responde en JSON con este formato exacto:
+{
+  "edited_text": "texto editado siguiendo la instrucción",
+  "explanation": "breve explicación de los cambios realizados"
+}""")
+
+            user_prompt = "\n\n".join(user_parts)
+
+            # Create prompt
+            micro_edit_prompt = ChatPromptTemplate.from_messages([
+                ("system", system_prompt),
+                ("user", user_prompt)
+            ])
+
+            # Build tracking config
+            config = {}
+            if organization_id:
+                config['tracking'] = {
+                    'organization_id': organization_id,
+                    'operation': 'micro_edit',
+                    'client_id': client_id
+                }
+
+            # Call LLM directly to preserve tracking
+            llm_response = await self.llm_fast.ainvoke(
+                micro_edit_prompt.format_messages(),
+                config=config
+            )
+
+            # Parse JSON response
+            try:
+                import json
+                result = json.loads(llm_response.content)
+            except Exception as e:
+                logger.error("micro_edit_json_parsing_failed", 
+                    error=str(e),
+                    content=llm_response.content[:500]
+                )
+                return {
+                    "original_text": text,
+                    "edited_text": text,
+                    "explanation": "Error al procesar la edición",
+                    "word_count_change": 0
+                }
+
+            # Calculate word count change
+            original_words = len(text.split())
+            edited_words = len(result.get("edited_text", "").split())
+            word_count_change = edited_words - original_words
+
+            # Build final response
+            response = {
+                "original_text": text,
+                "edited_text": result.get("edited_text", text),
+                "explanation": result.get("explanation", ""),
+                "word_count_change": word_count_change
+            }
+
+            logger.info("micro_edit_completed", 
+                original_length=len(text),
+                edited_length=len(response["edited_text"]),
+                word_count_change=word_count_change
+            )
+
+            return response
+
+        except Exception as e:
+            logger.error("micro_edit_error", error=str(e))
+            return {
+                "original_text": text,
+                "edited_text": text,
+                "explanation": f"Error: {str(e)}",
+                "word_count_change": 0
+            }
+
 
 # Global OpenRouter client instance
 _openrouter_client: Optional[OpenRouterClient] = None
