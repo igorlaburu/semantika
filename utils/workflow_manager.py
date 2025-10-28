@@ -235,17 +235,29 @@ def workflow_wrapper(workflow_code: str):
             # Extract company info
             company_id = client.get("company_id")
             client_id = client.get("client_id")
-            tier = client.get("metadata", {}).get("tier", "starter")
             
-            # If no company_id, use demo for backward compatibility
+            # Get tier from company or fallback logic
+            tier = "starter"  # default
+            
             if not company_id:
-                company_id = "00000000-0000-0000-0000-000000000001"  # Demo company
+                # Backward compatibility: use demo company
+                company_id = "00000000-0000-0000-0000-000000000001"
                 tier = "unlimited"
                 logger.info(
                     "using_demo_company_fallback",
                     workflow_code=workflow_code,
                     client_id=client_id
                 )
+            else:
+                # Get tier from company
+                try:
+                    supabase = manager.supabase
+                    company_result = supabase.client.table("companies").select("tier").eq("id", company_id).single().execute()
+                    if company_result.data:
+                        tier = company_result.data.get("tier", "starter")
+                except Exception as e:
+                    logger.warn("failed_to_get_company_tier", company_id=company_id, error=str(e))
+                    tier = "starter"  # Safe fallback
             
             return await manager.execute_workflow(
                 workflow_code=workflow_code,
