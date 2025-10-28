@@ -4,7 +4,7 @@ Standard processing pipeline for companies without custom workflows.
 """
 
 from typing import Dict, Any
-from sources.base_source import SourceContent
+from core.source_content import SourceContent
 from workflows.base_workflow import BaseWorkflow
 from utils.openrouter_client import get_openrouter_client
 
@@ -16,38 +16,19 @@ class DefaultWorkflow(BaseWorkflow):
         """Generate context unit using standard LLM processing.
         
         Args:
-            source_content: Raw content from source
+            source_content: SourceContent with text_content
             
         Returns:
             Standard context unit
         """
-        # Get aggregated text from source content
-        raw_content = source_content.raw_content
-        
-        # Combine all text content
-        text_parts = []
-        
-        # Email body/text
-        if "body" in raw_content:
-            text_parts.append(raw_content["body"])
-        
-        # Transcriptions from audio
-        if "transcriptions" in raw_content:
-            for transcript in raw_content["transcriptions"]:
-                text_parts.append(transcript.get("text", ""))
-        
-        # Attachment text
-        if "attachments_text" in raw_content:
-            for att_text in raw_content["attachments_text"]:
-                text_parts.append(att_text)
-
-        # Combine all text
-        full_text = "\n\n".join(filter(None, text_parts))
+        # Use text_content from SourceContent
+        full_text = source_content.text_content
         
         if not full_text.strip():
             self.logger.warn("no_text_content_found", source_id=source_content.source_id)
             return {
-                "title": "Empty Content",
+                "id": source_content.id,
+                "title": source_content.get_display_title(),
                 "summary": "No text content found in source",
                 "tags": [],
                 "atomic_statements": [],
@@ -58,22 +39,47 @@ class DefaultWorkflow(BaseWorkflow):
         openrouter = get_openrouter_client()
         
         # Generate context unit with tracking
-        # Note: organization_id and context_unit_id will be handled by universal_pipeline
-        context_unit = await openrouter.generate_context_unit(
-            text=full_text,
-            organization_id=None,  # Will be set by pipeline
-            context_unit_id=None,  # Will be set by pipeline
-            client_id=None  # Email source, no specific client
-        )
-        
-        # Add raw_text to context unit
-        context_unit["raw_text"] = full_text
+        # Use a simple analyze call for default workflow
+        try:
+            from core_stateless import StatelessPipeline
+            
+            # Create stateless pipeline for basic analysis
+            pipeline = StatelessPipeline(
+                organization_id="00000000-0000-0000-0000-000000000001",  # Demo org
+                client_id=None
+            )
+            
+            # Use analyze method for standard processing
+            analysis_result = await pipeline.analyze(full_text)
+            
+            # Convert to context unit format
+            context_unit = {
+                "id": source_content.id,
+                "title": analysis_result.get("title", source_content.get_display_title()),
+                "summary": analysis_result.get("summary", ""),
+                "tags": analysis_result.get("tags", []),
+                "atomic_statements": [],  # Default workflow doesn't generate atomic statements
+                "raw_text": full_text
+            }
+            
+        except Exception as e:
+            self.logger.warn("llm_analysis_failed", error=str(e))
+            # Fallback to basic context unit
+            context_unit = {
+                "id": source_content.id,
+                "title": source_content.get_display_title(),
+                "summary": source_content.get_text_preview(300),
+                "tags": [],
+                "atomic_statements": [],
+                "raw_text": full_text
+            }
         
         self.logger.info(
             "context_unit_generated",
             company_code=self.company_code,
-            title_length=len(context_unit.get("title", "")),
-            statements_count=len(context_unit.get("atomic_statements", []))
+            title=context_unit.get("title", ""),
+            summary_length=len(context_unit.get("summary", "")),
+            word_count=source_content.get_word_count()
         )
 
         return context_unit

@@ -117,6 +117,31 @@ async def run_email_monitor():
         logger.error("email_monitor_error", error=str(e))
 
 
+async def run_multi_company_email_monitor():
+    """Run multi-company email monitor with p.{company}@ekimen.ai routing."""
+    try:
+        if not settings.email_monitor_enabled:
+            logger.info("multi_company_email_monitor_disabled")
+            return
+
+        logger.info("starting_multi_company_email_monitor")
+
+        from sources.multi_company_email_monitor import MultiCompanyEmailMonitor
+
+        monitor = MultiCompanyEmailMonitor(
+            imap_server=settings.email_imap_server,
+            imap_port=settings.email_imap_port,
+            email_address=settings.email_address,
+            password=settings.email_password,
+            check_interval=settings.email_monitor_interval
+        )
+
+        await monitor.start()
+
+    except Exception as e:
+        logger.error("multi_company_email_monitor_error", error=str(e))
+
+
 async def execute_task(task: Dict[str, Any]):
     """Execute a scheduled task based on source type."""
     task_id = task["task_id"]
@@ -271,7 +296,8 @@ async def main():
             monitor_tasks.append(asyncio.create_task(run_file_monitor()))
 
         if settings.email_monitor_enabled:
-            monitor_tasks.append(asyncio.create_task(run_email_monitor()))
+            # Use new multi-company email monitor instead of legacy version
+            monitor_tasks.append(asyncio.create_task(run_multi_company_email_monitor()))
 
         # Keep the scheduler running
         if monitor_tasks:

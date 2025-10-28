@@ -5,7 +5,7 @@ All company-specific workflows inherit from BaseWorkflow.
 
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
-from sources.base_source import SourceContent
+from core.source_content import SourceContent
 from utils.logger import get_logger
 
 
