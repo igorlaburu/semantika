@@ -89,7 +89,7 @@ class TrackedChatOpenAI(ChatOpenAI):
                         
             # If no usage found, log warning
             if not usage:
-                logger.warning("no_usage_found", 
+                logger.warn("no_usage_found", 
                     model=self.model_name,
                     operation=tracking.get('operation'),
                     response_metadata=getattr(response, 'response_metadata', None),
@@ -124,7 +124,7 @@ class TrackedChatOpenAI(ChatOpenAI):
                         usage=usage
                     )
             else:
-                logger.warning("invalid_usage_data", 
+                logger.warn("invalid_usage_data", 
                     model=self.model_name,
                     operation=tracking.get('operation'),
                     usage=usage
@@ -807,7 +807,7 @@ Respond in JSON:
                     config=config
                 )
             else:
-                logger.warning("no_tracking_config_created",
+                logger.warn("no_tracking_config_created",
                     organization_id=organization_id,
                     context_unit_id=context_unit_id
                 )
@@ -838,7 +838,7 @@ Respond in JSON:
                     content=llm_response.content[:500]
                 )
                 # Fallback to original chain method
-                logger.warning("falling_back_to_chain_method")
+                logger.warn("falling_back_to_chain_method")
                 context_chain = RunnableSequence(
                     context_unit_prompt | self.llm_sonnet | JsonOutputParser()
                 )
