@@ -64,6 +64,9 @@ class ContextUnitGenerator:
                 statements_count=len(result.get("atomic_statements", []))
             )
 
+            # Add raw_text to the result
+            result["raw_text"] = prompt_text
+
             return result
 
         except Exception as e:

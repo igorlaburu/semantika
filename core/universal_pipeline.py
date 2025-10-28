@@ -159,6 +159,7 @@ class UniversalPipeline:
                 "summary": context_unit.get("summary", ""),
                 "tags": context_unit.get("tags", []),
                 "atomic_statements": context_unit.get("atomic_statements", []),
+                "raw_text": context_unit.get("raw_text", ""),
                 "status": "completed",
                 "processed_at": datetime.utcnow().isoformat()
             }
