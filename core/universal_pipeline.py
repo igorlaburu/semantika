@@ -69,7 +69,7 @@ class UniversalPipeline:
             context_unit = await self.generator.generate(
                 source_content=source_content,
                 organization_id=org["id"],
-                context_unit_id=cu_id,
+                context_unit_id=None,  # Don't pass it yet - will update after insert
                 client_id=None  # Email source, no client_id
             )
 
@@ -84,6 +84,9 @@ class UniversalPipeline:
             )
 
             logger.info("context_unit_stored", cu_id=cu_id, org=org["slug"])
+
+            # 5. Update llm_usage records with context_unit_id (if any were created)
+            await self._update_llm_usage_context_id(cu_id, org["id"])
 
             # 4. Optional: Store in Qdrant
             qdrant_point_id = None
@@ -239,3 +242,45 @@ class UniversalPipeline:
             logger.error("store_qdrant_error", cu_id=cu_id, error=str(e))
             # Don't raise - Qdrant storage is optional
             return None
+
+    async def _update_llm_usage_context_id(
+        self,
+        context_unit_id: str,
+        organization_id: str
+    ) -> None:
+        """
+        Update recent llm_usage records with context_unit_id.
+        
+        Updates LLM usage records from the last minute that belong to this organization
+        and don't have a context_unit_id set.
+        
+        Args:
+            context_unit_id: Context unit UUID
+            organization_id: Organization UUID
+        """
+        try:
+            from datetime import datetime, timedelta
+            
+            # Get records from last 2 minutes for this organization without context_unit_id
+            cutoff = (datetime.utcnow() - timedelta(minutes=2)).isoformat()
+            
+            result = self.supabase.client.table("llm_usage") \
+                .update({"context_unit_id": context_unit_id}) \
+                .eq("organization_id", organization_id) \
+                .is_("context_unit_id", "null") \
+                .gte("timestamp", cutoff) \
+                .execute()
+            
+            if result.data:
+                logger.info("llm_usage_context_updated", 
+                    context_unit_id=context_unit_id,
+                    updated_count=len(result.data)
+                )
+            else:
+                logger.debug("no_llm_usage_to_update", context_unit_id=context_unit_id)
+                
+        except Exception as e:
+            logger.error("update_llm_usage_context_error", 
+                context_unit_id=context_unit_id, 
+                error=str(e)
+            )
