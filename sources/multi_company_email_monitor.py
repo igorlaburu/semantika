@@ -384,7 +384,7 @@ class MultiCompanyEmailMonitor:
 
             try:
                 # Transcribe audio
-                transcription_result = await self.transcriber.transcribe_file(tmp_path)
+                transcription_result = self.transcriber.transcribe_file(tmp_path)
                 
                 if not transcription_result.get("text"):
                     logger.warn("empty_transcription", filename=filename)
