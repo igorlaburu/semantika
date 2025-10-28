@@ -71,10 +71,8 @@ class UsageTracker:
             output_cost = (output_tokens / 1_000_000) * pricing["output"]
             total_cost = input_cost + output_cost
 
-            # Create usage record
-            usage_id = str(uuid.uuid4())
+            # Create usage record (let Postgres generate the UUID)
             data = {
-                "id": usage_id,
                 "organization_id": organization_id,
                 "context_unit_id": context_unit_id,
                 "timestamp": datetime.utcnow().isoformat(),
@@ -93,7 +91,7 @@ class UsageTracker:
             data["client_id"] = client_id
 
             # Insert into database
-            self.supabase.client.table("llm_usage").insert(data).execute()
+            result = self.supabase.client.table("llm_usage").insert(data).execute()
 
             logger.info(
                 "usage_tracked",
@@ -104,7 +102,7 @@ class UsageTracker:
                 cost_usd=round(total_cost, 6)
             )
 
-            return usage_id
+            return result.data[0]["id"] if result.data else ""
 
         except Exception as e:
             logger.error("usage_tracking_error", error=str(e))
