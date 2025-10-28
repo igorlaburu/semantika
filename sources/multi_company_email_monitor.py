@@ -12,7 +12,7 @@ Example routing:
 import imaplib
 import email
 from email.header import decode_header
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 import asyncio
 import tempfile
 import os
@@ -467,6 +467,99 @@ class MultiCompanyEmailMonitor:
                 error=str(e)
             )
 
+    async def _process_combined_content_with_workflow(
+        self,
+        content_parts: List[str],
+        subject: str,
+        company: Dict,
+        organization: Dict,
+        source_metadata: Dict
+    ):
+        """
+        Process combined email content (body + attachments) as single context unit.
+
+        Args:
+            content_parts: List of content parts (subject, body, attachments, transcriptions)
+            subject: Email subject
+            company: Company data
+            organization: Organization data
+            source_metadata: Additional metadata
+        """
+        try:
+            logger.info("processing_combined_email_content_with_workflow", 
+                subject=subject,
+                company_code=company["company_code"],
+                content_parts_count=len(content_parts)
+            )
+
+            # Combine all content into single text
+            combined_text = "\n\n".join(content_parts)
+            
+            # Create SourceContent for combined content
+            from workflows.workflow_factory import get_workflow
+            from core.source_content import SourceContent
+            
+            source_content = SourceContent(
+                source_type="email",
+                source_id=f"email_{hash(subject + combined_text[:100])}",
+                organization_slug=organization["slug"],
+                text_content=combined_text,
+                metadata=source_metadata,
+                title=subject or "(Sin asunto)"
+            )
+            
+            # Get company-specific workflow
+            workflow = get_workflow(company["company_code"], company.get("settings", {}))
+            
+            # Process content through workflow
+            result = await workflow.process_content(source_content)
+            
+            # Save context unit to database
+            context_unit = result.get("context_unit", {})
+            if context_unit:
+                supabase = get_supabase_client()
+                
+                # Prepare context unit data for database
+                context_unit_data = {
+                    "id": context_unit.get("id"),
+                    "organization_id": organization["id"],
+                    "company_id": company["id"],
+                    "source_type": "email",
+                    "source_id": source_content.source_id,
+                    "source_metadata": source_content.metadata,
+                    "title": context_unit.get("title"),
+                    "summary": context_unit.get("summary"),
+                    "tags": context_unit.get("tags", []),
+                    "atomic_statements": context_unit.get("atomic_statements", []),
+                    "raw_text": combined_text,  # This is the complete raw content
+                    "status": "completed",
+                    "processed_at": "now()"
+                }
+                
+                # Insert into press_context_units
+                db_result = supabase.client.table("press_context_units").insert(context_unit_data).execute()
+                
+                logger.info(
+                    "combined_context_unit_saved_to_db",
+                    context_unit_id=context_unit.get("id"),
+                    company_code=company["company_code"],
+                    raw_text_length=len(combined_text)
+                )
+            
+            logger.info(
+                "combined_email_content_processed_with_workflow",
+                subject=subject,
+                company_code=company["company_code"],
+                context_unit_id=result.get("context_unit", {}).get("id")
+            )
+
+        except Exception as e:
+            logger.error("combined_content_workflow_processing_error", 
+                subject=subject, 
+                company_code=company.get("company_code"),
+                error=str(e)
+            )
+
     async def _process_email(self, mail: imaplib.IMAP4_SSL, email_id: bytes):
         """
         Process a single email with multi-company routing.
@@ -518,6 +611,13 @@ class MultiCompanyEmailMonitor:
 
             company, organization = company_org
 
+            # Collect all content (email body + attachments) into one context unit
+            all_content_parts = []
+            
+            # Add subject
+            if subject.strip():
+                all_content_parts.append(f"Asunto: {subject}")
+            
             # Process email body
             body = ""
             if message.is_multipart():
@@ -529,9 +629,12 @@ class MultiCompanyEmailMonitor:
                 body = message.get_payload(decode=True).decode("utf-8", errors="ignore")
 
             if body.strip():
-                await self._process_email_body_with_workflow(body, subject, company, organization)
+                all_content_parts.append(body.strip())
 
-            # Process attachments
+            # Process attachments and collect their content
+            audio_transcriptions = []
+            text_attachments = []
+            
             if message.is_multipart():
                 for part in message.walk():
                     # Skip non-attachments
@@ -549,18 +652,48 @@ class MultiCompanyEmailMonitor:
                     content = part.get_payload(decode=True)
 
                     if extension in self.TEXT_EXTENSIONS:
-                        await self._process_text_attachment_with_workflow(
-                            filename, content, subject, company, organization
-                        )
+                        text_content = content.decode("utf-8", errors="ignore")
+                        text_attachments.append(f"Archivo adjunto '{filename}':\n{text_content}")
+                        
                     elif extension in self.AUDIO_EXTENSIONS:
-                        await self._process_audio_attachment_with_workflow(
-                            filename, content, subject, company, organization
-                        )
+                        # Transcribe audio
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as tmp_file:
+                            tmp_file.write(content)
+                            tmp_path = tmp_file.name
+                        
+                        try:
+                            transcription_result = self.transcriber.transcribe_file(tmp_path)
+                            if transcription_result.get("text"):
+                                audio_transcriptions.append(f"Transcripción del audio '{filename}':\n{transcription_result['text']}")
+                        except Exception as e:
+                            logger.error("audio_transcription_error", filename=filename, error=str(e))
+                        finally:
+                            if os.path.exists(tmp_path):
+                                os.unlink(tmp_path)
                     else:
                         logger.debug("unsupported_attachment", 
                             filename=filename,
-                            company_code=company_code
+                            company_code=company["company_code"]
                         )
+            
+            # Add all text attachments
+            for text_attachment in text_attachments:
+                all_content_parts.append(text_attachment)
+                
+            # Add all audio transcriptions
+            for audio_transcription in audio_transcriptions:
+                all_content_parts.append(audio_transcription)
+            
+            # Create single context unit with all content
+            if all_content_parts:
+                await self._process_combined_content_with_workflow(
+                    all_content_parts, subject, company, organization, 
+                    source_metadata={
+                        "subject": subject,
+                        "company_code": company["company_code"],
+                        "attachments_count": len(text_attachments) + len(audio_transcriptions)
+                    }
+                )
 
             # Mark as read
             mail.store(email_id, "+FLAGS", "\\Seen")
