@@ -148,10 +148,11 @@ class OpenRouterClient:
         """Initialize OpenRouter client with LangChain."""
         try:
             # Initialize LLM clients with automatic usage tracking
+            # Using cheaper model for testing
             self.llm_sonnet = TrackedChatOpenAI(
                 base_url="https://openrouter.ai/api/v1",
                 api_key=settings.openrouter_api_key,
-                model="anthropic/claude-3.5-sonnet",
+                model="openai/gpt-4o-mini",  # Cheaper for testing
                 temperature=0.0
             )
 
