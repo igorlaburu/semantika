@@ -63,34 +63,21 @@ class TrackedChatOpenAI(ChatOpenAI):
                 usage_meta = response.usage_metadata
                 logger.debug("usage_metadata_found", usage_metadata=usage_meta)
                 
-                # Debug: Check what attributes usage_metadata actually has
-                logger.debug("usage_metadata_attributes", 
-                    attributes=dir(usage_meta),
-                    type=type(usage_meta).__name__
-                )
-                
-                # Check if it's a dict or object with attributes
-                if isinstance(usage_meta, dict):
-                    logger.debug("usage_metadata_is_dict", keys=list(usage_meta.keys()))
-                    if 'input_tokens' in usage_meta:
-                        usage = {
-                            'prompt_tokens': usage_meta['input_tokens'],
-                            'completion_tokens': usage_meta['output_tokens'],
-                            'total_tokens': usage_meta['total_tokens']
-                        }
-                        logger.debug("usage_extracted_from_usage_metadata_dict", usage=usage)
+                # Extract usage from dict format (OpenRouter returns dict)
+                if isinstance(usage_meta, dict) and 'input_tokens' in usage_meta:
+                    usage = {
+                        'prompt_tokens': usage_meta['input_tokens'],
+                        'completion_tokens': usage_meta['output_tokens'],
+                        'total_tokens': usage_meta['total_tokens']
+                    }
+                    logger.debug("usage_extracted_from_usage_metadata", usage=usage)
                 elif hasattr(usage_meta, 'input_tokens'):
                     usage = {
                         'prompt_tokens': usage_meta.input_tokens,
                         'completion_tokens': usage_meta.output_tokens,
                         'total_tokens': usage_meta.total_tokens
                     }
-                    logger.debug("usage_extracted_from_usage_metadata_object", usage=usage)
-                else:
-                    logger.warn("usage_metadata_format_unknown", 
-                        type=type(usage_meta).__name__,
-                        str_repr=str(usage_meta)
-                    )
+                    logger.debug("usage_extracted_from_usage_metadata", usage=usage)
                     
             elif hasattr(response, 'response_metadata'):
                 # Check multiple possible keys in response_metadata
