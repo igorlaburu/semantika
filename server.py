@@ -1,6 +1,8 @@
 """FastAPI server for semantika API.
 
 Handles all HTTP requests for document ingestion, search, and aggregation.
+
+Version: 2025-10-28
 """
 
 from datetime import datetime
