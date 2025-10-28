@@ -415,6 +415,38 @@ class MultiCompanyEmailMonitor:
                 # Process content through workflow
                 result = await workflow.process_content(source_content)
 
+                # Save context unit to database
+                context_unit = result.get("context_unit", {})
+                if context_unit:
+                    supabase = get_supabase_client()
+                    
+                    # Prepare context unit data for database
+                    context_unit_data = {
+                        "id": context_unit.get("id"),
+                        "organization_id": organization["id"],
+                        "company_id": company["id"],
+                        "source_type": "email_audio",
+                        "source_id": source_content.source_id,
+                        "source_metadata": source_content.metadata,
+                        "title": context_unit.get("title"),
+                        "summary": context_unit.get("summary"),
+                        "tags": context_unit.get("tags", []),
+                        "atomic_statements": context_unit.get("atomic_statements", []),
+                        "raw_text": context_unit.get("raw_text", source_content.text_content),
+                        "status": "completed",
+                        "processed_at": "now()"
+                    }
+                    
+                    # Insert into press_context_units
+                    db_result = supabase.client.table("press_context_units").insert(context_unit_data).execute()
+                    
+                    logger.info(
+                        "audio_context_unit_saved_to_db",
+                        context_unit_id=context_unit.get("id"),
+                        company_code=company["company_code"],
+                        filename=filename
+                    )
+
                 logger.info(
                     "audio_attachment_processed_with_workflow",
                     filename=filename,
