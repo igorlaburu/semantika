@@ -786,9 +786,9 @@ async def micro_edit(
         # Import here to avoid circular imports
         from utils.openrouter_client import get_openrouter_client
 
-        # Get organization from client
-        organization = await supabase_client.get_organization_by_client_id(client["client_id"])
-        if not organization:
+        # Get organization_id from client (already available)
+        organization_id = client.get("organization_id")
+        if not organization_id:
             raise HTTPException(status_code=404, detail="Organization not found")
 
         # Extract parameters
@@ -824,7 +824,7 @@ async def micro_edit(
             preserve_meaning=preserve_meaning,
             style_guide=style_guide,
             max_length=max_length,
-            organization_id=organization["id"],
+            organization_id=organization_id,
             client_id=client["client_id"]
         )
 
