@@ -926,7 +926,7 @@ Respond in JSON:
 
             user_parts.append("""
 Responde SOLO con JSON válido, sin texto adicional:
-{"edited_text": "texto editado siguiendo la instrucción", "explanation": "breve explicación de los cambios realizados"}""")
+{{"edited_text": "texto editado siguiendo la instrucción", "explanation": "breve explicación de los cambios realizados"}}""")
 
             user_prompt = "\n\n".join(user_parts)
 
