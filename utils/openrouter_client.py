@@ -45,9 +45,59 @@ class TrackedChatOpenAI(ChatOpenAI):
         response = await super().ainvoke(input, config, **kwargs)
 
         # Track usage if tracking info provided
-        if tracking and hasattr(response, 'response_metadata'):
-            usage = response.response_metadata.get('token_usage', {})
+        if tracking:
+            usage = None
+            
+            # Log detailed response structure for debugging
+            logger.debug("llm_response_debug", 
+                model=self.model_name,
+                response_type=type(response).__name__,
+                has_response_metadata=hasattr(response, 'response_metadata'),
+                has_usage_metadata=hasattr(response, 'usage_metadata'),
+                response_attributes=dir(response)
+            )
+            
+            # Try multiple formats to extract usage
+            if hasattr(response, 'usage_metadata'):
+                # LangChain v0.1+ format
+                usage_meta = response.usage_metadata
+                logger.debug("usage_metadata_found", usage_metadata=usage_meta)
+                
+                if hasattr(usage_meta, 'input_tokens'):
+                    usage = {
+                        'prompt_tokens': usage_meta.input_tokens,
+                        'completion_tokens': usage_meta.output_tokens,
+                        'total_tokens': usage_meta.total_tokens
+                    }
+                    logger.debug("usage_extracted_from_usage_metadata", usage=usage)
+                    
+            elif hasattr(response, 'response_metadata'):
+                # Check multiple possible keys in response_metadata
+                response_meta = response.response_metadata
+                logger.debug("response_metadata_found", 
+                    response_metadata_keys=list(response_meta.keys()) if isinstance(response_meta, dict) else str(response_meta),
+                    response_metadata=response_meta
+                )
+                
+                # Try different possible keys
+                for key in ['token_usage', 'usage', 'token_count', 'tokens']:
+                    if key in response_meta:
+                        usage = response_meta[key]
+                        logger.debug("usage_extracted_from_response_metadata", 
+                            key=key, usage=usage)
+                        break
+                        
+            # If no usage found, log warning
+            if not usage:
+                logger.warning("no_usage_found", 
+                    model=self.model_name,
+                    operation=tracking.get('operation'),
+                    response_metadata=getattr(response, 'response_metadata', None),
+                    usage_metadata=getattr(response, 'usage_metadata', None)
+                )
+                return response
 
+            # Validate and track usage
             if usage and usage.get('total_tokens', 0) > 0:
                 try:
                     tracker = get_usage_tracker()
@@ -61,8 +111,24 @@ class TrackedChatOpenAI(ChatOpenAI):
                         context_unit_id=tracking.get('context_unit_id'),
                         metadata=tracking.get('metadata', {})
                     )
+                    logger.info("usage_tracked_successfully", 
+                        model=self.model_name,
+                        operation=tracking.get('operation'),
+                        total_tokens=usage.get('total_tokens', 0)
+                    )
                 except Exception as e:
-                    logger.error("usage_tracking_failed", error=str(e))
+                    logger.error("usage_tracking_failed", 
+                        model=self.model_name,
+                        operation=tracking.get('operation'),
+                        error=str(e),
+                        usage=usage
+                    )
+            else:
+                logger.warning("invalid_usage_data", 
+                    model=self.model_name,
+                    operation=tracking.get('operation'),
+                    usage=usage
+                )
 
         return response
 
