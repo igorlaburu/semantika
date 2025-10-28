@@ -443,6 +443,7 @@ async def create_task(
     try:
         task = await supabase_client.create_task(
             client_id=client["client_id"],
+            company_id=client["company_id"],
             source_type=request.source_type,
             target=request.target,
             frequency_min=request.frequency_min,
@@ -477,7 +478,7 @@ async def list_tasks(
         List of tasks
     """
     try:
-        tasks = await supabase_client.get_tasks_by_client(client["client_id"])
+        tasks = await supabase_client.get_tasks_by_client(client["client_id"], client["company_id"])
         return tasks
 
     except Exception as e:
@@ -502,15 +503,15 @@ async def delete_task(
         Status message
     """
     try:
-        # Verify task belongs to client
-        task = await supabase_client.get_task_by_id(task_id)
+        # Verify task belongs to client and company (automatic filtering)
+        task = await supabase_client.get_task_by_id(task_id, client["company_id"])
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
 
         if task["client_id"] != client["client_id"]:
             raise HTTPException(status_code=403, detail="Not authorized to delete this task")
 
-        await supabase_client.delete_task(task_id)
+        await supabase_client.delete_task(task_id, client["company_id"])
 
         return {
             "status": "ok",
@@ -802,7 +803,7 @@ async def micro_edit(
         style_guide = None
         if style_guide_id:
             try:
-                style_result = supabase_client.client.table("styles") \
+                style_result = supabase_client.client.table("press_styles") \
                     .select("style_guide_markdown") \
                     .eq("id", style_guide_id) \
                     .eq("is_active", True) \

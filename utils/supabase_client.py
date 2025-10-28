@@ -119,10 +119,10 @@ class SupabaseClient:
     # TASKS
     # ============================================
 
-    async def get_tasks_by_client(self, client_id: str, is_active: Optional[bool] = None) -> List[Dict[str, Any]]:
-        """Get all tasks for a client."""
+    async def get_tasks_by_client(self, client_id: str, company_id: str, is_active: Optional[bool] = None) -> List[Dict[str, Any]]:
+        """Get all tasks for a client within a company."""
         try:
-            query = self.client.table("tasks").select("*").eq("client_id", client_id)
+            query = self.client.table("tasks").select("*").eq("client_id", client_id).eq("company_id", company_id)
 
             if is_active is not None:
                 query = query.eq("is_active", is_active)
@@ -131,7 +131,7 @@ class SupabaseClient:
             return response.data or []
 
         except Exception as e:
-            logger.error("get_tasks_error", error=str(e), client_id=client_id)
+            logger.error("get_tasks_error", error=str(e), client_id=client_id, company_id=company_id)
             return []
 
     async def get_all_active_tasks(self) -> List[Dict[str, Any]]:
@@ -146,6 +146,7 @@ class SupabaseClient:
     async def create_task(
         self,
         client_id: str,
+        company_id: str,
         source_type: str,
         target: str,
         frequency_min: int,
@@ -155,6 +156,7 @@ class SupabaseClient:
         try:
             task_data = {
                 "client_id": client_id,
+                "company_id": company_id,
                 "source_type": source_type,
                 "target": target,
                 "frequency_min": frequency_min,
@@ -170,6 +172,7 @@ class SupabaseClient:
                     "task_created",
                     task_id=created_task["task_id"],
                     client_id=client_id,
+                    company_id=company_id,
                     source_type=source_type
                 )
                 return created_task
@@ -177,31 +180,31 @@ class SupabaseClient:
                 raise Exception("Failed to create task")
 
         except Exception as e:
-            logger.error("create_task_error", error=str(e), client_id=client_id)
+            logger.error("create_task_error", error=str(e), client_id=client_id, company_id=company_id)
             raise
 
-    async def get_task_by_id(self, task_id: str) -> Optional[Dict[str, Any]]:
-        """Get task by ID."""
+    async def get_task_by_id(self, task_id: str, company_id: str) -> Optional[Dict[str, Any]]:
+        """Get task by ID within a company."""
         try:
-            response = self.client.table("tasks").select("*").eq("task_id", task_id).execute()
+            response = self.client.table("tasks").select("*").eq("task_id", task_id).eq("company_id", company_id).execute()
             return response.data[0] if response.data else None
         except Exception as e:
-            logger.error("get_task_by_id_error", error=str(e), task_id=task_id)
+            logger.error("get_task_by_id_error", error=str(e), task_id=task_id, company_id=company_id)
             return None
 
-    async def delete_task(self, task_id: str) -> bool:
-        """Delete a task (soft delete - sets is_active to False)."""
+    async def delete_task(self, task_id: str, company_id: str) -> bool:
+        """Delete a task (soft delete - sets is_active to False) within a company."""
         try:
-            response = self.client.table("tasks").update({"is_active": False}).eq("task_id", task_id).execute()
+            response = self.client.table("tasks").update({"is_active": False}).eq("task_id", task_id).eq("company_id", company_id).execute()
 
             if response.data and len(response.data) > 0:
-                logger.info("task_deleted", task_id=task_id)
+                logger.info("task_deleted", task_id=task_id, company_id=company_id)
                 return True
             else:
                 raise Exception("Failed to delete task")
 
         except Exception as e:
-            logger.error("delete_task_error", error=str(e), task_id=task_id)
+            logger.error("delete_task_error", error=str(e), task_id=task_id, company_id=company_id)
             raise
 
     async def update_task_last_run(self, task_id: str, last_run_timestamp: str) -> bool:
@@ -221,6 +224,39 @@ class SupabaseClient:
             return False
 
     # ============================================
+    # COMPANIES
+    # ============================================
+
+    async def get_company_by_email_alias(self, email_alias: str) -> Optional[Dict[str, Any]]:
+        """Get company by email alias in settings."""
+        try:
+            response = self.client.table("companies")\
+                .select("*")\
+                .contains("settings", {"email_alias": email_alias})\
+                .eq("is_active", True)\
+                .execute()
+
+            if response.data and len(response.data) > 0:
+                logger.debug("company_found_by_email", email_alias=email_alias, company_id=response.data[0]["id"])
+                return response.data[0]
+            else:
+                logger.warn("company_not_found_by_email", email_alias=email_alias)
+                return None
+
+        except Exception as e:
+            logger.error("get_company_by_email_error", error=str(e), email_alias=email_alias)
+            return None
+
+    async def get_company_by_id(self, company_id: str) -> Optional[Dict[str, Any]]:
+        """Get company by ID."""
+        try:
+            response = self.client.table("companies").select("*").eq("id", company_id).eq("is_active", True).execute()
+            return response.data[0] if response.data else None
+        except Exception as e:
+            logger.error("get_company_by_id_error", error=str(e), company_id=company_id)
+            return None
+
+    # ============================================
     # API CREDENTIALS
     # ============================================
 
@@ -235,6 +271,154 @@ class SupabaseClient:
 
         except Exception as e:
             logger.error("get_credentials_error", error=str(e), client_id=client_id, service=service_name)
+            return None
+
+    # ============================================
+    # PRESS CONTEXT UNITS
+    # ============================================
+
+    async def create_context_unit(
+        self,
+        context_unit_id: str,
+        company_id: str,
+        organization_id: str,
+        source_type: str,
+        source_id: str,
+        source_metadata: Dict[str, Any],
+        title: str,
+        summary: str,
+        tags: List[str],
+        atomic_statements: List[Dict[str, Any]],
+        raw_text: str = ""
+    ) -> Dict[str, Any]:
+        """Create a context unit."""
+        try:
+            data = {
+                "id": context_unit_id,
+                "company_id": company_id,
+                "organization_id": organization_id,
+                "source_type": source_type,
+                "source_id": source_id,
+                "source_metadata": source_metadata,
+                "title": title,
+                "summary": summary,
+                "tags": tags,
+                "atomic_statements": atomic_statements,
+                "raw_text": raw_text,
+                "status": "completed"
+            }
+
+            response = self.client.table("press_context_units").insert(data).execute()
+
+            if response.data and len(response.data) > 0:
+                created_unit = response.data[0]
+                logger.info(
+                    "context_unit_created",
+                    context_unit_id=context_unit_id,
+                    company_id=company_id
+                )
+                return created_unit
+            else:
+                raise Exception("Failed to create context unit")
+
+        except Exception as e:
+            logger.error("create_context_unit_error", error=str(e), context_unit_id=context_unit_id)
+            raise
+
+    async def get_context_units_by_company(
+        self,
+        company_id: str,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Get context units for a company."""
+        try:
+            response = self.client.table("press_context_units")\
+                .select("*")\
+                .eq("company_id", company_id)\
+                .order("processed_at", desc=True)\
+                .limit(limit)\
+                .offset(offset)\
+                .execute()
+
+            return response.data or []
+
+        except Exception as e:
+            logger.error("get_context_units_error", error=str(e), company_id=company_id)
+            return []
+
+    # ============================================
+    # PRESS STYLES
+    # ============================================
+
+    async def create_style(
+        self,
+        company_id: str,
+        style_name: str,
+        style_guide_markdown: str,
+        created_by_client_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Create a style guide."""
+        try:
+            data = {
+                "company_id": company_id,
+                "style_name": style_name,
+                "style_guide_markdown": style_guide_markdown,
+                "is_active": True
+            }
+
+            if created_by_client_id:
+                data["created_by_client_id"] = created_by_client_id
+
+            response = self.client.table("press_styles").insert(data).execute()
+
+            if response.data and len(response.data) > 0:
+                created_style = response.data[0]
+                logger.info(
+                    "style_created",
+                    style_id=created_style["id"],
+                    style_name=style_name,
+                    company_id=company_id
+                )
+                return created_style
+            else:
+                raise Exception("Failed to create style")
+
+        except Exception as e:
+            logger.error("create_style_error", error=str(e), style_name=style_name)
+            raise
+
+    async def get_styles_by_company(self, company_id: str) -> List[Dict[str, Any]]:
+        """Get all active styles for a company."""
+        try:
+            response = self.client.table("press_styles")\
+                .select("*")\
+                .eq("company_id", company_id)\
+                .eq("is_active", True)\
+                .order("created_at", desc=True)\
+                .execute()
+
+            return response.data or []
+
+        except Exception as e:
+            logger.error("get_styles_error", error=str(e), company_id=company_id)
+            return []
+
+    async def get_style_by_id(self, style_id: str, company_id: str) -> Optional[Dict[str, Any]]:
+        """Get style by ID and company."""
+        try:
+            response = self.client.table("press_styles")\
+                .select("*")\
+                .eq("id", style_id)\
+                .eq("company_id", company_id)\
+                .eq("is_active", True)\
+                .single()\
+                .execute()
+
+            return response.data
+
+        except Exception as e:
+            logger.error("get_style_by_id_error", error=str(e), style_id=style_id)
             return None
 
 

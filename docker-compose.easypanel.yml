@@ -32,9 +32,3 @@ services:
     restart: unless-stopped
     depends_on:
       - semantika-api
-
-  dozzle:
-    image: amir20/dozzle:latest
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    restart: unless-stopped

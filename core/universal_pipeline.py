@@ -61,33 +61,44 @@ class UniversalPipeline:
             if not org:
                 raise ValueError(f"Organization not found: {source_content.organization_slug}")
 
+            # 1.5. Get company for workflow selection
+            company = await self._get_company(org["company_id"])
+            if not company:
+                raise ValueError(f"Company not found for organization: {org['slug']}")
+
             # 2. Generate context unit ID first (needed for usage tracking)
             cu_id = str(uuid.uuid4())
 
-            # 3. Generate context unit using LLM (with usage tracking)
-            logger.info("generating_context_unit", org=org["slug"])
-            context_unit = await self.generator.generate(
-                source_content=source_content,
-                organization_id=org["id"],
-                context_unit_id=None,  # Simple: just track usage without relation
-                client_id=None  # Email source, no client_id
+            # 3. PHASE 3: Use company-specific workflow
+            logger.info("using_company_workflow", 
+                org=org["slug"], 
+                company_code=company["company_code"]
             )
+            
+            from workflows.workflow_factory import get_workflow
+            workflow = get_workflow(company["company_code"], company.get("settings", {}))
+            
+            # Process content through company workflow
+            workflow_result = await workflow.process_content(source_content)
+            context_unit = workflow_result["context_unit"]
 
-            # 4. Store in database
+            # 4. Store in database (include company_id)
             await self._store_context_unit(
                 cu_id=cu_id,
                 organization_id=org["id"],
+                company_id=company["id"],
                 source_type=source_content.source_type,
                 source_id=source_content.source_id,
                 source_metadata=source_content.metadata,
-                context_unit=context_unit
+                context_unit=context_unit,
+                workflow_result=workflow_result
             )
 
-            logger.info("context_unit_stored", cu_id=cu_id, org=org["slug"])
+            logger.info("context_unit_stored", cu_id=cu_id, org=org["slug"], company_code=company["company_code"])
 
-            # 4. Optional: Store in Qdrant
+            # 5. Optional: Store in Qdrant (use workflow setting)
             qdrant_point_id = None
-            if org.get("settings", {}).get("store_in_qdrant", False):
+            if workflow.should_store_in_qdrant():
                 logger.info("storing_in_qdrant", cu_id=cu_id)
                 qdrant_point_id = await self._store_in_qdrant(
                     cu_id=cu_id,
@@ -100,6 +111,7 @@ class UniversalPipeline:
                 "status": "ok",
                 "context_unit_id": cu_id,
                 "context_unit": context_unit,
+                "workflow_result": workflow_result,
                 "qdrant_point_id": qdrant_point_id
             }
 
@@ -128,14 +140,32 @@ class UniversalPipeline:
             logger.error("get_organization_error", slug=slug, error=str(e))
             return None
 
+    async def _get_company(self, company_id: str) -> Dict[str, Any]:
+        """Get company by ID."""
+        try:
+            result = self.supabase.client.table("companies") \
+                .select("*") \
+                .eq("id", company_id) \
+                .eq("is_active", True) \
+                .single() \
+                .execute()
+
+            return result.data
+
+        except Exception as e:
+            logger.error("get_company_error", company_id=company_id, error=str(e))
+            return None
+
     async def _store_context_unit(
         self,
         cu_id: str,
         organization_id: str,
+        company_id: str,
         source_type: str,
         source_id: str,
         source_metadata: Dict,
-        context_unit: Dict[str, Any]
+        context_unit: Dict[str, Any],
+        workflow_result: Dict[str, Any]
     ) -> None:
         """
         Store context unit in database.
@@ -143,15 +173,18 @@ class UniversalPipeline:
         Args:
             cu_id: Pre-generated context unit UUID
             organization_id: Organization UUID
+            company_id: Company UUID
             source_type: Source type (email, api, etc.)
             source_id: Source identifier
             source_metadata: Source metadata
             context_unit: Generated context unit
+            workflow_result: Full workflow processing result
         """
         try:
             data = {
                 "id": cu_id,
                 "organization_id": organization_id,
+                "company_id": company_id,
                 "source_type": source_type,
                 "source_id": source_id,
                 "source_metadata": source_metadata,
@@ -161,10 +194,16 @@ class UniversalPipeline:
                 "atomic_statements": context_unit.get("atomic_statements", []),
                 "raw_text": context_unit.get("raw_text", ""),
                 "status": "completed",
-                "processed_at": datetime.utcnow().isoformat()
+                "processed_at": datetime.utcnow().isoformat(),
+                # Store additional workflow data
+                "workflow_data": {
+                    "company_code": workflow_result.get("company_code"),
+                    "analysis": workflow_result.get("analysis", {}),
+                    "custom_data": workflow_result.get("custom_data", {})
+                }
             }
 
-            result = self.supabase.client.table("context_units") \
+            result = self.supabase.client.table("press_context_units") \
                 .insert(data) \
                 .execute()
 
@@ -228,7 +267,7 @@ class UniversalPipeline:
             )
 
             # Update context_unit with qdrant_point_id
-            self.supabase.client.table("context_units") \
+            self.supabase.client.table("press_context_units") \
                 .update({"qdrant_point_id": point_id}) \
                 .eq("id", cu_id) \
                 .execute()

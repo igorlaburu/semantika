@@ -1,7 +1,6 @@
 """JSON structured logging for semantika.
 
 All services log to stdout in JSON format for easy parsing and monitoring.
-Logs are consumed by Dozzle for real-time viewing.
 """
 
 import json

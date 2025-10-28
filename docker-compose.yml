@@ -27,21 +27,6 @@ services:
     networks:
       - semantika-network
 
-  dozzle:
-    image: amir20/dozzle:latest
-    container_name: dozzle
-    ports:
-      - "8081:8080"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    environment:
-      - DOZZLE_LEVEL=info
-      - DOZZLE_TAILSIZE=300
-      - DOZZLE_FILTER=name=semantika
-    restart: unless-stopped
-    networks:
-      - semantika-network
-
 networks:
   semantika-network:
     driver: bridge

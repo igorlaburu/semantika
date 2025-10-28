@@ -21,7 +21,6 @@ Este documento contiene instrucciones específicas para Claude Code al trabajar 
 1. **semantika-api**: FastAPI server (puerto 8000)
 2. **semantika-scheduler**: APScheduler daemon
 3. **qdrant**: Vector database (puerto 6333)
-4. **dozzle**: Log viewer (puerto 8081)
 
 ### Flujo de Datos
 1. Ingesta → Guardrails (PII/Copyright) → Desduplicación → Qdrant
@@ -148,9 +147,6 @@ docker-compose logs -f semantika-scheduler
 
 # Acceder al API
 curl http://localhost:8000/health
-
-# Ver logs en web
-open http://localhost:8081
 
 # Parar todo
 docker-compose down

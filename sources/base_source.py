@@ -85,7 +85,7 @@ class BaseSource(ABC):
         pass
 
     async def _query_organization_by_email(self, email_address: str) -> Optional[str]:
-        """Helper: Query organization by email address in channels.
+        """Helper: Query organization by company email alias.
 
         Args:
             email_address: Email to search for
@@ -98,22 +98,36 @@ class BaseSource(ABC):
         try:
             supabase = get_supabase_client()
 
-            # Query organizations where email_address is in channels.email.addresses array
-            # Use supabase.client.table() - the actual Supabase client
-            result = supabase.client.table("organizations").select("slug, channels").eq("is_active", True).execute()
+            # PHASE 2: Look for company by email_alias in settings
+            company = await supabase.get_company_by_email_alias(email_address.lower())
+            
+            if not company:
+                self.logger.warn("no_company_matched_by_email", email=email_address)
+                return None
 
-            # Filter in Python (Supabase JSONB queries can be tricky)
-            for org in result.data:
-                channels = org.get("channels", {})
-                email_config = channels.get("email", {})
-                addresses = email_config.get("addresses", [])
+            # Get first active organization for this company
+            # Simplified: 1 company = 1 organization for now
+            result = supabase.client.table("organizations")\
+                .select("slug")\
+                .eq("company_id", company["id"])\
+                .eq("is_active", True)\
+                .limit(1)\
+                .execute()
 
-                if email_address.lower() in [addr.lower() for addr in addresses]:
-                    self.logger.info("org_matched", email=email_address, slug=org["slug"])
-                    return org["slug"]
-
-            self.logger.warn("no_org_matched", email=email_address)
-            return None
+            if result.data and len(result.data) > 0:
+                org_slug = result.data[0]["slug"]
+                self.logger.info("org_matched_via_company", 
+                    email=email_address, 
+                    company_code=company["company_code"],
+                    org_slug=org_slug
+                )
+                return org_slug
+            else:
+                self.logger.warn("no_org_found_for_company", 
+                    email=email_address,
+                    company_id=company["id"]
+                )
+                return None
 
         except Exception as e:
             self.logger.error("org_email_lookup_error", email=email_address, error=str(e))
