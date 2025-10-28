@@ -43,7 +43,8 @@ class UsageTracker:
         operation: str,
         input_tokens: int,
         output_tokens: int,
-        organization_id: Optional[str] = None,
+        organization_id: str,
+        client_id: Optional[str] = None,
         context_unit_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None
     ) -> str:
@@ -55,7 +56,8 @@ class UsageTracker:
             operation: Operation type (e.g., "context_unit", "article", "style")
             input_tokens: Prompt tokens
             output_tokens: Completion tokens
-            organization_id: Organization UUID (optional)
+            organization_id: Organization UUID (required)
+            client_id: Client UUID (optional, for API calls)
             context_unit_id: Context unit UUID (optional)
             metadata: Additional metadata (optional)
 
@@ -74,6 +76,7 @@ class UsageTracker:
             data = {
                 "id": usage_id,
                 "organization_id": organization_id,
+                "client_id": client_id,
                 "context_unit_id": context_unit_id,
                 "timestamp": datetime.utcnow().isoformat(),
                 "model": model,

@@ -17,21 +17,71 @@ from .usage_tracker import get_usage_tracker
 logger = get_logger("openrouter_client")
 
 
+class TrackedChatOpenAI(ChatOpenAI):
+    """ChatOpenAI with automatic token usage tracking.
+
+    Usage:
+        llm = TrackedChatOpenAI(...)
+        response = await llm.ainvoke(
+            messages,
+            config={
+                'tracking': {
+                    'organization_id': 'uuid',
+                    'operation': 'context_unit',
+                    'client_id': 'uuid',  # optional
+                    'context_unit_id': 'uuid'  # optional
+                }
+            }
+        )
+    """
+
+    async def ainvoke(self, input, config=None, **kwargs):
+        """Invoke LLM and track token usage."""
+        # Extract tracking config
+        config = config or {}
+        tracking = config.pop('tracking', None)
+
+        # Call original LLM
+        response = await super().ainvoke(input, config, **kwargs)
+
+        # Track usage if tracking info provided
+        if tracking and hasattr(response, 'response_metadata'):
+            usage = response.response_metadata.get('token_usage', {})
+
+            if usage and usage.get('total_tokens', 0) > 0:
+                try:
+                    tracker = get_usage_tracker()
+                    await tracker.track(
+                        model=self.model_name,
+                        operation=tracking.get('operation', 'unknown'),
+                        input_tokens=usage.get('prompt_tokens', 0),
+                        output_tokens=usage.get('completion_tokens', 0),
+                        organization_id=tracking['organization_id'],
+                        client_id=tracking.get('client_id'),
+                        context_unit_id=tracking.get('context_unit_id'),
+                        metadata=tracking.get('metadata', {})
+                    )
+                except Exception as e:
+                    logger.error("usage_tracking_failed", error=str(e))
+
+        return response
+
+
 class OpenRouterClient:
     """OpenRouter client wrapper using LangChain chains."""
 
     def __init__(self):
         """Initialize OpenRouter client with LangChain."""
         try:
-            # Initialize LLM clients for different use cases
-            self.llm_sonnet = ChatOpenAI(
+            # Initialize LLM clients with automatic usage tracking
+            self.llm_sonnet = TrackedChatOpenAI(
                 base_url="https://openrouter.ai/api/v1",
                 api_key=settings.openrouter_api_key,
                 model="anthropic/claude-3.5-sonnet",
                 temperature=0.0
             )
 
-            self.llm_fast = ChatOpenAI(
+            self.llm_fast = TrackedChatOpenAI(
                 base_url="https://openrouter.ai/api/v1",
                 api_key=settings.openrouter_api_key,
                 model="openai/gpt-4o-mini",
@@ -310,20 +360,34 @@ Extract and respond in JSON:
             logger.error("aggregation_error", error=str(e))
             return "Error generating summary."
 
-    async def analyze(self, text: str) -> Dict[str, Any]:
+    async def analyze(
+        self,
+        text: str,
+        organization_id: Optional[str] = None,
+        client_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Analyze text and extract title, summary, tags.
 
         Args:
             text: Text to analyze
+            organization_id: Organization UUID (for usage tracking)
+            client_id: Client UUID (for usage tracking)
 
         Returns:
             Dict with title, summary, tags
         """
         try:
-            result = await self.analyze_chain.ainvoke({
-                "text": text[:8000]
-            })
+            # Build tracking config
+            config = {}
+            if organization_id:
+                config['tracking'] = {
+                    'organization_id': organization_id,
+                    'operation': 'analyze',
+                    'client_id': client_id
+                }
+
+            result = await self.analyze_chain.ainvoke({"text": text[:8000]}, config=config)
 
             logger.debug("analyze_completed", title_length=len(result.get("title", "")))
             return result
@@ -332,20 +396,34 @@ Extract and respond in JSON:
             logger.error("analyze_error", error=str(e))
             return {"title": "", "summary": "", "tags": []}
 
-    async def analyze_atomic(self, text: str) -> Dict[str, Any]:
+    async def analyze_atomic(
+        self,
+        text: str,
+        organization_id: Optional[str] = None,
+        client_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Analyze text and extract title, summary, tags, atomic facts.
 
         Args:
             text: Text to analyze
+            organization_id: Organization UUID (for usage tracking)
+            client_id: Client UUID (for usage tracking)
 
         Returns:
             Dict with title, summary, tags, atomic_facts
         """
         try:
-            result = await self.analyze_atomic_chain.ainvoke({
-                "text": text[:8000]
-            })
+            # Build tracking config
+            config = {}
+            if organization_id:
+                config['tracking'] = {
+                    'organization_id': organization_id,
+                    'operation': 'analyze_atomic',
+                    'client_id': client_id
+                }
+
+            result = await self.analyze_atomic_chain.ainvoke({"text": text[:8000]}, config=config)
 
             logger.debug(
                 "analyze_atomic_completed",
@@ -383,7 +461,9 @@ Extract and respond in JSON:
         self,
         text: str,
         style_guide: Optional[str] = None,
-        language: str = "es"
+        language: str = "es",
+        organization_id: Optional[str] = None,
+        client_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Generate news article from text/facts with specific style.
@@ -392,6 +472,8 @@ Extract and respond in JSON:
             text: Source text or atomic facts
             style_guide: Markdown style guide (optional)
             language: Target language
+            organization_id: Organization UUID (for usage tracking)
+            client_id: Client UUID (for usage tracking)
 
         Returns:
             Dict with article, title, summary, tags
@@ -439,7 +521,16 @@ Respond in JSON:
                 redact_prompt | self.llm_sonnet | JsonOutputParser()
             )
 
-            result = await redact_chain.ainvoke({"text": text[:8000]})
+            # Build tracking config
+            config = {}
+            if organization_id:
+                config['tracking'] = {
+                    'organization_id': organization_id,
+                    'operation': 'redact_news',
+                    'client_id': client_id
+                }
+
+            result = await redact_chain.ainvoke({"text": text[:8000]}, config=config)
 
             logger.debug(
                 "redact_news_completed",
@@ -566,7 +657,8 @@ Use specific, concrete examples extracted from the actual articles. Be detailed 
         self,
         text: str,
         organization_id: Optional[str] = None,
-        context_unit_id: Optional[str] = None
+        context_unit_id: Optional[str] = None,
+        client_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Generate structured context unit from any content source.
@@ -581,6 +673,7 @@ Use specific, concrete examples extracted from the actual articles. Be detailed 
             text: Aggregated content from any source
             organization_id: Organization UUID (for usage tracking)
             context_unit_id: Context unit UUID (for usage tracking)
+            client_id: Client UUID (for usage tracking, API calls)
 
         Returns:
             Dict with title, summary, tags, atomic_statements
@@ -633,28 +726,21 @@ Respond in JSON:
 }}""")
             ])
 
-            # Format prompt
-            messages = await context_unit_prompt.ainvoke({"text": text[:12000]})
+            context_chain = RunnableSequence(
+                context_unit_prompt | self.llm_sonnet | JsonOutputParser()
+            )
 
-            # Invoke LLM and capture response with usage metadata
-            response = await self.llm_sonnet.ainvoke(messages)
+            # Build tracking config if organization_id provided
+            config = {}
+            if organization_id:
+                config['tracking'] = {
+                    'organization_id': organization_id,
+                    'operation': 'context_unit',
+                    'context_unit_id': context_unit_id,
+                    'client_id': client_id
+                }
 
-            # Parse JSON from response
-            result = json.loads(response.content)
-
-            # Track usage if response has token metadata
-            if hasattr(response, 'response_metadata') and 'token_usage' in response.response_metadata:
-                usage = response.response_metadata['token_usage']
-                tracker = get_usage_tracker()
-                await tracker.track(
-                    model="anthropic/claude-3.5-sonnet",
-                    operation="context_unit",
-                    input_tokens=usage.get('prompt_tokens', 0),
-                    output_tokens=usage.get('completion_tokens', 0),
-                    organization_id=organization_id,
-                    context_unit_id=context_unit_id,
-                    metadata={"source": "email"}
-                )
+            result = await context_chain.ainvoke({"text": text[:12000]}, config=config)
 
             logger.debug(
                 "context_unit_generated",

@@ -539,7 +539,10 @@ async def process_analyze(
     try:
         from core_stateless import StatelessPipeline
 
-        pipeline = StatelessPipeline()
+        pipeline = StatelessPipeline(
+            organization_id=client.get('organization_id'),
+            client_id=client['client_id']
+        )
 
         result = await pipeline.analyze(request.text)
 
@@ -576,7 +579,10 @@ async def process_analyze_atomic(
     try:
         from core_stateless import StatelessPipeline
 
-        pipeline = StatelessPipeline()
+        pipeline = StatelessPipeline(
+            organization_id=client.get('organization_id'),
+            client_id=client['client_id']
+        )
 
         result = await pipeline.analyze_atomic(request.text)
 
@@ -615,7 +621,10 @@ async def process_redact_news(
     try:
         from core_stateless import StatelessPipeline
 
-        pipeline = StatelessPipeline()
+        pipeline = StatelessPipeline(
+            organization_id=client.get('organization_id'),
+            client_id=client['client_id']
+        )
 
         params = request.params or {}
         style_guide = params.get("style_guide")
@@ -660,7 +669,10 @@ async def process_url(
     try:
         from core_stateless import StatelessPipeline
 
-        pipeline = StatelessPipeline()
+        pipeline = StatelessPipeline(
+            organization_id=client.get('organization_id'),
+            client_id=client['client_id']
+        )
 
         result = await pipeline.process_url(
             url=request.url,
@@ -715,7 +727,10 @@ async def generate_style_guide(
                 detail="Maximum 10 URLs allowed"
             )
 
-        pipeline = StatelessPipeline()
+        pipeline = StatelessPipeline(
+            organization_id=client.get('organization_id'),
+            client_id=client['client_id']
+        )
 
         result = await pipeline.generate_style_guide(
             urls=request.urls,

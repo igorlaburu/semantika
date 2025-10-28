@@ -6,7 +6,8 @@
 
 CREATE TABLE IF NOT EXISTS llm_usage (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  client_id UUID REFERENCES clients(id) ON DELETE SET NULL,
   context_unit_id UUID REFERENCES context_units(id) ON DELETE SET NULL,
 
   -- Timing
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS llm_usage (
 
 -- Indexes
 CREATE INDEX idx_llm_usage_org ON llm_usage(organization_id);
+CREATE INDEX idx_llm_usage_client ON llm_usage(client_id);
 CREATE INDEX idx_llm_usage_timestamp ON llm_usage(timestamp DESC);
 CREATE INDEX idx_llm_usage_model ON llm_usage(model);
 CREATE INDEX idx_llm_usage_operation ON llm_usage(operation);
@@ -39,6 +41,9 @@ CREATE INDEX idx_llm_usage_context_unit ON llm_usage(context_unit_id);
 
 -- Comments
 COMMENT ON TABLE llm_usage IS 'LLM token usage and cost tracking';
+COMMENT ON COLUMN llm_usage.organization_id IS 'Organization (for billing - always present)';
+COMMENT ON COLUMN llm_usage.client_id IS 'Client/API key used (if from API)';
+COMMENT ON COLUMN llm_usage.context_unit_id IS 'Context unit generated (if from email/context pipeline)';
 COMMENT ON COLUMN llm_usage.model IS 'Full model name from OpenRouter (e.g., anthropic/claude-3.5-sonnet)';
 COMMENT ON COLUMN llm_usage.operation IS 'Type of operation: context_unit, article, style, etc.';
 COMMENT ON COLUMN llm_usage.input_tokens IS 'Prompt tokens consumed';

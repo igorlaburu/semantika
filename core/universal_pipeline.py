@@ -69,7 +69,8 @@ class UniversalPipeline:
             context_unit = await self.generator.generate(
                 source_content=source_content,
                 organization_id=org["id"],
-                context_unit_id=cu_id
+                context_unit_id=cu_id,
+                client_id=None  # Email source, no client_id
             )
 
             # 4. Store in database

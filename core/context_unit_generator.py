@@ -23,7 +23,8 @@ class ContextUnitGenerator:
         self,
         source_content: SourceContent,
         organization_id: str = None,
-        context_unit_id: str = None
+        context_unit_id: str = None,
+        client_id: str = None
     ) -> Dict[str, Any]:
         """
         Generate context unit from source content.
@@ -32,6 +33,7 @@ class ContextUnitGenerator:
             source_content: Unified content from any source
             organization_id: Organization UUID (for usage tracking)
             context_unit_id: Context unit UUID (for usage tracking)
+            client_id: Client UUID (for usage tracking, API calls)
 
         Returns:
             Dict with title, summary, tags, atomic_statements
@@ -52,7 +54,8 @@ class ContextUnitGenerator:
             result = await self.openrouter.generate_context_unit(
                 text=prompt_text,
                 organization_id=organization_id,
-                context_unit_id=context_unit_id
+                context_unit_id=context_unit_id,
+                client_id=client_id
             )
 
             logger.info(

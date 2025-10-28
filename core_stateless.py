@@ -18,9 +18,17 @@ logger = get_logger("stateless_pipeline")
 class StatelessPipeline:
     """Pipeline for stateless document processing (no Qdrant storage)."""
 
-    def __init__(self):
-        """Initialize stateless pipeline."""
+    def __init__(self, organization_id: Optional[str] = None, client_id: Optional[str] = None):
+        """
+        Initialize stateless pipeline.
+
+        Args:
+            organization_id: Organization UUID (for usage tracking)
+            client_id: Client UUID (for usage tracking)
+        """
         self.openrouter = get_openrouter_client()
+        self.organization_id = organization_id
+        self.client_id = client_id
         logger.debug("stateless_pipeline_initialized")
 
     async def analyze(self, text: str) -> Dict[str, Any]:
@@ -36,7 +44,11 @@ class StatelessPipeline:
         logger.info("analyze_start", text_length=len(text))
 
         try:
-            result = await self.openrouter.analyze(text)
+            result = await self.openrouter.analyze(
+                text=text,
+                organization_id=self.organization_id,
+                client_id=self.client_id
+            )
 
             logger.info("analyze_completed", result_keys=list(result.keys()))
             return result
@@ -58,7 +70,11 @@ class StatelessPipeline:
         logger.info("analyze_atomic_start", text_length=len(text))
 
         try:
-            result = await self.openrouter.analyze_atomic(text)
+            result = await self.openrouter.analyze_atomic(
+                text=text,
+                organization_id=self.organization_id,
+                client_id=self.client_id
+            )
 
             logger.info(
                 "analyze_atomic_completed",
@@ -98,7 +114,9 @@ class StatelessPipeline:
             result = await self.openrouter.redact_news(
                 text=text,
                 style_guide=style_guide,
-                language=language
+                language=language,
+                organization_id=self.organization_id,
+                client_id=self.client_id
             )
 
             logger.info(
