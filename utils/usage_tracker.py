@@ -76,7 +76,6 @@ class UsageTracker:
             data = {
                 "id": usage_id,
                 "organization_id": organization_id,
-                "client_id": client_id,
                 "context_unit_id": context_unit_id,
                 "timestamp": datetime.utcnow().isoformat(),
                 "model": model,
@@ -89,6 +88,11 @@ class UsageTracker:
                 "total_cost_usd": round(total_cost, 6),
                 "metadata": metadata or {}
             }
+            
+            # Add client_id only if the column exists (for API calls)
+            # Note: client_id column may not exist in all deployments
+            if client_id is not None:
+                data["client_id"] = client_id
 
             # Insert into database
             self.supabase.client.table("llm_usage").insert(data).execute()
