@@ -20,6 +20,10 @@ CREATE TABLE IF NOT EXISTS workflow_configs (
     -- Usage limits per tier (simple approach)
     limits_starter JSONB DEFAULT '{"monthly": 1000, "daily": 50}'::JSONB,
     limits_pro JSONB DEFAULT '{"monthly": 5000, "daily": 200}'::JSONB,
+    limits_unlimited JSONB DEFAULT '{"monthly": -1, "daily": -1}'::JSONB,
+    
+    -- Cost estimation
+    estimated_cost_eur DECIMAL(6,4) DEFAULT 0.0050,
     
     -- Defaults for unlimited usage prevention
     default_monthly_limit INTEGER DEFAULT 100,
@@ -99,7 +103,17 @@ BEGIN
     END IF;
     
     -- Extract limits based on tier
-    IF p_tier = 'pro' THEN
+    IF p_tier = 'unlimited' THEN
+        -- Unlimited tier: return success immediately without checking
+        RETURN jsonb_build_object(
+            'allowed', true,
+            'tier', 'unlimited',
+            'daily_usage', 0,
+            'daily_limit', -1,
+            'monthly_usage', 0,
+            'monthly_limit', -1
+        );
+    ELSIF p_tier = 'pro' THEN
         monthly_limit := COALESCE((config_record.limits_pro->>'monthly')::INTEGER, config_record.default_monthly_limit);
         daily_limit := COALESCE((config_record.limits_pro->>'daily')::INTEGER, config_record.default_daily_limit);
     ELSE

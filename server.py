@@ -535,7 +535,7 @@ async def process_analyze(
     client: Dict = Depends(get_current_client)
 ) -> Dict[str, Any]:
     """
-    Analyze text and extract: title, summary, tags.
+    Analyze text and extract: title, summary, tags with usage control.
 
     Requires: X-API-Key header
 
@@ -548,22 +548,34 @@ async def process_analyze(
         Analysis result with title, summary, tags
     """
     try:
-        from core_stateless import StatelessPipeline
+        from utils.workflow_endpoints import execute_analyze
 
-        pipeline = StatelessPipeline(
-            organization_id=client.get('organization_id'),
-            client_id=client['client_id']
+        result = await execute_analyze(
+            client=client,
+            text=request.text,
+            params=request.params
         )
 
-        result = await pipeline.analyze(request.text)
+        # Handle workflow result format
+        if result.get("success", True):
+            data = result.get("data", result)
+            return {
+                "status": "ok",
+                "action": "analyze",
+                "result": data,
+                "text_length": len(request.text)
+            }
+        else:
+            if result.get("error") == "usage_limit_exceeded":
+                raise HTTPException(
+                    status_code=429, 
+                    detail=f"Usage limit exceeded: {result.get('details', 'Daily or monthly limit reached')}"
+                )
+            else:
+                raise HTTPException(status_code=500, detail=result.get("details", "Workflow execution failed"))
 
-        return {
-            "status": "ok",
-            "action": "analyze",
-            "result": result,
-            "text_length": len(request.text)
-        }
-
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("process_analyze_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
@@ -575,7 +587,7 @@ async def process_analyze_atomic(
     client: Dict = Depends(get_current_client)
 ) -> Dict[str, Any]:
     """
-    Analyze text and extract: title, summary, tags, atomic facts.
+    Analyze text and extract: title, summary, tags, atomic facts with usage control.
 
     Requires: X-API-Key header
 
@@ -588,22 +600,34 @@ async def process_analyze_atomic(
         Analysis result with title, summary, tags, atomic_facts
     """
     try:
-        from core_stateless import StatelessPipeline
+        from utils.workflow_endpoints import execute_analyze_atomic
 
-        pipeline = StatelessPipeline(
-            organization_id=client.get('organization_id'),
-            client_id=client['client_id']
+        result = await execute_analyze_atomic(
+            client=client,
+            text=request.text,
+            params=request.params
         )
 
-        result = await pipeline.analyze_atomic(request.text)
+        # Handle workflow result format
+        if result.get("success", True):
+            data = result.get("data", result)
+            return {
+                "status": "ok",
+                "action": "analyze_atomic",
+                "result": data,
+                "text_length": len(request.text)
+            }
+        else:
+            if result.get("error") == "usage_limit_exceeded":
+                raise HTTPException(
+                    status_code=429, 
+                    detail=f"Usage limit exceeded: {result.get('details', 'Daily or monthly limit reached')}"
+                )
+            else:
+                raise HTTPException(status_code=500, detail=result.get("details", "Workflow execution failed"))
 
-        return {
-            "status": "ok",
-            "action": "analyze_atomic",
-            "result": result,
-            "text_length": len(request.text)
-        }
-
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("process_analyze_atomic_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
@@ -615,7 +639,7 @@ async def process_redact_news(
     client: Dict = Depends(get_current_client)
 ) -> Dict[str, Any]:
     """
-    Generate news article from text/facts with specific style.
+    Generate news article from text/facts with specific style and usage control.
 
     Requires: X-API-Key header
 
@@ -630,30 +654,34 @@ async def process_redact_news(
         Generated article with title, summary, tags
     """
     try:
-        from core_stateless import StatelessPipeline
+        from utils.workflow_endpoints import execute_redact_news
 
-        pipeline = StatelessPipeline(
-            organization_id=client.get('organization_id'),
-            client_id=client['client_id']
-        )
-
-        params = request.params or {}
-        style_guide = params.get("style_guide")
-        language = params.get("language", "es")
-
-        result = await pipeline.redact_news(
+        result = await execute_redact_news(
+            client=client,
             text=request.text,
-            style_guide=style_guide,
-            language=language
+            params=request.params
         )
 
-        return {
-            "status": "ok",
-            "action": "redact_news",
-            "result": result,
-            "text_length": len(request.text)
-        }
+        # Handle workflow result format
+        if result.get("success", True):
+            data = result.get("data", result)
+            return {
+                "status": "ok",
+                "action": "redact_news",
+                "result": data,
+                "text_length": len(request.text)
+            }
+        else:
+            if result.get("error") == "usage_limit_exceeded":
+                raise HTTPException(
+                    status_code=429, 
+                    detail=f"Usage limit exceeded: {result.get('details', 'Daily or monthly limit reached')}"
+                )
+            else:
+                raise HTTPException(status_code=500, detail=result.get("details", "Workflow execution failed"))
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("process_redact_news_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
@@ -765,7 +793,7 @@ async def micro_edit(
     client: Dict = Depends(get_current_client)
 ) -> Dict[str, Any]:
     """
-    Perform micro-editing on text using LLM.
+    Perform micro-editing on text using LLM with usage control.
 
     Requires: X-API-Key header
 
@@ -784,61 +812,45 @@ async def micro_edit(
             command=request.command[:100]
         )
 
-        # Import here to avoid circular imports
-        from utils.openrouter_client import get_openrouter_client
-
-        # Get organization_id from client (already available)
-        organization_id = client.get("organization_id")
-        if not organization_id:
-            raise HTTPException(status_code=404, detail="Organization not found")
-
-        # Extract parameters
-        params = request.params or {}
-        language = params.get("language", "es")
-        preserve_meaning = params.get("preserve_meaning", True)
-        style_guide_id = params.get("style_guide_id")
-        max_length = params.get("max_length")
-
-        # Get style guide if provided
-        style_guide = None
-        if style_guide_id:
-            try:
-                style_result = supabase_client.client.table("press_styles") \
-                    .select("style_guide_markdown") \
-                    .eq("id", style_guide_id) \
-                    .eq("is_active", True) \
-                    .single() \
-                    .execute()
-                
-                if style_result.data:
-                    style_guide = style_result.data["style_guide_markdown"]
-            except Exception as e:
-                logger.warn("style_guide_not_found", style_guide_id=style_guide_id, error=str(e))
-
-        # Get OpenRouter client and perform micro-edit
-        openrouter = get_openrouter_client()
-        result = await openrouter.micro_edit(
+        # Use workflow-enabled function
+        from utils.workflow_endpoints import execute_micro_edit
+        
+        result = await execute_micro_edit(
+            client=client,
             text=request.text,
             command=request.command,
             context=request.context,
-            language=language,
-            preserve_meaning=preserve_meaning,
-            style_guide=style_guide,
-            max_length=max_length,
-            organization_id=organization_id,
-            client_id=client["client_id"]
+            params=request.params
         )
 
-        logger.info(
-            "micro_edit_completed",
-            client_id=client["client_id"],
-            word_count_change=result.get("word_count_change", 0)
-        )
-
-        return {
-            "success": True,
-            "data": result
-        }
+        # Handle workflow result format
+        if result.get("success", True):
+            data = result.get("data", result)
+            logger.info(
+                "micro_edit_completed",
+                client_id=client["client_id"],
+                word_count_change=data.get("word_count_change", 0)
+            )
+            return {
+                "success": True,
+                "data": data
+            }
+        else:
+            # Usage limit exceeded or other workflow error
+            logger.warn(
+                "micro_edit_workflow_failed",
+                client_id=client["client_id"],
+                error=result.get("error"),
+                details=result.get("details")
+            )
+            
+            if result.get("error") == "usage_limit_exceeded":
+                raise HTTPException(
+                    status_code=429, 
+                    detail=f"Usage limit exceeded: {result.get('details', 'Daily or monthly limit reached')}"
+                )
+            else:
+                raise HTTPException(status_code=500, detail=result.get("details", "Workflow execution failed"))
 
     except HTTPException:
         raise
