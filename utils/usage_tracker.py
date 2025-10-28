@@ -89,10 +89,8 @@ class UsageTracker:
                 "metadata": metadata or {}
             }
             
-            # Add client_id only if the column exists (for API calls)
-            # Note: client_id column may not exist in all deployments
-            if client_id is not None:
-                data["client_id"] = client_id
+            # Add client_id (now column exists, can be null for email sources)
+            data["client_id"] = client_id
 
             # Insert into database
             self.supabase.client.table("llm_usage").insert(data).execute()
