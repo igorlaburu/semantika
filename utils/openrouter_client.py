@@ -945,12 +945,28 @@ Responde SOLO con JSON válido, sin texto adicional:
                     'client_id': client_id
                 }
 
-            # Use chain with JsonOutputParser for reliability
-            micro_edit_chain = RunnableSequence(
-                micro_edit_prompt | self.llm_fast | JsonOutputParser()
+            # Call LLM directly to preserve tracking, then parse JSON
+            llm_response = await self.llm_fast.ainvoke(
+                micro_edit_prompt.format_messages(),
+                config=config
             )
             
-            result = await micro_edit_chain.ainvoke({}, config=config)
+            # Parse JSON manually from response
+            try:
+                import json
+                result = json.loads(llm_response.content)
+            except Exception as e:
+                logger.error("micro_edit_json_parsing_failed", 
+                    error=str(e),
+                    content=llm_response.content[:500]
+                )
+                # Return error response
+                return {
+                    "original_text": text,
+                    "edited_text": text,
+                    "explanation": f"Error parsing JSON: {str(e)}",
+                    "word_count_change": 0
+                }
 
             # Calculate word count change
             original_words = len(text.split())
