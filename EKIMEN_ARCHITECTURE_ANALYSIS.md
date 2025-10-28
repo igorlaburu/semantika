@@ -17,19 +17,19 @@ Ekimen es una plataforma SaaS multi-tenant que transforma datos semánticos no e
 ### Components Architecture
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   semantika-api │    │semantika-scheduler│   │   qdrant-db     │
-│   (FastAPI)     │◄──►│  (APScheduler)   │◄──►│  (Vector Store) │
-│   Port: 8000    │    │   (Cron Jobs)    │    │   Port: 6333    │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
+┌─────────────────┐    ┌───────────────────┐    ┌─────────────────┐
+│   semantika-api │    │semantika-scheduler│    │   qdrant-db     │
+│   (FastAPI)     │◄──►│  (APScheduler)    │◄──►│  (Vector Store) │
+│   Port: 8000    │    │   (Cron Jobs)     │    │   Port: 6333    │
+└─────────────────┘    └───────────────────┘    └─────────────────┘
          │                        │                        │
          ▼                        ▼                        ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Supabase Database                          │
-│  • Multi-tenancy (companies, clients)                          │
-│  • Workflow configs & usage tracking                           │
-│  • LLM usage & cost tracking                                   │
-│  • Task scheduling & execution logs                            │
+│  • Multi-tenancy (companies, clients)                           │
+│  • Workflow configs & usage tracking                            │
+│  • LLM usage & cost tracking                                    │
+│  • Task scheduling & execution logs                             │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
