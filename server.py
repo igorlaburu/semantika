@@ -523,6 +523,81 @@ async def get_executions(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/sources")
+async def get_sources(
+    client: Dict = Depends(get_current_client),
+    source_type: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    Get all information sources for authenticated client.
+    
+    Requires: X-API-Key header
+    
+    Query params:
+        - source_type: Filter by source type (email, scraping, webhook, etc.)
+    
+    Returns:
+        List of sources with configuration
+    """
+    try:
+        supabase = get_supabase_client()
+        sources = await supabase.get_sources_by_client(client["client_id"], source_type)
+        return sources
+        
+    except Exception as e:
+        logger.error("get_sources_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/sources")
+async def create_source(
+    request: Dict[str, Any],
+    client: Dict = Depends(get_current_client)
+) -> Dict[str, Any]:
+    """
+    Create a new information source.
+    
+    Requires: X-API-Key header
+    
+    Body:
+        - source_code: Unique code for this client
+        - source_name: Display name
+        - source_type: Type (email, scraping, webhook, etc.)
+        - config: Source-specific configuration
+        - workflow_code: Optional workflow to use
+        - schedule_config: Optional scheduling configuration
+    
+    Returns:
+        Created source
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        source_data = {
+            "client_id": client["client_id"],
+            "company_id": client.get("company_id"),
+            "source_code": request["source_code"],
+            "source_name": request["source_name"],
+            "source_type": request["source_type"],
+            "config": request.get("config", {}),
+            "workflow_code": request.get("workflow_code"),
+            "schedule_config": request.get("schedule_config"),
+            "description": request.get("description"),
+            "is_active": request.get("is_active", True)
+        }
+        
+        result = supabase.client.table("press_sources").insert(source_data).execute()
+        
+        if result.data and len(result.data) > 0:
+            return result.data[0]
+        else:
+            raise HTTPException(status_code=400, detail="Failed to create source")
+        
+    except Exception as e:
+        logger.error("create_source_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.delete("/tasks/{task_id}")
 async def delete_task(
     task_id: str,

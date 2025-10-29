@@ -281,6 +281,116 @@ class SupabaseClient:
             raise
 
     # ============================================
+    # PRESS SOURCES
+    # ============================================
+
+    async def get_sources_by_client(self, client_id: str, source_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get all sources for a client, optionally filtered by type."""
+        try:
+            query = self.client.table("press_sources")\
+                .select("*")\
+                .eq("client_id", client_id)\
+                .eq("is_active", True)
+            
+            if source_type:
+                query = query.eq("source_type", source_type)
+            
+            response = query.execute()
+            return response.data or []
+            
+        except Exception as e:
+            logger.error("get_sources_by_client_error", error=str(e))
+            return []
+
+    async def get_email_routing_for_address(self, email_address: str) -> Optional[Dict[str, Any]]:
+        """Find which source handles a specific email address."""
+        try:
+            # First try exact match
+            exact_match = self.client.table("email_routing")\
+                .select("*, press_sources!inner(*)")\
+                .eq("email_pattern", email_address)\
+                .eq("pattern_type", "exact")\
+                .eq("press_sources.is_active", True)\
+                .order("priority", desc=True)\
+                .limit(1)\
+                .execute()
+            
+            if exact_match.data:
+                return exact_match.data[0]
+            
+            # Try pattern matching (prefix, domain, etc.)
+            # This could be enhanced with more sophisticated pattern matching
+            domain = email_address.split('@')[1] if '@' in email_address else ""
+            
+            domain_match = self.client.table("email_routing")\
+                .select("*, press_sources!inner(*)")\
+                .eq("email_pattern", f"@{domain}")\
+                .eq("pattern_type", "domain")\
+                .eq("press_sources.is_active", True)\
+                .order("priority", desc=True)\
+                .limit(1)\
+                .execute()
+            
+            if domain_match.data:
+                return domain_match.data[0]
+            
+            return None
+            
+        except Exception as e:
+            logger.error("get_email_routing_error", email=email_address, error=str(e))
+            return None
+
+    async def get_scheduled_sources(self) -> List[Dict[str, Any]]:
+        """Get all sources that need scheduled execution."""
+        try:
+            response = self.client.table("press_sources")\
+                .select("*")\
+                .eq("is_active", True)\
+                .eq("source_type", "scraping")\
+                .is_("schedule_config", "not.null")\
+                .execute()
+            
+            return response.data or []
+            
+        except Exception as e:
+            logger.error("get_scheduled_sources_error", error=str(e))
+            return []
+
+    async def update_source_execution_stats(
+        self, 
+        source_id: str, 
+        success: bool, 
+        items_processed: int = 0
+    ) -> bool:
+        """Update execution statistics for a source."""
+        try:
+            if success:
+                response = self.client.table("press_sources")\
+                    .update({
+                        "total_executions": self.client.functions.increment("total_executions"),
+                        "successful_executions": self.client.functions.increment("successful_executions"),
+                        "total_items_processed": self.client.functions.increment("total_items_processed", items_processed),
+                        "last_execution": "now()"
+                    })\
+                    .eq("source_id", source_id)\
+                    .execute()
+            else:
+                response = self.client.table("press_sources")\
+                    .update({
+                        "total_executions": self.client.functions.increment("total_executions"),
+                        "failed_executions": self.client.functions.increment("failed_executions"),
+                        "last_execution": "now()"
+                    })\
+                    .eq("source_id", source_id)\
+                    .execute()
+            
+            return len(response.data) > 0
+            
+        except Exception as e:
+            logger.error("update_source_execution_stats_error", source_id=source_id, error=str(e))
+            return False
+
+    # ============================================
     # COMPANIES
     # ============================================
 
