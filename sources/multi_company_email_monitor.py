@@ -142,7 +142,7 @@ class MultiCompanyEmailMonitor:
                 return None
             
             # Extract source from routing
-            source = routing.get("press_sources")
+            source = routing.get("sources")
             if not source:
                 logger.warn("no_source_in_routing", to_address=to_address)
                 return None

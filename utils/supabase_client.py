@@ -287,7 +287,7 @@ class SupabaseClient:
     async def get_sources_by_client(self, client_id: str, source_type: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get all sources for a client, optionally filtered by type."""
         try:
-            query = self.client.table("press_sources")\
+            query = self.client.table("sources")\
                 .select("*")\
                 .eq("client_id", client_id)\
                 .eq("is_active", True)
@@ -307,10 +307,10 @@ class SupabaseClient:
         try:
             # First try exact match
             exact_match = self.client.table("email_routing")\
-                .select("*, press_sources!inner(*)")\
+                .select("*, sources!inner(*)")\
                 .eq("email_pattern", email_address)\
                 .eq("pattern_type", "exact")\
-                .eq("press_sources.is_active", True)\
+                .eq("sources.is_active", True)\
                 .order("priority", desc=True)\
                 .limit(1)\
                 .execute()
@@ -323,10 +323,10 @@ class SupabaseClient:
             domain = email_address.split('@')[1] if '@' in email_address else ""
             
             domain_match = self.client.table("email_routing")\
-                .select("*, press_sources!inner(*)")\
+                .select("*, sources!inner(*)")\
                 .eq("email_pattern", f"@{domain}")\
                 .eq("pattern_type", "domain")\
-                .eq("press_sources.is_active", True)\
+                .eq("sources.is_active", True)\
                 .order("priority", desc=True)\
                 .limit(1)\
                 .execute()
@@ -343,7 +343,7 @@ class SupabaseClient:
     async def get_scheduled_sources(self) -> List[Dict[str, Any]]:
         """Get all sources that need scheduled execution."""
         try:
-            response = self.client.table("press_sources")\
+            response = self.client.table("sources")\
                 .select("*")\
                 .eq("is_active", True)\
                 .eq("source_type", "scraping")\
@@ -365,7 +365,7 @@ class SupabaseClient:
         """Update execution statistics for a source."""
         try:
             if success:
-                response = self.client.table("press_sources")\
+                response = self.client.table("sources")\
                     .update({
                         "total_executions": self.client.functions.increment("total_executions"),
                         "successful_executions": self.client.functions.increment("successful_executions"),
@@ -375,7 +375,7 @@ class SupabaseClient:
                     .eq("source_id", source_id)\
                     .execute()
             else:
-                response = self.client.table("press_sources")\
+                response = self.client.table("sources")\
                     .update({
                         "total_executions": self.client.functions.increment("total_executions"),
                         "failed_executions": self.client.functions.increment("failed_executions"),

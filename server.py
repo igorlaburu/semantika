@@ -586,7 +586,7 @@ async def create_source(
             "is_active": request.get("is_active", True)
         }
         
-        result = supabase.client.table("press_sources").insert(source_data).execute()
+        result = supabase.client.table("sources").insert(source_data).execute()
         
         if result.data and len(result.data) > 0:
             return result.data[0]
@@ -627,7 +627,7 @@ async def update_source(
         supabase = get_supabase_client()
         
         # Verify source belongs to client
-        existing_source = supabase.client.table("press_sources")\
+        existing_source = supabase.client.table("sources")\
             .select("*")\
             .eq("source_id", source_id)\
             .eq("client_id", client["client_id"])\
@@ -647,7 +647,7 @@ async def update_source(
             raise HTTPException(status_code=400, detail="No fields to update")
         
         # Update source
-        result = supabase.client.table("press_sources")\
+        result = supabase.client.table("sources")\
             .update(update_data)\
             .eq("source_id", source_id)\
             .eq("client_id", client["client_id"])\
