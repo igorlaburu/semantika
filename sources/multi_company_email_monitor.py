@@ -552,6 +552,25 @@ class MultiCompanyEmailMonitor:
                 company_code=company["company_code"],
                 context_unit_id=result.get("context_unit", {}).get("id")
             )
+            
+            # Log execution
+            await supabase.log_execution(
+                client_id=context_unit.get("id", "00000000-0000-0000-0000-000000000000"),
+                company_id=company["id"],
+                source_name=company["company_name"],
+                source_type="email",
+                items_count=1,
+                status_code=200,
+                status="success",
+                details=f"Email procesado: {subject}",
+                metadata={
+                    "subject": subject,
+                    "workflow_code": company["company_code"],
+                    "context_unit_id": context_unit.get("id"),
+                    "content_parts": len(content_parts)
+                },
+                workflow_code=company["company_code"]
+            )
 
         except Exception as e:
             logger.error("combined_content_workflow_processing_error", 
@@ -559,6 +578,28 @@ class MultiCompanyEmailMonitor:
                 company_code=company.get("company_code"),
                 error=str(e)
             )
+            
+            # Log failed execution
+            try:
+                await supabase.log_execution(
+                    client_id="00000000-0000-0000-0000-000000000000",
+                    company_id=company.get("id"),
+                    source_name=company.get("company_name", "Unknown"),
+                    source_type="email",
+                    items_count=0,
+                    status_code=500,
+                    status="error",
+                    details=f"Error procesando email: {subject}",
+                    error_message=str(e),
+                    metadata={
+                        "subject": subject,
+                        "workflow_code": company.get("company_code"),
+                        "error_type": type(e).__name__
+                    },
+                    workflow_code=company.get("company_code")
+                )
+            except Exception as log_error:
+                logger.error("execution_log_error", error=str(log_error))
 
     async def _process_email(self, mail: imaplib.IMAP4_SSL, email_id: bytes):
         """

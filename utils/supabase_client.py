@@ -224,6 +224,63 @@ class SupabaseClient:
             return False
 
     # ============================================
+    # EXECUTIONS
+    # ============================================
+
+    async def log_execution(
+        self,
+        client_id: str,
+        source_name: str,
+        source_type: str,
+        items_count: int = 0,
+        status_code: Optional[int] = None,
+        status: str = "success",
+        details: Optional[str] = None,
+        error_message: Optional[str] = None,
+        metadata: Optional[Dict] = None,
+        duration_ms: Optional[int] = None,
+        task_id: Optional[str] = None,
+        workflow_code: Optional[str] = None,
+        company_id: Optional[str] = None
+    ) -> str:
+        """Log an execution to the executions table."""
+        try:
+            execution_data = {
+                "client_id": client_id,
+                "company_id": company_id,
+                "source_name": source_name,
+                "source_type": source_type,
+                "items_count": items_count,
+                "status_code": status_code,
+                "status": status,
+                "details": details,
+                "error_message": error_message,
+                "metadata": metadata or {},
+                "duration_ms": duration_ms,
+                "task_id": task_id,
+                "workflow_code": workflow_code
+            }
+            
+            result = self.client.table("executions").insert(execution_data).execute()
+            
+            if result.data and len(result.data) > 0:
+                execution_id = result.data[0]["execution_id"]
+                logger.debug("execution_logged", 
+                    execution_id=execution_id,
+                    source_name=source_name,
+                    source_type=source_type,
+                    status=status
+                )
+                return execution_id
+            else:
+                logger.error("log_execution_failed", data=execution_data)
+                return None
+            
+        except Exception as e:
+            logger.error("log_execution_error", error=str(e))
+            raise
+
+    # ============================================
     # COMPANIES
     # ============================================
 

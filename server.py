@@ -486,6 +486,43 @@ async def list_tasks(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/executions")
+async def get_executions(
+    client: Dict = Depends(get_current_client),
+    limit: int = 100,
+    offset: int = 0
+) -> List[Dict[str, Any]]:
+    """
+    Get execution logs for authenticated client.
+    
+    Requires: X-API-Key header
+    
+    Query params:
+        - limit: Maximum results (default: 100)
+        - offset: Offset for pagination (default: 0)
+    
+    Returns:
+        List of executions
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        # Get executions for this client
+        result = supabase.client.table("executions")\
+            .select("*")\
+            .eq("client_id", client["client_id"])\
+            .order("timestamp", desc=True)\
+            .limit(limit)\
+            .offset(offset)\
+            .execute()
+        
+        return result.data
+        
+    except Exception as e:
+        logger.error("get_executions_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.delete("/tasks/{task_id}")
 async def delete_task(
     task_id: str,

@@ -10,6 +10,7 @@ Runs:
 import asyncio
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
@@ -105,6 +106,7 @@ async def execute_task(task: Dict[str, Any]):
     client_id = task["client_id"]
     source_type = task["source_type"]
     target = task["target"]
+    company_id = task.get("company_id")
 
     logger.info(
         "executing_task",
@@ -116,6 +118,7 @@ async def execute_task(task: Dict[str, Any]):
 
     supabase = get_supabase_client()
     execution_time = datetime.utcnow().isoformat() + "Z"
+    start_time = datetime.utcnow()
 
     try:
         if source_type == "web_llm":
@@ -133,6 +136,27 @@ async def execute_task(task: Dict[str, Any]):
                 skip_guardrails=skip_guardrails
             )
             logger.info("task_completed", task_id=task_id, result=result)
+            
+            # Log execution
+            duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+            await supabase.log_execution(
+                client_id=client_id,
+                company_id=company_id,
+                source_name=urlparse(target).netloc or target,
+                source_type="scraping",
+                items_count=result.get("documents_scraped", 0),
+                status_code=200 if result.get("documents_scraped", 0) > 0 else 404,
+                status="success" if result.get("documents_scraped", 0) > 0 else "error",
+                details=f"{result.get('documents_scraped', 0)} noticias procesadas correctamente" if result.get("documents_scraped", 0) > 0 else "Página no encontrada - sitio web caído",
+                metadata={
+                    "url": target,
+                    "documents_scraped": result.get("documents_scraped", 0),
+                    "documents_ingested": result.get("documents_ingested", 0),
+                    "extract_multiple": extract_multiple
+                },
+                duration_ms=duration_ms,
+                task_id=task_id
+            )
 
         elif source_type == "twitter":
             logger.warn("task_not_implemented", task_id=task_id, source_type=source_type)
@@ -151,6 +175,28 @@ async def execute_task(task: Dict[str, Any]):
 
     except Exception as e:
         logger.error("task_execution_error", task_id=task_id, error=str(e))
+        
+        # Log failed execution
+        duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+        await supabase.log_execution(
+            client_id=client_id,
+            company_id=company_id,
+            source_name=urlparse(target).netloc if source_type == "web_llm" else target,
+            source_type="scraping" if source_type == "web_llm" else source_type,
+            items_count=0,
+            status_code=500,
+            status="error",
+            details=f"Error ejecutando tarea: {str(e)}",
+            error_message=str(e),
+            metadata={
+                "url": target if source_type == "web_llm" else None,
+                "source_type": source_type,
+                "error_type": type(e).__name__
+            },
+            duration_ms=duration_ms,
+            task_id=task_id
+        )
+        
         # Still update last_run even on error to track execution attempts
         await supabase.update_task_last_run(task_id, execution_time)
 
