@@ -121,29 +121,42 @@ class MultiCompanyEmailMonitor:
             logger.debug("company_extraction_failed", to_header=to_header, error=str(e))
             return None
 
-    async def _get_company_and_organization(self, company_code: str) -> Optional[Tuple[Dict, Dict]]:
+    async def _get_routing_and_source(self, to_address: str) -> Optional[Tuple[Dict, Dict, Dict]]:
         """
-        Get company and organization by company code.
+        Get routing configuration and associated source for email address.
 
         Args:
-            company_code: Company code (e.g., 'elconfidencial', 'demo')
+            to_address: Full email address (e.g., 'p.demo@ekimen.ai')
 
         Returns:
-            Tuple of (company, organization) or None if not found
+            Tuple of (company, organization, source) or None if not found
         """
         try:
             supabase = get_supabase_client()
             
-            # Get company by code
+            # Get email routing configuration with associated press source
+            routing = await supabase.get_email_routing_for_address(to_address)
+            
+            if not routing:
+                logger.warn("no_routing_found", to_address=to_address)
+                return None
+            
+            # Extract source from routing
+            source = routing.get("press_sources")
+            if not source:
+                logger.warn("no_source_in_routing", to_address=to_address)
+                return None
+            
+            # Get company
             company_result = supabase.client.table("companies")\
                 .select("*")\
-                .eq("company_code", company_code)\
+                .eq("id", source["company_id"])\
                 .eq("is_active", True)\
                 .maybe_single()\
                 .execute()
             
             if not company_result.data:
-                logger.warn("company_not_found", company_code=company_code)
+                logger.warn("company_not_found", company_id=source["company_id"])
                 return None
             
             company = company_result.data
@@ -157,21 +170,22 @@ class MultiCompanyEmailMonitor:
                 .execute()
             
             if not org_result.data:
-                logger.warn("no_organization_for_company", company_code=company_code)
+                logger.warn("no_organization_for_company", company_id=company["id"])
                 return None
             
             organization = org_result.data[0]
             
-            logger.debug("company_and_org_found", 
-                company_code=company_code,
+            logger.debug("routing_and_source_found", 
+                to_address=to_address,
                 company_id=company["id"],
+                source_id=source["source_id"],
                 org_slug=organization["slug"]
             )
             
-            return company, organization
+            return company, organization, source
 
         except Exception as e:
-            logger.error("company_org_lookup_error", company_code=company_code, error=str(e))
+            logger.error("routing_lookup_error", to_address=to_address, error=str(e))
             return None
 
     def _decode_subject(self, subject: str) -> str:
@@ -238,8 +252,9 @@ class MultiCompanyEmailMonitor:
                 }
             )
             
-            # Get company-specific workflow
-            workflow = get_workflow(company["company_code"], company.get("settings", {}))
+            # Get workflow for this source
+            workflow_code = source.get("workflow_code", "default")
+            workflow = get_workflow(workflow_code, company.get("settings", {}))
             
             # Process content through workflow
             result = await workflow.process_content(source_content)
@@ -333,8 +348,9 @@ class MultiCompanyEmailMonitor:
                 }
             )
             
-            # Get company-specific workflow
-            workflow = get_workflow(company["company_code"], company.get("settings", {}))
+            # Get workflow for this source
+            workflow_code = source.get("workflow_code", "default")
+            workflow = get_workflow(workflow_code, company.get("settings", {}))
             
             # Process content through workflow
             result = await workflow.process_content(source_content)
@@ -508,8 +524,9 @@ class MultiCompanyEmailMonitor:
                 title=subject or "(Sin asunto)"
             )
             
-            # Get company-specific workflow
-            workflow = get_workflow(company["company_code"], company.get("settings", {}))
+            # Get workflow for this source from metadata
+            workflow_code = source_metadata.get("workflow_code", "default")
+            workflow = get_workflow(workflow_code, company.get("settings", {}))
             
             # Process content through workflow
             result = await workflow.process_content(source_content)
@@ -565,11 +582,12 @@ class MultiCompanyEmailMonitor:
                 details=f"Email procesado: {subject}",
                 metadata={
                     "subject": subject,
-                    "workflow_code": company["company_code"],
+                    "workflow_code": workflow_code,
                     "context_unit_id": context_unit.get("id"),
-                    "content_parts": len(content_parts)
+                    "content_parts": len(content_parts),
+                    "source_id": source["source_id"]
                 },
-                workflow_code=company["company_code"]
+                workflow_code=workflow_code
             )
 
         except Exception as e:
@@ -581,6 +599,7 @@ class MultiCompanyEmailMonitor:
             
             # Log failed execution
             try:
+                workflow_code = source_metadata.get("workflow_code", "default")
                 await supabase.log_execution(
                     client_id="00000000-0000-0000-0000-000000000000",
                     company_id=company.get("id"),
@@ -593,10 +612,11 @@ class MultiCompanyEmailMonitor:
                     error_message=str(e),
                     metadata={
                         "subject": subject,
-                        "workflow_code": company.get("company_code"),
-                        "error_type": type(e).__name__
+                        "workflow_code": workflow_code,
+                        "error_type": type(e).__name__,
+                        "source_id": source_metadata.get("source_id")
                     },
-                    workflow_code=company.get("company_code")
+                    workflow_code=workflow_code
                 )
             except Exception as log_error:
                 logger.error("execution_log_error", error=str(log_error))
@@ -626,31 +646,20 @@ class MultiCompanyEmailMonitor:
                 from_addr=from_header
             )
 
-            # Extract company code from To header
-            company_code = self._extract_company_from_to_header(to_header)
-
-            if not company_code:
+            # Get routing configuration and source for this email address
+            routing_result = await self._get_routing_and_source(to_header)
+            if not routing_result:
                 logger.warn(
-                    "no_company_in_email",
+                    "no_routing_for_email",
                     to_header=to_header,
                     subject=subject,
-                    expected_format="p.{company_code}@ekimen.ai"
+                    message="Email routing not configured for this address"
                 )
                 # Mark as read and skip
                 mail.store(email_id, "+FLAGS", "\\Seen")
                 return
 
-            # Get company and organization
-            company_org = await self._get_company_and_organization(company_code)
-            if not company_org:
-                logger.warn("company_not_found_for_code", 
-                    company_code=company_code,
-                    subject=subject
-                )
-                mail.store(email_id, "+FLAGS", "\\Seen")
-                return
-
-            company, organization = company_org
+            company, organization, source = routing_result
 
             # Collect all content (email body + attachments) into one context unit
             all_content_parts = []
@@ -732,6 +741,9 @@ class MultiCompanyEmailMonitor:
                     source_metadata={
                         "subject": subject,
                         "company_code": company["company_code"],
+                        "source_id": source["source_id"],
+                        "source_name": source["source_name"],
+                        "workflow_code": source.get("workflow_code", "default"),
                         "attachments_count": len(text_attachments) + len(audio_transcriptions)
                     }
                 )

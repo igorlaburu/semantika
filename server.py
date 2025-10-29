@@ -598,6 +598,78 @@ async def create_source(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.put("/sources/{source_id}")
+async def update_source(
+    source_id: str,
+    request: Dict[str, Any],
+    client: Dict = Depends(get_current_client)
+) -> Dict[str, Any]:
+    """
+    Update an existing information source.
+    
+    Requires: X-API-Key header
+    
+    Path params:
+        - source_id: UUID of the source to update
+    
+    Body (all optional):
+        - source_name: Display name
+        - config: Source-specific configuration
+        - workflow_code: Workflow to use
+        - schedule_config: Scheduling configuration
+        - description: Source description
+        - is_active: Enable/disable source
+    
+    Returns:
+        Updated source
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        # Verify source belongs to client
+        existing_source = supabase.client.table("press_sources")\
+            .select("*")\
+            .eq("source_id", source_id)\
+            .eq("client_id", client["client_id"])\
+            .maybe_single()\
+            .execute()
+        
+        if not existing_source.data:
+            raise HTTPException(status_code=404, detail="Source not found")
+        
+        # Prepare update data (only include provided fields)
+        update_data = {}
+        for field in ["source_name", "config", "workflow_code", "schedule_config", "description", "is_active"]:
+            if field in request:
+                update_data[field] = request[field]
+        
+        if not update_data:
+            raise HTTPException(status_code=400, detail="No fields to update")
+        
+        # Update source
+        result = supabase.client.table("press_sources")\
+            .update(update_data)\
+            .eq("source_id", source_id)\
+            .eq("client_id", client["client_id"])\
+            .execute()
+        
+        if result.data and len(result.data) > 0:
+            logger.info("source_updated", 
+                source_id=source_id,
+                client_id=client["client_id"],
+                updated_fields=list(update_data.keys())
+            )
+            return result.data[0]
+        else:
+            raise HTTPException(status_code=400, detail="Failed to update source")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("update_source_error", source_id=source_id, error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.delete("/tasks/{task_id}")
 async def delete_task(
     task_id: str,

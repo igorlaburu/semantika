@@ -100,105 +100,112 @@ async def run_multi_company_email_monitor():
         logger.error("multi_company_email_monitor_error", error=str(e))
 
 
-async def execute_task(task: Dict[str, Any]):
-    """Execute a scheduled task based on source type."""
-    task_id = task["task_id"]
-    client_id = task["client_id"]
-    source_type = task["source_type"]
-    target = task["target"]
-    company_id = task.get("company_id")
+async def execute_source_task(source: Dict[str, Any]):
+    """Execute a scheduled source task based on source type."""
+    source_id = source["source_id"]
+    client_id = source["client_id"]
+    company_id = source.get("company_id")
+    source_type = source["source_type"]
+    source_name = source["source_name"]
+    config = source.get("config", {})
 
     logger.info(
-        "executing_task",
-        task_id=task_id,
+        "executing_source_task",
+        source_id=source_id,
         client_id=client_id,
         source_type=source_type,
-        target=target
+        source_name=source_name
     )
 
     supabase = get_supabase_client()
-    execution_time = datetime.utcnow().isoformat() + "Z"
     start_time = datetime.utcnow()
 
     try:
-        if source_type == "web_llm":
-            # Web scraping with LLM extraction
-            # Get config values, use defaults if not specified
-            config = task.get("config", {})
+        if source_type == "scraping":
+            # Web scraping
+            target_url = config.get("url")
+            if not target_url:
+                logger.error("scraping_source_missing_url", source_id=source_id)
+                return
+
             extract_multiple = config.get("extract_multiple", True)
             skip_guardrails = config.get("skip_guardrails", False)
 
             scraper = WebScraper()
             result = await scraper.scrape_and_ingest(
-                url=target,
+                url=target_url,
                 client_id=client_id,
                 extract_multiple=extract_multiple,
                 skip_guardrails=skip_guardrails
             )
-            logger.info("task_completed", task_id=task_id, result=result)
+            logger.info("source_task_completed", source_id=source_id, result=result)
             
             # Log execution
             duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
             await supabase.log_execution(
                 client_id=client_id,
                 company_id=company_id,
-                source_name=urlparse(target).netloc or target,
+                source_name=source_name,
                 source_type="scraping",
                 items_count=result.get("documents_scraped", 0),
                 status_code=200 if result.get("documents_scraped", 0) > 0 else 404,
                 status="success" if result.get("documents_scraped", 0) > 0 else "error",
                 details=f"{result.get('documents_scraped', 0)} noticias procesadas correctamente" if result.get("documents_scraped", 0) > 0 else "Página no encontrada - sitio web caído",
                 metadata={
-                    "url": target,
+                    "url": target_url,
                     "documents_scraped": result.get("documents_scraped", 0),
                     "documents_ingested": result.get("documents_ingested", 0),
                     "extract_multiple": extract_multiple
                 },
                 duration_ms=duration_ms,
-                task_id=task_id
+                workflow_code=source.get("workflow_code")
+            )
+            
+            # Update source execution stats
+            await supabase.update_source_execution_stats(
+                source_id, 
+                success=result.get("documents_scraped", 0) > 0,
+                items_processed=result.get("documents_scraped", 0)
             )
 
-        elif source_type == "twitter":
-            logger.warn("task_not_implemented", task_id=task_id, source_type=source_type)
+        elif source_type == "webhook":
+            logger.debug("webhook_source_skip", source_id=source_id, message="Webhooks are triggered externally")
 
-        elif source_type in ["api_efe", "api_reuters", "api_wordpress"]:
-            logger.warn("task_not_implemented", task_id=task_id, source_type=source_type)
+        elif source_type == "api":
+            logger.warn("api_source_not_implemented", source_id=source_id, source_type=source_type)
 
         elif source_type == "manual":
-            logger.debug("task_manual_skip", task_id=task_id)
+            logger.debug("manual_source_skip", source_id=source_id)
 
         else:
-            logger.error("unknown_source_type", task_id=task_id, source_type=source_type)
-
-        # Update last_run timestamp in Supabase
-        await supabase.update_task_last_run(task_id, execution_time)
+            logger.error("unknown_source_type", source_id=source_id, source_type=source_type)
 
     except Exception as e:
-        logger.error("task_execution_error", task_id=task_id, error=str(e))
+        logger.error("source_task_execution_error", source_id=source_id, error=str(e))
         
         # Log failed execution
         duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
         await supabase.log_execution(
             client_id=client_id,
             company_id=company_id,
-            source_name=urlparse(target).netloc if source_type == "web_llm" else target,
-            source_type="scraping" if source_type == "web_llm" else source_type,
+            source_name=source_name,
+            source_type=source_type,
             items_count=0,
             status_code=500,
             status="error",
-            details=f"Error ejecutando tarea: {str(e)}",
+            details=f"Error ejecutando fuente: {str(e)}",
             error_message=str(e),
             metadata={
-                "url": target if source_type == "web_llm" else None,
+                "source_id": source_id,
                 "source_type": source_type,
                 "error_type": type(e).__name__
             },
             duration_ms=duration_ms,
-            task_id=task_id
+            workflow_code=source.get("workflow_code")
         )
         
-        # Still update last_run even on error to track execution attempts
-        await supabase.update_task_last_run(task_id, execution_time)
+        # Update source execution stats
+        await supabase.update_source_execution_stats(source_id, success=False)
 
 
 async def cleanup_old_data():
@@ -223,38 +230,42 @@ async def cleanup_old_data():
         logger.error("ttl_cleanup_error", error=str(e))
 
 
-async def schedule_tasks(scheduler: AsyncIOScheduler):
-    """Load tasks from Supabase and schedule them."""
-    logger.info("loading_tasks")
+async def schedule_sources(scheduler: AsyncIOScheduler):
+    """Load sources from Supabase and schedule them."""
+    logger.info("loading_sources")
 
     try:
-        # REMOVED: Legacy IMAP email listener job - replaced by MultiCompanyEmailMonitor background task
-
         supabase = get_supabase_client()
-        tasks = await supabase.get_all_active_tasks()
+        sources = await supabase.get_scheduled_sources()
 
-        logger.info("tasks_loaded", count=len(tasks))
+        logger.info("sources_loaded", count=len(sources))
 
-        for task in tasks:
-            task_id = task["task_id"]
-            frequency_min = task["frequency_min"]
+        for source in sources:
+            source_id = source["source_id"]
+            schedule_config = source.get("schedule_config", {})
+            
+            # Get frequency from schedule config (default 60 minutes if not specified)
+            frequency_min = schedule_config.get("frequency_minutes", 60)
+            
+            # Only schedule scraping sources that have valid schedule config
+            if source["source_type"] == "scraping" and frequency_min > 0:
+                # Schedule source with interval trigger
+                scheduler.add_job(
+                    execute_source_task,
+                    trigger=IntervalTrigger(minutes=frequency_min),
+                    args=[source],
+                    id=f"source_{source_id}",
+                    replace_existing=True,
+                    max_instances=1
+                )
 
-            # Schedule task with interval trigger
-            scheduler.add_job(
-                execute_task,
-                trigger=IntervalTrigger(minutes=frequency_min),
-                args=[task],
-                id=f"task_{task_id}",
-                replace_existing=True,
-                max_instances=1
-            )
-
-            logger.info(
-                "task_scheduled",
-                task_id=task_id,
-                frequency_min=frequency_min,
-                source_type=task["source_type"]
-            )
+                logger.info(
+                    "source_scheduled",
+                    source_id=source_id,
+                    source_name=source["source_name"],
+                    frequency_min=frequency_min,
+                    source_type=source["source_type"]
+                )
 
         # Schedule daily TTL cleanup at 3 AM
         scheduler.add_job(
@@ -267,7 +278,7 @@ async def schedule_tasks(scheduler: AsyncIOScheduler):
         logger.info("ttl_cleanup_scheduled", time="03:00 UTC daily")
 
     except Exception as e:
-        logger.error("schedule_tasks_error", error=str(e))
+        logger.error("schedule_sources_error", error=str(e))
 
 
 async def main():
@@ -280,8 +291,8 @@ async def main():
         scheduler.start()
         logger.info("apscheduler_started")
 
-        # Load and schedule tasks from Supabase
-        await schedule_tasks(scheduler)
+        # Load and schedule sources from Supabase
+        await schedule_sources(scheduler)
 
         # Create tasks for monitors
         monitor_tasks = []
