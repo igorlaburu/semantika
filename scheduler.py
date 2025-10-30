@@ -347,6 +347,22 @@ async def schedule_sources(scheduler: AsyncIOScheduler):
         logger.error("schedule_sources_error", error=str(e))
 
 
+async def reload_sources_periodically(scheduler: AsyncIOScheduler):
+    """Reload sources from database every 5 minutes to pick up changes."""
+    logger.info("scheduling_sources_reload", interval_minutes=5)
+    
+    scheduler.add_job(
+        schedule_sources,
+        trigger=IntervalTrigger(minutes=5),
+        args=[scheduler],
+        id="sources_reload",
+        replace_existing=True,
+        max_instances=1
+    )
+    
+    logger.info("sources_reload_scheduled", interval_minutes=5)
+
+
 async def main():
     """Main scheduler entry point."""
     logger.info("scheduler_starting")
@@ -361,6 +377,9 @@ async def main():
         logger.info("calling_schedule_sources")
         await schedule_sources(scheduler)
         logger.info("schedule_sources_completed")
+        
+        # Schedule periodic reload of sources (every 5 minutes)
+        await reload_sources_periodically(scheduler)
 
         # Create tasks for monitors
         monitor_tasks = []
