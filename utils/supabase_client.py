@@ -364,25 +364,19 @@ class SupabaseClient:
     ) -> bool:
         """Update execution statistics for a source."""
         try:
+            # Use SQL functions for incrementing
             if success:
-                response = self.client.table("sources")\
-                    .update({
-                        "total_executions": self.client.functions.increment("total_executions"),
-                        "successful_executions": self.client.functions.increment("successful_executions"),
-                        "total_items_processed": self.client.functions.increment("total_items_processed", items_processed),
-                        "last_execution": "now()"
-                    })\
-                    .eq("source_id", source_id)\
-                    .execute()
+                response = self.client.rpc('increment_source_stats', {
+                    'source_id': source_id,
+                    'success': True,
+                    'items_processed': items_processed
+                }).execute()
             else:
-                response = self.client.table("sources")\
-                    .update({
-                        "total_executions": self.client.functions.increment("total_executions"),
-                        "failed_executions": self.client.functions.increment("failed_executions"),
-                        "last_execution": "now()"
-                    })\
-                    .eq("source_id", source_id)\
-                    .execute()
+                response = self.client.rpc('increment_source_stats', {
+                    'source_id': source_id,
+                    'success': False,
+                    'items_processed': 0
+                }).execute()
             
             return len(response.data) > 0
             

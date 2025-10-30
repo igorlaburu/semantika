@@ -192,7 +192,8 @@ SIN markdown, {news_count} items exactos."""
                             context_unit_keys=list(context_unit.keys()) if context_unit else []
                         )
                         
-                        # Use supabase client from outside loop
+                        # Get supabase client
+                        supabase = get_supabase_client()
                         
                         # Simplified data to avoid DB issues
                         context_unit_data = {
