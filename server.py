@@ -972,6 +972,44 @@ async def generate_style_guide(
 
 
 @app.post("/api/process/micro-edit")
+
+
+@app.post("/test/perplexity")
+async def test_perplexity_execution(
+    x_api_key: str = Header(..., alias="x-api-key")
+):
+    """Execute Perplexity news task manually for testing."""
+    try:
+        # Validate API key
+        client = await validate_api_key(x_api_key)
+        
+        # Get Perplexity source
+        supabase = get_supabase_client()
+        result = supabase.client.table("sources")\
+            .select("*")\
+            .eq("source_name", "Medios Generalistas")\
+            .execute()
+        
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Perplexity source not found")
+        
+        source = result.data[0]
+        
+        # Execute task
+        from sources.perplexity_news_connector import execute_perplexity_news_task
+        result = await execute_perplexity_news_task(source)
+        
+        return {
+            "success": True,
+            "message": "Perplexity task executed",
+            "result": result
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("test_perplexity_error", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Execution failed: {str(e)}")
 async def micro_edit(
     request: MicroEditRequest,
     client: Dict = Depends(get_current_client)
