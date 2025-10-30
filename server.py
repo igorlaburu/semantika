@@ -981,7 +981,7 @@ async def test_perplexity_execution(
     """Execute Perplexity news task manually for testing."""
     try:
         # Validate API key
-        client = await validate_api_key(x_api_key)
+        client = await get_current_client(x_api_key)
         
         # Get Perplexity source
         supabase = get_supabase_client()
