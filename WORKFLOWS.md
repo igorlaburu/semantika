@@ -466,6 +466,248 @@ git push  # Auto-deploy
 logger.setLevel("DEBUG")
 ```
 
+## Configuración de Límites y Tiers
+
+### 1. **Sistema de Tiers**
+
+El sistema maneja tres niveles de suscripción con límites diferenciados:
+
+```sql
+-- Estructura de límites por tier en workflow_configs
+{
+  "starter": {"daily": 25, "monthly": 500},     -- 149€/mes
+  "pro": {"daily": 100, "monthly": 2000},       -- 250€/mes  
+  "unlimited": {"daily": -1, "monthly": -1}     -- Sin límites
+}
+```
+
+### 2. **Configurar Límites para Nuevo Workflow**
+
+```sql
+INSERT INTO workflow_configs (
+    workflow_code,
+    workflow_name,
+    description,
+    api_endpoint,
+    is_api_enabled,
+    limits_starter,
+    limits_pro,
+    limits_unlimited,
+    estimated_cost_eur,
+    is_active
+) VALUES (
+    'mi_workflow',
+    'Mi Workflow Personalizado',
+    'Descripción del workflow',
+    '/process/mi-workflow',
+    true,
+    '{"daily": 20, "monthly": 300}',      -- Starter
+    '{"daily": 80, "monthly": 1500}',     -- Pro
+    '{"daily": -1, "monthly": -1}',       -- Unlimited
+    0.0100,                               -- Costo por ejecución (EUR)
+    true                                  -- Activo
+);
+```
+
+### 3. **Asignar Tier a Empresa**
+
+```sql
+-- Cambiar tier de empresa existente
+UPDATE companies 
+SET tier = 'pro' 
+WHERE company_code = 'mi_empresa';
+
+-- Crear empresa con tier específico
+INSERT INTO companies (
+    company_code,
+    company_name,
+    tier,
+    settings
+) VALUES (
+    'nueva_empresa',
+    'Nueva Empresa S.L.',
+    'starter',
+    '{"email_alias": "p.nueva@ekimen.ai"}'
+);
+
+-- Verificar configuración actual
+SELECT company_code, company_name, tier 
+FROM companies 
+ORDER BY tier;
+```
+
+### 4. **Límites por Workflow Existentes**
+
+| Workflow | Starter (149€) | Pro (250€) | Unlimited |
+|----------|---------------|------------|-----------|
+| **analyze** | 50/día, 1000/mes | 200/día, 5000/mes | ∞ |
+| **analyze_atomic** | 25/día, 500/mes | 100/día, 2000/mes | ∞ |
+| **redact_news** | 10/día, 200/mes | 50/día, 1000/mes | ∞ |
+| **micro_edit** | 25/día, 500/mes | 100/día, 2000/mes | ∞ |
+| **style_generation** | 2/día, 10/mes | 5/día, 50/mes | ∞ |
+
+### 5. **Enforcement Automático**
+
+El sistema verifica límites automáticamente en cada ejecución:
+
+```python
+# El workflow_wrapper verifica límites antes de ejecutar
+@workflow_wrapper("mi_workflow")
+async def execute_mi_workflow(client, params):
+    # Límites verificados automáticamente aquí
+    pass
+```
+
+**Respuesta cuando se excede el límite:**
+```json
+{
+  "error": "usage_limit_exceeded", 
+  "details": "Daily limit exceeded: 100/100 for workflow 'analyze'",
+  "limits": {
+    "daily_used": 100,
+    "daily_limit": 100,
+    "monthly_used": 2341,
+    "monthly_limit": 5000
+  }
+}
+```
+
+### 6. **Verificar Uso Actual**
+
+```sql
+-- Ver uso de workflows por empresa
+SELECT 
+    c.company_name,
+    c.tier,
+    wu.workflow_id,
+    wc.workflow_code,
+    wu.execution_date,
+    wu.execution_count
+FROM workflow_usage wu
+JOIN companies c ON c.id = wu.company_id
+JOIN workflow_configs wc ON wc.workflow_id = wu.workflow_id
+WHERE wu.execution_date >= CURRENT_DATE - INTERVAL '7 days'
+ORDER BY wu.execution_date DESC;
+```
+
+## Gestión de Estado de Workflows
+
+### 1. **is_active en workflow_configs**
+
+El campo `is_active` en la tabla `workflow_configs` controla la disponibilidad global del workflow:
+
+```sql
+-- Desactivar workflow globalmente
+UPDATE workflow_configs 
+SET is_active = false 
+WHERE workflow_code = 'mi_workflow';
+```
+
+**¿Qué significa `is_active = false`?**
+
+- ❌ **API endpoints disabled**: Los endpoints `/process/mi-workflow` devuelven error 503
+- ❌ **No aparece en listados**: No se muestra en documentación de API
+- ❌ **Bloqueo total**: Ninguna empresa puede usar el workflow, independientemente de su tier
+- ✅ **Datos conservados**: Las ejecuciones históricas se mantienen
+- ✅ **Configuración preservada**: Los límites y settings no se borran
+
+### 2. **Estados del Workflow**
+
+```sql
+-- Estados posibles y sus efectos
+SELECT 
+    workflow_code,
+    is_active,
+    CASE 
+        WHEN is_active = true THEN 'Disponible para todas las empresas según tier'
+        WHEN is_active = false THEN 'Bloqueado globalmente - Error 503'
+    END as estado
+FROM workflow_configs;
+```
+
+### 3. **Desactivación Temporal vs Permanente**
+
+```sql
+-- Desactivación temporal (mantenimiento, bugs)
+UPDATE workflow_configs 
+SET 
+    is_active = false,
+    description = description || ' [TEMPORARILY DISABLED - MAINTENANCE]'
+WHERE workflow_code = 'mi_workflow';
+
+-- Reactivación
+UPDATE workflow_configs 
+SET 
+    is_active = true,
+    description = REPLACE(description, ' [TEMPORARILY DISABLED - MAINTENANCE]', '')
+WHERE workflow_code = 'mi_workflow';
+
+-- Desactivación permanente (deprecado)
+UPDATE workflow_configs 
+SET 
+    is_active = false,
+    description = description || ' [DEPRECATED - Use analyze_v2 instead]'
+WHERE workflow_code = 'analyze_v1';
+```
+
+### 4. **Verificar Estado desde API**
+
+```bash
+# Workflow activo - funciona normal
+curl -X POST "https://api.ekimen.ai/process/analyze" \
+  -H "X-API-Key: tu-key" \
+  -d '{"text": "test"}'
+# → 200 OK
+
+# Workflow inactivo - error
+curl -X POST "https://api.ekimen.ai/process/deprecated-workflow" \
+  -H "X-API-Key: tu-key" \
+  -d '{"text": "test"}'
+# → 503 Service Unavailable
+# {"error": "workflow_disabled", "workflow_code": "deprecated-workflow"}
+```
+
+### 5. **Monitoreo de Workflows Inactivos**
+
+```sql
+-- Workflows inactivos que aún reciben tráfico
+SELECT 
+    wc.workflow_code,
+    wc.workflow_name,
+    wc.is_active,
+    COUNT(wu.execution_count) as recent_attempts
+FROM workflow_configs wc
+LEFT JOIN workflow_usage wu ON wu.workflow_id = wc.workflow_id 
+    AND wu.execution_date >= CURRENT_DATE - INTERVAL '7 days'
+WHERE wc.is_active = false
+GROUP BY wc.workflow_code, wc.workflow_name, wc.is_active
+HAVING COUNT(wu.execution_count) > 0;
+```
+
+## Mejores Prácticas
+
+### 1. **Límites Realistas**
+- Basar en costos reales de LLM y capacidad del servidor
+- Permitir burst ocasional sin bloquear uso normal
+- Escalado gradual: starter → pro debe ser 3-4x, no 10x
+
+### 2. **Comunicación de Límites**
+```python
+# En tu workflow, añadir info sobre límites
+async def get_usage_info(self, company_id: str) -> Dict:
+    return {
+        "tier": "pro",
+        "limits": {"daily": 100, "monthly": 2000},
+        "current_usage": {"daily": 45, "monthly": 890},
+        "next_reset": "2025-10-30T00:00:00Z"
+    }
+```
+
+### 3. **Gestión de Estado**
+- `is_active = false` solo para mantenimiento o deprecación
+- Comunicar cambios con antelación a los usuarios
+- Mantener logs de cuándo/por qué se desactiva un workflow
+
 ## Ejemplos de Workflows Existentes
 
 - **`default`**: Análisis básico sin personalización
