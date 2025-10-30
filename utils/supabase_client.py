@@ -347,7 +347,7 @@ class SupabaseClient:
                 .select("*")\
                 .eq("is_active", True)\
                 .in_("source_type", ["scraping", "api"])\
-                .is_("schedule_config", "not.null")\
+                .not_.is_("schedule_config", "null")\
                 .execute()
             
             return response.data or []
