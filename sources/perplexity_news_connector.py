@@ -185,7 +185,7 @@ SIN markdown, {news_count} items exactos."""
                     # Process through workflow
                     result = await workflow.process_content(source_content)
                     
-                    if result.get("success"):
+                    if result.get("success") or result.get("context_unit"):
                         context_unit = result.get("context_unit", {})
                         logger.debug("workflow_success", 
                             title=news_item.get("titulo", "")[:50],
