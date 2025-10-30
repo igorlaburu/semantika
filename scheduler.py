@@ -172,7 +172,46 @@ async def execute_source_task(source: Dict[str, Any]):
             logger.debug("webhook_source_skip", source_id=source_id, message="Webhooks are triggered externally")
 
         elif source_type == "api":
-            logger.warn("api_source_not_implemented", source_id=source_id, source_type=source_type)
+            # Check if it's a Perplexity news source
+            if config.get("connector_type") == "perplexity_news":
+                from sources.perplexity_news_connector import execute_perplexity_news_task
+                
+                result = await execute_perplexity_news_task(source)
+                
+                logger.info("perplexity_api_task_completed", 
+                    source_id=source_id, 
+                    result=result
+                )
+                
+                # Log execution
+                duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+                await supabase.log_execution(
+                    client_id=client_id,
+                    company_id=company_id,
+                    source_name=source_name,
+                    source_type="api",
+                    items_count=result.get("items_processed", 0),
+                    status_code=200 if result.get("success") else 500,
+                    status="success" if result.get("success") else "error",
+                    details=f"Perplexity API: {result.get('items_processed', 0)} noticias procesadas" if result.get("success") else f"Error: {result.get('error')}",
+                    metadata={
+                        "connector_type": "perplexity_news",
+                        "items_fetched": result.get("items_fetched", 0),
+                        "items_processed": result.get("items_processed", 0),
+                        "location": config.get("location", "Bilbao/Vizcaya")
+                    },
+                    duration_ms=duration_ms,
+                    workflow_code=source.get("workflow_code")
+                )
+                
+                # Update source execution stats
+                await supabase.update_source_execution_stats(
+                    source_id, 
+                    success=result.get("success", False),
+                    items_processed=result.get("items_processed", 0)
+                )
+            else:
+                logger.warn("api_source_not_implemented", source_id=source_id, source_type=source_type)
 
         elif source_type == "manual":
             logger.debug("manual_source_skip", source_id=source_id)
@@ -243,12 +282,39 @@ async def schedule_sources(scheduler: AsyncIOScheduler):
         for source in sources:
             source_id = source["source_id"]
             schedule_config = source.get("schedule_config", {})
+            source_type = source["source_type"]
             
-            # Get frequency from schedule config (default 60 minutes if not specified)
+            # Check for cron schedule (specific times like 9:00 AM daily)
+            cron_schedule = schedule_config.get("cron")
             frequency_min = schedule_config.get("frequency_minutes", 60)
             
-            # Only schedule scraping sources that have valid schedule config
-            if source["source_type"] == "scraping" and frequency_min > 0:
+            if cron_schedule:
+                # Parse cron format: "hour minute" or full cron
+                if " " in cron_schedule:
+                    parts = cron_schedule.split()
+                    if len(parts) == 2:  # "9 0" for 9:00 AM daily
+                        hour, minute = int(parts[0]), int(parts[1])
+                        
+                        scheduler.add_job(
+                            execute_source_task,
+                            trigger=CronTrigger(hour=hour, minute=minute),
+                            args=[source],
+                            id=f"source_{source_id}",
+                            replace_existing=True,
+                            max_instances=1
+                        )
+                        
+                        logger.info(
+                            "source_scheduled_cron",
+                            source_id=source_id,
+                            source_name=source["source_name"],
+                            cron_time=f"{hour:02d}:{minute:02d}",
+                            source_type=source_type
+                        )
+                        continue
+            
+            # Fallback to interval scheduling for scraping and API sources
+            if source_type in ["scraping", "api"] and frequency_min > 0:
                 # Schedule source with interval trigger
                 scheduler.add_job(
                     execute_source_task,
@@ -260,11 +326,11 @@ async def schedule_sources(scheduler: AsyncIOScheduler):
                 )
 
                 logger.info(
-                    "source_scheduled",
+                    "source_scheduled_interval",
                     source_id=source_id,
                     source_name=source["source_name"],
                     frequency_min=frequency_min,
-                    source_type=source["source_type"]
+                    source_type=source_type
                 )
 
         # Schedule daily TTL cleanup at 3 AM

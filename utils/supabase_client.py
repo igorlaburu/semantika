@@ -346,7 +346,7 @@ class SupabaseClient:
             response = self.client.table("sources")\
                 .select("*")\
                 .eq("is_active", True)\
-                .eq("source_type", "scraping")\
+                .in_("source_type", ["scraping", "api"])\
                 .is_("schedule_config", "not.null")\
                 .execute()
             
