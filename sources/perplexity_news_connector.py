@@ -210,16 +210,14 @@ SIN markdown, {news_count} items exactos."""
                             error=result.get("error"),
                             workflow_result=result
                         )
-                    
-                    # ALWAYS try to save, regardless of workflow success
-                    # Use basic data if workflow failed
-                    context_unit = result.get("context_unit") if result.get("success") else {
-                        "title": news_item.get("titulo", f"Noticia {i+1}"),
-                        "summary": news_item.get("texto", "")[:200],
-                        "atomic_statements": [],
-                        "tags": [],
-                        "raw_text": news_item.get("texto", "")
-                    }
+                        # Use basic data if workflow failed
+                        context_unit = {
+                            "title": news_item.get("titulo", f"Noticia {i+1}"),
+                            "summary": news_item.get("texto", "")[:200],
+                            "atomic_statements": [],
+                            "tags": [],
+                            "raw_text": news_item.get("texto", "")
+                        }
                     
                     # Save to database
                     try:
