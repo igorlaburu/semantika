@@ -358,7 +358,9 @@ async def main():
         logger.info("apscheduler_started")
 
         # Load and schedule sources from Supabase
+        logger.info("calling_schedule_sources")
         await schedule_sources(scheduler)
+        logger.info("schedule_sources_completed")
 
         # Create tasks for monitors
         monitor_tasks = []
