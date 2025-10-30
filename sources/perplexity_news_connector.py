@@ -198,15 +198,22 @@ SIN markdown, {news_count} items exactos."""
                         context_unit_data = {
                             "organization_id": organization["id"],
                             "company_id": company["id"],
-                            "source_type": "api_news",
+                            "source_type": "api",
                             "title": context_unit.get("title"),
                             "summary": context_unit.get("summary"),
                             "status": "completed"
                         }
                         
                         # Insert into press_context_units
-                        # Skip DB insert for now to test workflow
-                        logger.info("skipping_db_insert_for_test", context_unit_id=context_unit.get("id"))
+                        try:
+                            db_result = supabase.client.table("press_context_units").insert(context_unit_data).execute()
+                            logger.info("db_insert_success", context_unit_id=context_unit.get("id"))
+                        except Exception as db_error:
+                            logger.error("db_insert_failed", 
+                                error=str(db_error),
+                                context_unit_data=context_unit_data
+                            )
+                            continue
                         
                         processed_units.append(context_unit)
                         
