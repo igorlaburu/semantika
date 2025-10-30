@@ -205,7 +205,7 @@ SIN markdown, {news_count} items exactos."""
                             "title": context_unit.get("title"),
                             "summary": context_unit.get("summary"),
                             "tags": context_unit.get("tags", []),
-                            "atomic_statements": context_unit.get("atomic_statements", []),
+                            "atomic_statements": context_unit.get("atomic_statements") or [],
                             "raw_text": source_content.text_content,
                             "status": "completed",
                             "processed_at": "now()"
