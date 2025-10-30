@@ -208,7 +208,16 @@ SIN markdown, {news_count} items exactos."""
                         }
                         
                         # Insert into press_context_units
-                        db_result = supabase.client.table("press_context_units").insert(context_unit_data).execute()
+                        try:
+                            db_result = supabase.client.table("press_context_units").insert(context_unit_data).execute()
+                            logger.debug("db_insert_success", context_unit_id=context_unit.get("id"))
+                        except Exception as db_error:
+                            logger.error("db_insert_failed", 
+                                context_unit_id=context_unit.get("id"),
+                                error=str(db_error),
+                                context_unit_data=context_unit_data
+                            )
+                            continue
                         
                         processed_units.append(context_unit)
                         
