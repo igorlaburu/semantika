@@ -85,17 +85,19 @@ SIN markdown, {news_count} items exactos."""
                         error_text = await response.text()
                         logger.error("perplexity_api_error", 
                             status=response.status,
-                            error=error_text
+                            error=error_text,
+                            headers=dict(response.headers)
                         )
                         return []
                     
                     response_data = await response.json()
+                    logger.debug("perplexity_raw_response", response=response_data)
                     
             # Extract the content from response
             content = response_data.get("choices", [{}])[0].get("message", {}).get("content", "")
             
             if not content:
-                logger.error("empty_perplexity_response")
+                logger.error("empty_perplexity_response", response_data=response_data)
                 return []
             
             # Parse JSON from content
