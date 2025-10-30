@@ -971,9 +971,6 @@ async def generate_style_guide(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/process/micro-edit")
-
-
 @app.post("/test/perplexity")
 async def test_perplexity_execution(
     x_api_key: str = Header(..., alias="x-api-key")
