@@ -200,13 +200,16 @@ SIN markdown, {news_count} items exactos."""
                         # Get supabase client
                         supabase = get_supabase_client()
                         
-                        # Simplified data to avoid DB issues
+                        # Complete data including atomic_statements
                         context_unit_data = {
                             "organization_id": organization["id"],
                             "company_id": company["id"],
                             "source_type": "api",
                             "title": context_unit.get("title"),
                             "summary": context_unit.get("summary"),
+                            "atomic_statements": context_unit.get("atomic_statements"),
+                            "tags": context_unit.get("tags"),
+                            "raw_text": context_unit.get("raw_text"),
                             "status": "completed"
                         }
                         
