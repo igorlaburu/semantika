@@ -225,7 +225,6 @@ SIN markdown, {news_count} items exactos."""
                         
                         context_unit_data = {
                             "id": context_unit.get("id"),
-                            "organization_id": organization["id"],
                             "company_id": company["id"],
                             "source_type": "api",
                             "title": context_unit.get("title"),
