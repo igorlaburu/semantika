@@ -271,7 +271,7 @@ async def cleanup_old_data():
 
 async def schedule_sources(scheduler: AsyncIOScheduler):
     """Load sources from Supabase and schedule them."""
-    logger.info("loading_sources")
+    logger.info("loading_sources", timestamp=datetime.utcnow().isoformat())
 
     try:
         supabase = get_supabase_client()
