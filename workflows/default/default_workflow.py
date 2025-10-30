@@ -58,7 +58,7 @@ class DefaultWorkflow(BaseWorkflow):
                 "title": analysis_result.get("title", source_content.get_display_title()),
                 "summary": analysis_result.get("summary", ""),
                 "tags": analysis_result.get("tags", []),
-                "atomic_statements": analysis_result.get("atomic_statements", []),
+                "atomic_statements": analysis_result.get("atomic_facts", analysis_result.get("atomic_statements", [])),
                 "raw_text": full_text
             }
             
