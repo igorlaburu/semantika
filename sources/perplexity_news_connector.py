@@ -110,6 +110,11 @@ SIN markdown, {news_count} items exactos."""
                     content = content[:-3]
                 content = content.strip()
                 
+                # Clean invalid control characters that break JSON parsing
+                import re
+                content = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', content)
+                content = content.replace('\n', '\\n').replace('\r', '\\r')
+                
                 parsed_data = json.loads(content)
                 news_items = parsed_data.get("news", [])
                 
