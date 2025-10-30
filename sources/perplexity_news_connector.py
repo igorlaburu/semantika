@@ -197,23 +197,29 @@ SIN markdown, {news_count} items exactos."""
                             context_unit_keys=list(context_unit.keys()) if context_unit else []
                         )
                         
-                        # Use the standard context unit generator to save properly
+                        # Save directly to press_context_units with ALL fields
                         try:
-                            from core.context_unit_generator import ContextUnitGenerator
+                            supabase = get_supabase_client()
                             
-                            generator = ContextUnitGenerator(
-                                organization["id"], 
-                                company["id"]
-                            )
+                            context_unit_data = {
+                                "organization_id": organization["id"],
+                                "company_id": company["id"],
+                                "source_type": "api",
+                                "title": context_unit.get("title"),
+                                "summary": context_unit.get("summary"),
+                                "atomic_statements": context_unit.get("atomic_statements"),
+                                "tags": context_unit.get("tags"),
+                                "raw_text": context_unit.get("raw_text"),
+                                "status": "completed"
+                            }
                             
-                            # Save the context unit properly using the standard system
-                            saved_unit = await generator.save_context_unit(context_unit)
-                            logger.info("context_unit_saved", context_unit_id=saved_unit.get("id"))
+                            db_result = supabase.client.table("press_context_units").insert(context_unit_data).execute()
+                            logger.info("context_unit_saved", context_unit_id=context_unit.get("id"))
                             
                         except Exception as save_error:
                             logger.error("context_unit_save_failed", 
                                 error=str(save_error),
-                                context_unit_keys=list(context_unit.keys()) if context_unit else []
+                                context_unit_data=context_unit_data
                             )
                             continue
                         
