@@ -258,15 +258,16 @@ async def execute_perplexity_news_task(source: Dict[str, Any]) -> Dict[str, Any]
         
         # Get configuration
         config = source.get("config", {})
-        api_key = config.get("perplexity_api_key")
         location = config.get("location", "Bilbao, Vizcaya o Bizkaia")
         news_count = config.get("news_count", 5)
         
+        # Get API key from environment settings
+        api_key = settings.perplexity_api_key
         if not api_key:
-            logger.error("missing_perplexity_api_key", source_id=source["source_id"])
+            logger.error("missing_perplexity_api_key_env", source_id=source["source_id"])
             return {
                 "success": False,
-                "error": "Missing Perplexity API key in source configuration"
+                "error": "Missing PERPLEXITY_API_KEY environment variable"
             }
         
         # Get company and organization

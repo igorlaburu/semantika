@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-Script para configurar la API key de Perplexity en la fuente Medios Generalistas.
+Script para probar la conexión con Perplexity API.
+
+La API key se lee desde la variable de entorno PERPLEXITY_API_KEY.
 
 Uso:
-    python scripts/configure_perplexity_api.py --api-key "pplx-xxxxx"
+    python scripts/configure_perplexity_api.py --test
 """
 
 import asyncio
@@ -14,74 +16,25 @@ import os
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.supabase_client import get_supabase_client
+from utils.config import settings
 from utils.logger import get_logger
 
-logger = get_logger("configure_perplexity")
+logger = get_logger("test_perplexity")
 
 
-async def configure_perplexity_api_key(api_key: str) -> bool:
+async def test_perplexity_connection() -> bool:
     """
-    Configure Perplexity API key for Medios Generalistas source.
-    
-    Args:
-        api_key: Perplexity API key
-        
-    Returns:
-        Success status
-    """
-    try:
-        supabase = get_supabase_client()
-        
-        # Find the Medios Generalistas source
-        result = supabase.client.table("sources")\
-            .select("source_id, config")\
-            .eq("source_code", "medios_generalistas")\
-            .single()\
-            .execute()
-        
-        if not result.data:
-            logger.error("medios_generalistas_source_not_found")
-            return False
-        
-        source_id = result.data["source_id"]
-        current_config = result.data["config"]
-        
-        # Update config with real API key
-        updated_config = {**current_config, "perplexity_api_key": api_key}
-        
-        # Update the source
-        update_result = supabase.client.table("sources")\
-            .update({"config": updated_config})\
-            .eq("source_id", source_id)\
-            .execute()
-        
-        if update_result.data:
-            logger.info("perplexity_api_key_configured", 
-                source_id=source_id,
-                api_key_prefix=api_key[:10] + "..."
-            )
-            return True
-        else:
-            logger.error("failed_to_update_source")
-            return False
-            
-    except Exception as e:
-        logger.error("configure_api_key_error", error=str(e))
-        return False
-
-
-async def test_perplexity_connection(api_key: str) -> bool:
-    """
-    Test Perplexity API connection.
-    
-    Args:
-        api_key: Perplexity API key
+    Test Perplexity API connection using environment variable.
         
     Returns:
         Connection success
     """
     try:
+        api_key = settings.perplexity_api_key
+        if not api_key:
+            logger.error("missing_perplexity_api_key_env")
+            return False
+            
         from sources.perplexity_news_connector import PerplexityNewsConnector
         
         connector = PerplexityNewsConnector(api_key)
@@ -89,6 +42,8 @@ async def test_perplexity_connection(api_key: str) -> bool:
         
         if news_items:
             logger.info("perplexity_connection_test_success", items_count=len(news_items))
+            print(f"✅ Successfully fetched {len(news_items)} test news item(s)")
+            print(f"📰 First item: {news_items[0].get('titulo', 'N/A')}")
             return True
         else:
             logger.warn("perplexity_connection_test_no_results")
@@ -101,29 +56,22 @@ async def test_perplexity_connection(api_key: str) -> bool:
 
 async def main():
     """Main function."""
-    parser = argparse.ArgumentParser(description="Configure Perplexity API key")
-    parser.add_argument("--api-key", required=True, help="Perplexity API key")
-    parser.add_argument("--test", action="store_true", help="Test API connection")
+    parser = argparse.ArgumentParser(description="Test Perplexity API connection")
+    parser.add_argument("--test", action="store_true", default=True, help="Test API connection")
     
     args = parser.parse_args()
     
-    if args.test:
-        print("Testing Perplexity API connection...")
-        success = await test_perplexity_connection(args.api_key)
-        if success:
-            print("✅ API connection test successful")
-        else:
-            print("❌ API connection test failed")
-            sys.exit(1)
+    print("Testing Perplexity API connection...")
+    print(f"Using API key from environment: PERPLEXITY_API_KEY")
     
-    print("Configuring Perplexity API key...")
-    success = await configure_perplexity_api_key(args.api_key)
+    success = await test_perplexity_connection()
     
     if success:
-        print("✅ Perplexity API key configured successfully")
-        print("📰 The 'Medios Generalistas' source will now fetch news daily at 9:00 AM")
+        print("✅ Perplexity API connection test successful")
+        print("📰 The 'Medios Generalistas' source is ready to fetch news daily at 9:00 AM")
     else:
-        print("❌ Failed to configure API key")
+        print("❌ Perplexity API connection test failed")
+        print("🔑 Check that PERPLEXITY_API_KEY environment variable is set correctly")
         sys.exit(1)
 
 

@@ -53,6 +53,12 @@ class Settings(BaseSettings):
         description="ScraperTech API base URL"
     )
 
+    # Perplexity Configuration
+    perplexity_api_key: str = Field(
+        default="",
+        description="Perplexity API key for news fetching"
+    )
+
     # Text Processing Configuration
     chunk_size: int = Field(
         default=1000,
