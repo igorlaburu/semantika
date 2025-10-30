@@ -195,20 +195,14 @@ SIN markdown, {news_count} items exactos."""
                         # Save to database
                         supabase = get_supabase_client()
                         
+                        # Simplified data to avoid DB issues
                         context_unit_data = {
-                            "id": context_unit.get("id"),
                             "organization_id": organization["id"],
                             "company_id": company["id"],
                             "source_type": "api_news",
-                            "source_id": source_content.source_id,
-                            "source_metadata": source_content.metadata,
                             "title": context_unit.get("title"),
                             "summary": context_unit.get("summary"),
-                            "tags": context_unit.get("tags", []),
-                            "atomic_statements": context_unit.get("atomic_statements") or [],
-                            "raw_text": source_content.text_content,
-                            "status": "completed",
-                            "processed_at": "now()"
+                            "status": "completed"
                         }
                         
                         # Insert into press_context_units
