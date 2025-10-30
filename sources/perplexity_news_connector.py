@@ -187,6 +187,10 @@ SIN markdown, {news_count} items exactos."""
                     
                     if result.get("success"):
                         context_unit = result.get("context_unit", {})
+                        logger.debug("workflow_success", 
+                            title=news_item.get("titulo", "")[:50],
+                            context_unit_keys=list(context_unit.keys()) if context_unit else []
+                        )
                         
                         # Save to database
                         supabase = get_supabase_client()
@@ -229,7 +233,8 @@ SIN markdown, {news_count} items exactos."""
                     else:
                         logger.error("news_item_processing_failed",
                             title=news_item.get("titulo", "")[:50],
-                            error=result.get("error")
+                            error=result.get("error"),
+                            workflow_result=result
                         )
                         
                 except Exception as e:
