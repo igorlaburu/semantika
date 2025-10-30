@@ -670,6 +670,42 @@ async def update_source(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/context-units")
+async def get_context_units(
+    limit: int = 20,
+    offset: int = 0,
+    client: Dict = Depends(get_current_client)
+) -> List[Dict[str, Any]]:
+    """
+    Get context units for authenticated client.
+    
+    Requires: X-API-Key header
+    
+    Query params:
+        - limit: Maximum results (default: 20)
+        - offset: Offset for pagination (default: 0)
+    
+    Returns:
+        List of context units
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        result = supabase.client.table("press_context_units")\
+            .select("*")\
+            .eq("company_id", client["company_id"])\
+            .order("created_at", desc=True)\
+            .limit(limit)\
+            .offset(offset)\
+            .execute()
+        
+        return result.data or []
+        
+    except Exception as e:
+        logger.error("get_context_units_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.delete("/tasks/{task_id}")
 async def delete_task(
     task_id: str,
