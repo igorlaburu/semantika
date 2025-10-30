@@ -192,8 +192,7 @@ SIN markdown, {news_count} items exactos."""
                             context_unit_keys=list(context_unit.keys()) if context_unit else []
                         )
                         
-                        # Save to database
-                        supabase = get_supabase_client()
+                        # Use supabase client from outside loop
                         
                         # Simplified data to avoid DB issues
                         context_unit_data = {
@@ -206,16 +205,8 @@ SIN markdown, {news_count} items exactos."""
                         }
                         
                         # Insert into press_context_units
-                        try:
-                            db_result = supabase.client.table("press_context_units").insert(context_unit_data).execute()
-                            logger.debug("db_insert_success", context_unit_id=context_unit.get("id"))
-                        except Exception as db_error:
-                            logger.error("db_insert_failed", 
-                                context_unit_id=context_unit.get("id"),
-                                error=str(db_error),
-                                context_unit_data=context_unit_data
-                            )
-                            continue
+                        # Skip DB insert for now to test workflow
+                        logger.info("skipping_db_insert_for_test", context_unit_id=context_unit.get("id"))
                         
                         processed_units.append(context_unit)
                         
