@@ -197,32 +197,6 @@ SIN markdown, {news_count} items exactos."""
                             context_unit_keys=list(context_unit.keys()) if context_unit else []
                         )
                         
-                        # Save directly to press_context_units with ALL fields
-                        try:
-                            supabase = get_supabase_client()
-                            
-                            context_unit_data = {
-                                "organization_id": organization["id"],
-                                "company_id": company["id"],
-                                "source_type": "api",
-                                "title": context_unit.get("title"),
-                                "summary": context_unit.get("summary"),
-                                "atomic_statements": context_unit.get("atomic_statements"),
-                                "tags": context_unit.get("tags"),
-                                "raw_text": context_unit.get("raw_text"),
-                                "status": "completed"
-                            }
-                            
-                            db_result = supabase.client.table("press_context_units").insert(context_unit_data).execute()
-                            logger.info("context_unit_saved", context_unit_id=context_unit.get("id"))
-                            
-                        except Exception as save_error:
-                            logger.error("context_unit_save_failed", 
-                                error=str(save_error),
-                                context_unit_data=context_unit_data
-                            )
-                            continue
-                        
                         processed_units.append(context_unit)
                         
                         logger.info("news_item_processed",
@@ -236,6 +210,42 @@ SIN markdown, {news_count} items exactos."""
                             error=result.get("error"),
                             workflow_result=result
                         )
+                    
+                    # ALWAYS try to save, regardless of workflow success
+                    # Use basic data if workflow failed
+                    context_unit = result.get("context_unit") if result.get("success") else {
+                        "title": news_item.get("titulo", f"Noticia {i+1}"),
+                        "summary": news_item.get("texto", "")[:200],
+                        "atomic_statements": [],
+                        "tags": [],
+                        "raw_text": news_item.get("texto", "")
+                    }
+                    
+                    # Save to database
+                    try:
+                        supabase = get_supabase_client()
+                        
+                        context_unit_data = {
+                            "organization_id": organization["id"],
+                            "company_id": company["id"],
+                            "source_type": "api",
+                            "title": context_unit.get("title"),
+                            "summary": context_unit.get("summary"),
+                            "atomic_statements": context_unit.get("atomic_statements"),
+                            "tags": context_unit.get("tags"),
+                            "raw_text": context_unit.get("raw_text"),
+                            "status": "completed"
+                        }
+                        
+                        db_result = supabase.client.table("press_context_units").insert(context_unit_data).execute()
+                        logger.info("context_unit_saved", context_unit_id=context_unit.get("id"), title=context_unit.get("title"))
+                        
+                    except Exception as save_error:
+                        logger.error("context_unit_save_failed", 
+                            error=str(save_error),
+                            title=news_item.get("titulo", "")
+                        )
+                        continue
                         
                 except Exception as e:
                     logger.error("news_item_processing_error",
