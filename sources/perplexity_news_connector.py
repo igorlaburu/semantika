@@ -223,13 +223,27 @@ SIN markdown, {news_count} items exactos."""
                     try:
                         supabase = get_supabase_client()
                         
+                        # Convert atomic_statements to proper format
+                        atomic_statements = context_unit.get("atomic_statements", [])
+                        if atomic_statements and isinstance(atomic_statements[0], str):
+                            # Convert from string array to object array
+                            atomic_statements = [
+                                {
+                                    "order": i + 1,
+                                    "type": "fact",
+                                    "speaker": None,
+                                    "text": statement
+                                }
+                                for i, statement in enumerate(atomic_statements)
+                            ]
+                        
                         context_unit_data = {
                             "id": context_unit.get("id"),
                             "company_id": company["id"],
                             "source_type": "api",
                             "title": context_unit.get("title"),
                             "summary": context_unit.get("summary"),
-                            "atomic_statements": context_unit.get("atomic_statements"),
+                            "atomic_statements": atomic_statements,
                             "tags": context_unit.get("tags"),
                             "raw_text": context_unit.get("raw_text"),
                             "status": "completed"
