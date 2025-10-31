@@ -260,6 +260,15 @@ class MicroEditRequest(BaseModel):
     params: Optional[Dict[str, Any]] = {}
 
 
+class RedactNewsRichRequest(BaseModel):
+    """Request model for rich news redaction from context units."""
+    context_unit_ids: List[str]
+    title: Optional[str] = None
+    instructions: Optional[str] = None
+    style_guide: Optional[str] = None
+    language: str = "es"
+
+
 # ============================================
 # INGESTION ENDPOINTS
 # ============================================
@@ -1004,6 +1013,61 @@ async def generate_style_guide(
         raise
     except Exception as e:
         logger.error("generate_style_guide_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/process/redact-news-rich")
+async def process_redact_news_rich(
+    request: RedactNewsRichRequest,
+    client: Dict = Depends(get_current_client)
+) -> Dict[str, Any]:
+    """
+    Generate rich news article from multiple context units with custom instructions.
+
+    Requires: X-API-Key header
+
+    Body:
+        - context_unit_ids: List of context unit UUIDs (required)
+        - title: Optional title suggestion (if empty, LLM generates it)
+        - instructions: Optional writing instructions (if empty, ignored)
+        - style_guide: Optional markdown style guide (string)
+        - language: Target language (default: "es")
+
+    Returns:
+        Generated article with title, summary, tags, and sources
+    """
+    try:
+        from utils.workflow_endpoints import execute_redact_news_rich
+
+        result = await execute_redact_news_rich(
+            client=client,
+            context_unit_ids=request.context_unit_ids,
+            title=request.title,
+            instructions=request.instructions,
+            style_guide=request.style_guide,
+            language=request.language
+        )
+
+        if result.get("success", True):
+            data = result.get("data", result)
+            return {
+                "status": "ok",
+                "action": "redact_news_rich",
+                "result": data
+            }
+        else:
+            if result.get("error") == "usage_limit_exceeded":
+                raise HTTPException(
+                    status_code=429, 
+                    detail=f"Usage limit exceeded: {result.get('details', 'Daily or monthly limit reached')}"
+                )
+            else:
+                raise HTTPException(status_code=500, detail=result.get("details", "Workflow execution failed"))
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("process_redact_news_rich_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 

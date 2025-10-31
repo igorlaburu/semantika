@@ -617,6 +617,116 @@ Respond in JSON:
             logger.error("redact_news_error", error=str(e))
             return {"article": "", "title": "", "summary": "", "tags": []}
 
+    async def redact_news_rich(
+        self,
+        source_text: str,
+        title_suggestion: str = "",
+        instructions: str = "",
+        style_guide: Optional[str] = None,
+        language: str = "es",
+        organization_id: Optional[str] = None,
+        client_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Generate rich news article from multiple context units with custom instructions.
+
+        Args:
+            source_text: Aggregated source text from multiple context units
+            title_suggestion: Optional title suggestion (placeholder: $titulo$)
+            instructions: Optional writing instructions (placeholder: $indicaciones$)
+            style_guide: Markdown style guide (optional)
+            language: Target language
+            organization_id: Organization UUID (for usage tracking)
+            client_id: Client UUID (for usage tracking)
+
+        Returns:
+            Dict with article, title, summary, tags
+        """
+        try:
+            if style_guide:
+                system_prompt = f"""You are a professional journalist. Write news articles following this style guide:
+
+{style_guide[:4000]}
+
+Follow the style guide precisely in your writing."""
+            else:
+                system_prompt = f"""You are a professional journalist. Write clear, objective news articles in {language}.
+
+Use:
+- Inverted pyramid structure
+- Active voice
+- Short paragraphs (2-3 sentences)
+- Neutral, professional tone
+- Clear, specific titles"""
+
+            if title_suggestion and instructions:
+                user_instructions = f"""Title suggestion: {title_suggestion}
+
+Additional instructions: {instructions}
+
+Follow the title suggestion and instructions when writing the article."""
+            elif title_suggestion:
+                user_instructions = f"""Title suggestion: {title_suggestion}
+
+Use this title or similar when writing the article."""
+            elif instructions:
+                user_instructions = f"""Additional instructions: {instructions}
+
+Follow these instructions when writing the article."""
+            else:
+                user_instructions = "Generate an appropriate title and write the article freely based on the sources."
+
+            redact_rich_prompt = ChatPromptTemplate.from_messages([
+                ("system", system_prompt),
+                ("user", """Based on these source materials from multiple context units, write a comprehensive news article.
+
+{user_instructions}
+
+Source materials:
+{source_text}
+
+Requirements:
+- Write a complete, well-structured article that synthesizes information from all sources
+- Create an engaging, accurate title
+- Write a brief summary (2-3 sentences)
+- Generate 3-5 relevant tags
+- Format article with clear paragraph breaks (use \\n\\n between paragraphs)
+- Each paragraph should be 2-4 sentences
+- You may use some or all of the atomic facts provided, based on relevance
+- All sources are available for citation even if not all facts are used
+- NO advertisement blocks or meta-content
+
+Respond in JSON:
+{{"article": "Full article text...", "title": "...", "summary": "...", "tags": [...]}}""")
+            ])
+
+            redact_rich_chain = RunnableSequence(
+                redact_rich_prompt | self.llm_sonnet | JsonOutputParser()
+            )
+
+            config = {}
+            if organization_id:
+                config['tracking'] = {
+                    'organization_id': organization_id,
+                    'operation': 'redact_news_rich',
+                    'client_id': client_id
+                }
+
+            result = await redact_rich_chain.ainvoke({
+                "source_text": source_text[:12000],
+                "user_instructions": user_instructions
+            }, config=config)
+
+            logger.debug(
+                "redact_news_rich_completed",
+                article_length=len(result.get("article", ""))
+            )
+            return result
+
+        except Exception as e:
+            logger.error("redact_news_rich_error", error=str(e))
+            return {"article": "", "title": "", "summary": "", "tags": []}
+
     async def generate_style_guide(
         self,
         style_name: str,

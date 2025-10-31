@@ -274,3 +274,115 @@ async def execute_url_processing(
     except Exception as e:
         logger.error("url_processing_workflow_error", error=str(e))
         raise
+
+
+@workflow_wrapper("redact_news_rich")
+async def execute_redact_news_rich(
+    client: Dict[str, Any],
+    context_unit_ids: list,
+    title: Optional[str] = None,
+    instructions: Optional[str] = None,
+    style_guide: Optional[str] = None,
+    language: str = "es"
+) -> Dict[str, Any]:
+    """
+    Execute rich news redaction from multiple context units.
+    
+    Args:
+        client: Authenticated client data
+        context_unit_ids: List of context unit UUIDs
+        title: Optional title suggestion
+        instructions: Optional writing instructions
+        style_guide: Optional markdown style guide
+        language: Target language
+        
+    Returns:
+        Generated news article with sources
+    """
+    try:
+        from utils.openrouter_client import get_openrouter_client
+        
+        supabase_client = get_supabase_client()
+        organization_id = client.get("organization_id", "00000000-0000-0000-0000-000000000001")
+        
+        context_units = []
+        for cu_id in context_unit_ids:
+            result = supabase_client.client.table("press_context_units")\
+                .select("*")\
+                .eq("id", cu_id)\
+                .eq("company_id", client["company_id"])\
+                .maybe_single()\
+                .execute()
+            
+            if result.data:
+                context_units.append(result.data)
+        
+        if not context_units:
+            raise ValueError("No context units found for provided IDs")
+        
+        logger.info(
+            "context_units_retrieved",
+            count=len(context_units),
+            client_id=client["client_id"]
+        )
+        
+        all_statements = []
+        for cu in context_units:
+            atomic_statements = cu.get("atomic_statements", [])
+            if isinstance(atomic_statements, list):
+                for stmt in atomic_statements:
+                    all_statements.append({
+                        "context_unit_id": cu["id"],
+                        "context_unit_title": cu.get("title", ""),
+                        "statement": stmt
+                    })
+        
+        all_statements.sort(key=lambda x: x.get("statement", {}).get("order", 0))
+        
+        source_text_parts = []
+        for cu in context_units:
+            cu_title = cu.get("title", "Sin título")
+            cu_summary = cu.get("summary", "")
+            statements = cu.get("atomic_statements", [])
+            
+            source_text_parts.append(f"## {cu_title}")
+            if cu_summary:
+                source_text_parts.append(f"Resumen: {cu_summary}")
+            
+            if statements:
+                source_text_parts.append("Hechos atómicos:")
+                for stmt in statements:
+                    stmt_text = stmt.get("text", "") if isinstance(stmt, dict) else str(stmt)
+                    source_text_parts.append(f"- {stmt_text}")
+            
+            source_text_parts.append("")
+        
+        source_text = "\n".join(source_text_parts)
+        
+        openrouter = get_openrouter_client()
+        result = await openrouter.redact_news_rich(
+            source_text=source_text,
+            title_suggestion=title or "",
+            instructions=instructions or "",
+            style_guide=style_guide,
+            language=language,
+            organization_id=organization_id,
+            client_id=client["client_id"]
+        )
+        
+        result["sources"] = [
+            {
+                "id": cu["id"],
+                "title": cu.get("title", ""),
+                "summary": cu.get("summary", ""),
+                "created_at": cu.get("created_at", "")
+            }
+            for cu in context_units
+        ]
+        result["statements_count"] = len(all_statements)
+        
+        return result
+        
+    except Exception as e:
+        logger.error("redact_news_rich_workflow_error", error=str(e))
+        raise
