@@ -38,27 +38,23 @@ class DefaultWorkflow(BaseWorkflow):
         # Use OpenRouter client for LLM processing
         openrouter = get_openrouter_client()
         
-        # Generate context unit with tracking
-        # Use a simple analyze call for default workflow
+        # Generate context unit with new structured format
         try:
-            from core_stateless import StatelessPipeline
-            
-            # Create stateless pipeline for basic analysis
-            pipeline = StatelessPipeline(
-                organization_id="00000000-0000-0000-0000-000000000001",  # Demo org
+            # Use generate_context_unit for proper Spanish output and structured statements
+            analysis_result = await openrouter.generate_context_unit(
+                text=full_text,
+                organization_id="00000000-0000-0000-0000-000000000001",
+                context_unit_id=source_content.id,
                 client_id=None
             )
             
-            # Use analyze_atomic method for complete processing with atomic statements
-            analysis_result = await pipeline.analyze_atomic(full_text)
-            
-            # Convert to context unit format
+            # Build context unit with structured atomic statements
             context_unit = {
                 "id": source_content.id,
                 "title": analysis_result.get("title", source_content.get_display_title()),
                 "summary": analysis_result.get("summary", ""),
                 "tags": analysis_result.get("tags", []),
-                "atomic_statements": analysis_result.get("atomic_facts", analysis_result.get("atomic_statements", [])),
+                "atomic_statements": analysis_result.get("atomic_statements", []),
                 "raw_text": full_text
             }
             
