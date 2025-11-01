@@ -806,9 +806,10 @@ async def create_context_unit(
                 "client_id": client["client_id"],
                 "company_id": company["id"]
             },
-            title=request.title or None,
-            id=context_unit_id
+            title=request.title or None
         )
+        # Set ID manually after creation
+        source_content.id = context_unit_id
         
         # Get workflow and process
         workflow = get_workflow("default", company.get("settings", {}))
@@ -973,9 +974,10 @@ async def create_context_unit_from_url(
                 "company_id": company["id"],
                 "manual_scraping": True
             },
-            title=final_title,
-            id=context_unit_id
+            title=final_title
         )
+        # Set ID manually after creation
+        source_content.id = context_unit_id
         
         # Get workflow and process
         workflow = get_workflow("default", company.get("settings", {}))
