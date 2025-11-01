@@ -858,6 +858,25 @@ async def create_context_unit(
             title=created_unit.get("title", "")
         )
         
+        # Log execution
+        await supabase.log_execution(
+            client_id=client["client_id"],
+            company_id=company["id"],
+            source_name="Manual Text Entry",
+            source_type="manual",
+            items_count=1,
+            status_code=200,
+            status="success",
+            details=f"Context unit created: {created_unit.get('title', 'Untitled')}",
+            metadata={
+                "context_unit_id": created_unit["id"],
+                "text_length": len(request.text),
+                "has_custom_title": bool(request.title),
+                "created_via": "api"
+            },
+            workflow_code="default"
+        )
+        
         return {
             "success": True,
             "context_unit": created_unit
@@ -867,6 +886,29 @@ async def create_context_unit(
         raise
     except Exception as e:
         logger.error("create_context_unit_error", error=str(e), client_id=client["client_id"])
+        
+        # Log failed execution
+        try:
+            await supabase.log_execution(
+                client_id=client["client_id"],
+                company_id=client["company_id"],
+                source_name="Manual Text Entry",
+                source_type="manual",
+                items_count=0,
+                status_code=500,
+                status="error",
+                details=f"Failed to create context unit: {str(e)}",
+                error_message=str(e),
+                metadata={
+                    "text_length": len(request.text),
+                    "has_custom_title": bool(request.title),
+                    "error_type": type(e).__name__
+                },
+                workflow_code="default"
+            )
+        except:
+            pass
+        
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1026,6 +1068,27 @@ async def create_context_unit_from_url(
             title=created_unit.get("title", "")
         )
         
+        # Log execution
+        await supabase.log_execution(
+            client_id=client["client_id"],
+            company_id=company["id"],
+            source_name="Manual URL Scraping",
+            source_type="scraping",
+            items_count=1,
+            status_code=200,
+            status="success",
+            details=f"URL scraped and context unit created: {created_unit.get('title', 'Untitled')}",
+            metadata={
+                "context_unit_id": created_unit["id"],
+                "url": request.url,
+                "scraped_title": scraped_title,
+                "text_length": len(scraped_text),
+                "has_custom_title": bool(request.title),
+                "created_via": "api"
+            },
+            workflow_code="default"
+        )
+        
         return {
             "success": True,
             "context_unit": created_unit,
@@ -1036,6 +1099,29 @@ async def create_context_unit_from_url(
         raise
     except Exception as e:
         logger.error("create_context_unit_from_url_error", error=str(e), client_id=client["client_id"], url=request.url)
+        
+        # Log failed execution
+        try:
+            await supabase.log_execution(
+                client_id=client["client_id"],
+                company_id=client["company_id"],
+                source_name="Manual URL Scraping",
+                source_type="scraping",
+                items_count=0,
+                status_code=500,
+                status="error",
+                details=f"Failed to scrape URL and create context unit: {str(e)}",
+                error_message=str(e),
+                metadata={
+                    "url": request.url,
+                    "has_custom_title": bool(request.title),
+                    "error_type": type(e).__name__
+                },
+                workflow_code="default"
+            )
+        except:
+            pass
+        
         raise HTTPException(status_code=500, detail=str(e))
 
 
