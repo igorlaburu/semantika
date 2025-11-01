@@ -546,17 +546,45 @@ Extract and respond in JSON:
         client_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Generate news article from text/facts with specific style.
+        Generate news article from simple text or facts (SINGLE SOURCE).
+        
+        Use this method when:
+        - You have raw text from ONE source (article, email, document)
+        - You want a quick article generation without advanced controls
+        - You don't need to specify custom title or writing instructions
+        - Source content is already in text format (not structured context units)
+        
+        Workflow:
+        1. Receives raw text (up to 8000 chars)
+        2. Applies optional style guide
+        3. Generates article with LLM (Claude Sonnet 4.5)
+        4. Returns: article, title, summary, tags
+        
+        Limitations:
+        - No control over title generation
+        - No custom writing instructions
+        - Single source only (no multi-source synthesis)
+        - Limited to 8000 characters input
 
         Args:
-            text: Source text or atomic facts
-            style_guide: Markdown style guide (optional)
-            language: Target language
+            text: Raw source text or atomic facts (max 8000 chars)
+            style_guide: Optional markdown style guide for writing tone/format
+            language: Target language (default: "es" - Spanish)
             organization_id: Organization UUID (for usage tracking)
             client_id: Client UUID (for usage tracking)
 
         Returns:
-            Dict with article, title, summary, tags
+            Dict with:
+            - article: Generated news article text
+            - title: Auto-generated title
+            - summary: 2-3 sentence summary
+            - tags: List of 3-5 relevant tags
+            
+        Example:
+            result = await openrouter.redact_news(
+                text="El alcalde anunció nuevas medidas...",
+                style_guide="# Estilo formal y objetivo"
+            )
         """
         try:
             # Build dynamic system prompt based on style guide
@@ -641,12 +669,45 @@ Respond in JSON:
         client_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Generate rich news article from multiple context units with custom instructions.
+        Generate RICH news article from MULTIPLE context units with advanced controls.
+        
+        Use this method when:
+        - You have MULTIPLE context units from database (with atomic_statements)
+        - You want to SUGGEST or CONTROL the article title
+        - You need CUSTOM WRITING INSTRUCTIONS (tone, focus, audience)
+        - You're synthesizing information from multiple sources
+        - You need richer source material (titles, summaries, atomic facts)
+        
+        Workflow:
+        1. Receives aggregated source_text from multiple context units
+           Format: "## Title\nResumen: ...\nHechos atómicos:\n- fact1\n- fact2..."
+        2. Accepts optional title_suggestion to guide/control title generation
+        3. Accepts optional instructions for writing style/focus/angle
+        4. Applies optional style guide
+        5. Generates article with LLM (Claude Sonnet 4.5)
+        6. Returns: article, title, summary, tags
+        
+        Key Differences from redact_news:
+        - MULTI-SOURCE: Synthesizes info from multiple context units
+        - TITLE CONTROL: Can suggest/specify desired title
+        - CUSTOM INSTRUCTIONS: Guide writing angle, tone, focus
+        - RICHER INPUT: Structured source with titles, summaries, atomic statements
+        - LARGER INPUT: Up to 12000 chars (vs 8000 in redact_news)
+        
+        Title Behavior:
+        - If title_suggestion provided: LLM will use it or similar
+        - If title_suggestion empty: LLM generates title freely
+        
+        Instructions Examples:
+        - "Enfoca en las consecuencias económicas"
+        - "Usa tono neutral y datos específicos"
+        - "Destaca el impacto en jóvenes"
 
         Args:
-            source_text: Aggregated source text from multiple context units
-            title_suggestion: Optional title suggestion (placeholder: $titulo$)
-            instructions: Optional writing instructions (placeholder: $indicaciones$)
+            source_text: Aggregated formatted text from multiple context units (max 12000 chars)
+                        Expected format: "## Title\nResumen: ...\nHechos atómicos:\n- ...\n\n## Title2..."
+            title_suggestion: Optional title to suggest/control final title (empty = auto-generate)
+            instructions: Optional writing instructions to guide tone/focus/angle (empty = ignore)
             style_guide: Markdown style guide (optional)
             language: Target language
             organization_id: Organization UUID (for usage tracking)
