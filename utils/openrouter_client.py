@@ -579,11 +579,19 @@ Use:
 Source content:
 {text}
 
-Requirements:
+CRITICAL REQUIREMENTS:
+- Use ONLY information explicitly stated in the source content above
+- Do NOT add facts, data, quotes, or details not present in the source
+- Do NOT invent names, dates, locations, or statistics
+- Do NOT make assumptions or inferences beyond what is stated
+- If source lacks information, DO NOT fill gaps with invented content
+- Every fact in your article MUST be traceable to the source content
+
+Article structure:
 - Write a complete, well-structured article
-- Create an engaging, accurate title
-- Write a brief summary (2-3 sentences)
-- Generate 3-5 relevant tags
+- Create an engaging, accurate title based ONLY on source content
+- Write a brief summary (2-3 sentences) reflecting ONLY source information
+- Generate 3-5 relevant tags from topics in the source
 - Format article with clear paragraph breaks (use \\n\\n between paragraphs)
 - Each paragraph should be 2-4 sentences
 - NO advertisement blocks or meta-content
@@ -685,15 +693,22 @@ Follow these instructions when writing the article."""
 Source materials:
 {source_text}
 
-Requirements:
+CRITICAL REQUIREMENTS:
+- Use ONLY information explicitly stated in the source materials above
+- Do NOT add facts, data, quotes, or details not present in the sources
+- Do NOT invent names, dates, locations, or statistics
+- Do NOT make assumptions or inferences beyond what is stated
+- If sources lack information, DO NOT fill gaps with invented content
+- Every fact in your article MUST be traceable to the source materials
+
+Article structure:
 - Write a complete, well-structured article that synthesizes information from all sources
-- Create an engaging, accurate title
-- Write a brief summary (2-3 sentences)
-- Generate 3-5 relevant tags
+- Create an engaging, accurate title based ONLY on source content
+- Write a brief summary (2-3 sentences) reflecting ONLY source information
+- Generate 3-5 relevant tags from topics in the sources
 - Format article with clear paragraph breaks (use \\n\\n between paragraphs)
 - Each paragraph should be 2-4 sentences
 - You may use some or all of the atomic facts provided, based on relevance
-- All sources are available for citation even if not all facts are used
 - NO advertisement blocks or meta-content
 
 Respond in JSON:
@@ -874,22 +889,30 @@ Extract a structured context unit from the provided content. The content may be:
 - Mixed content (email with attachments, transcriptions, etc.)
 
 Your task:
-1. Extract a clear TITLE (concise, informative)
-2. Write a SUMMARY (2-3 sentences capturing essence)
-3. Generate TAGS (3-7 relevant keywords)
+1. Extract a clear TITLE (concise, informative) in SPANISH
+2. Write a SUMMARY (2-3 sentences capturing essence) in SPANISH
+3. Generate TAGS (3-7 relevant keywords) in SPANISH
 4. Extract ATOMIC STATEMENTS in strict source order:
    - Each statement is ONE fact, question, answer, or quote
    - Preserve original order from source
-   - If interview: identify speakers, mark questions/answers
+   - If interview: identify speakers, mark questions/answers clearly
    - If news: extract factual statements
-   - Type each statement: fact, question, answer, quote, context
+   - Type each statement PRECISELY:
+     * "fact" - A verifiable factual statement (e.g., dates, events, data)
+     * "quote" - Direct quote from a person (use quotation marks)
+     * "question" - A question asked (from interview/Q&A)
+     * "answer" - An answer given (from interview/Q&A)
+     * "context" - Background or contextual information
+   - Write ALL statements in SPANISH
 
 IMPORTANT:
+- ALL OUTPUT (title, summary, tags, statements) MUST be in SPANISH
 - Maintain STRICT chronological order from source
 - Each statement is independent and complete
 - Include speaker attribution when identifiable
 - Do NOT invent information
-- NO advertisement blocks or meta-content"""),
+- NO advertisement blocks or meta-content
+- Use EXACT type labels: fact, quote, question, answer, or context"""),
                 ("user", """Analyze this content and generate a context unit:
 
 {text}
@@ -902,7 +925,7 @@ Respond in JSON:
   "atomic_statements": [
     {{
       "order": 1,
-      "type": "fact|question|answer|quote|context",
+      "type": "fact|quote|question|answer|context",
       "speaker": "Name or null",
       "text": "Complete statement"
     }},
