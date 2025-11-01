@@ -768,11 +768,14 @@ class MultiCompanyEmailMonitor:
 
             logger.info("email_processed_multi_company", 
                 subject=subject,
-                company_code=company_code
+                company_code=company["company_code"]
             )
 
         except Exception as e:
-            logger.error("email_processing_error_multi_company", error=str(e))
+            logger.error("email_processing_error_multi_company", 
+                error=str(e),
+                subject=subject if 'subject' in locals() else "unknown"
+            )
 
     async def check_inbox(self):
         """Check inbox for new unread emails."""
