@@ -1107,6 +1107,9 @@ async def test_perplexity_execution(
     except Exception as e:
         logger.error("test_perplexity_error", error=str(e))
         raise HTTPException(status_code=500, detail=f"Execution failed: {str(e)}")
+
+
+@app.post("/process/micro-edit")
 async def micro_edit(
     request: MicroEditRequest,
     client: Dict = Depends(get_current_client)
