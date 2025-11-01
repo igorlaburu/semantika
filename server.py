@@ -275,6 +275,12 @@ class CreateContextUnitRequest(BaseModel):
     title: Optional[str] = None
 
 
+class CreateContextUnitFromURLRequest(BaseModel):
+    """Request model for creating context unit from URL."""
+    url: str
+    title: Optional[str] = None
+
+
 # ============================================
 # INGESTION ENDPOINTS
 # ============================================
@@ -860,6 +866,177 @@ async def create_context_unit(
         raise
     except Exception as e:
         logger.error("create_context_unit_error", error=str(e), client_id=client["client_id"])
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/context-units/from-url")
+async def create_context_unit_from_url(
+    request: CreateContextUnitFromURLRequest,
+    client: Dict = Depends(get_current_client)
+) -> Dict[str, Any]:
+    """
+    Create a context unit from a URL (web scraping).
+    
+    Use this endpoint to automatically scrape and process web content:
+    - News articles
+    - Blog posts
+    - Press releases
+    - Any public web page
+    
+    Workflow:
+    1. Receives URL (and optional title)
+    2. Scrapes web page content using BeautifulSoup/LLM
+    3. Processes through default workflow (generates context unit)
+    4. Saves to press_context_units table with source_type="scraping"
+    5. Returns created context unit
+    
+    Requires: X-API-Key header
+    
+    Body:
+        - url: URL to scrape (required)
+        - title: Optional title override (if not provided, extracted from page)
+    
+    Returns:
+        Created context unit with id, title, summary, tags, atomic_statements
+    """
+    try:
+        from sources.web_scraper import WebScraper
+        from workflows.workflow_factory import get_workflow
+        from core.source_content import SourceContent
+        import uuid
+        
+        logger.info(
+            "url_context_unit_request",
+            client_id=client["client_id"],
+            url=request.url,
+            has_title=bool(request.title)
+        )
+        
+        # Get company and organization
+        supabase = get_supabase_client()
+        
+        company_result = supabase.client.table("companies")\
+            .select("*")\
+            .eq("id", client["company_id"])\
+            .maybe_single()\
+            .execute()
+        
+        if not company_result.data:
+            raise HTTPException(status_code=404, detail="Company not found")
+        
+        company = company_result.data
+        
+        org_result = supabase.client.table("organizations")\
+            .select("*")\
+            .eq("company_id", company["id"])\
+            .eq("is_active", True)\
+            .limit(1)\
+            .execute()
+        
+        if not org_result.data:
+            raise HTTPException(status_code=404, detail="No active organization found")
+        
+        organization = org_result.data[0]
+        
+        # Scrape URL
+        scraper = WebScraper()
+        scrape_result = await scraper.scrape_url(request.url)
+        
+        if not scrape_result.get("success"):
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Failed to scrape URL: {scrape_result.get('error', 'Unknown error')}"
+            )
+        
+        # Extract content
+        scraped_data = scrape_result.get("data", {})
+        scraped_text = scraped_data.get("text", "")
+        scraped_title = scraped_data.get("title", "")
+        
+        if not scraped_text:
+            raise HTTPException(status_code=400, detail="No content extracted from URL")
+        
+        # Use provided title or scraped title
+        final_title = request.title or scraped_title or None
+        
+        # Create SourceContent
+        context_unit_id = str(uuid.uuid4())
+        source_content = SourceContent(
+            source_type="scraping",
+            source_id=f"scraping_{context_unit_id[:8]}",
+            organization_slug=organization["slug"],
+            text_content=scraped_text,
+            metadata={
+                "url": request.url,
+                "scraped_title": scraped_title,
+                "client_id": client["client_id"],
+                "company_id": company["id"],
+                "manual_scraping": True
+            },
+            title=final_title,
+            id=context_unit_id
+        )
+        
+        # Get workflow and process
+        workflow = get_workflow("default", company.get("settings", {}))
+        result = await workflow.process_content(source_content)
+        
+        # Extract context unit
+        context_unit = result.get("context_unit", {})
+        if not context_unit:
+            raise HTTPException(status_code=500, detail="Failed to generate context unit")
+        
+        # Save to database
+        context_unit_data = {
+            "id": context_unit.get("id"),
+            "organization_id": organization["id"],
+            "company_id": company["id"],
+            "source_type": "scraping",
+            "source_id": source_content.source_id,
+            "source_metadata": {
+                "url": request.url,
+                "scraped_title": scraped_title,
+                "client_id": client["client_id"],
+                "created_via": "api",
+                "manual_scraping": True,
+                "has_custom_title": bool(request.title)
+            },
+            "title": context_unit.get("title"),
+            "summary": context_unit.get("summary"),
+            "tags": context_unit.get("tags", []),
+            "atomic_statements": context_unit.get("atomic_statements", []),
+            "raw_text": scraped_text,
+            "status": "completed",
+            "processed_at": "now()"
+        }
+        
+        db_result = supabase.client.table("press_context_units")\
+            .insert(context_unit_data)\
+            .execute()
+        
+        if not db_result.data:
+            raise HTTPException(status_code=500, detail="Failed to save context unit")
+        
+        created_unit = db_result.data[0]
+        
+        logger.info(
+            "url_context_unit_created",
+            client_id=client["client_id"],
+            context_unit_id=created_unit["id"],
+            url=request.url,
+            title=created_unit.get("title", "")
+        )
+        
+        return {
+            "success": True,
+            "context_unit": created_unit,
+            "scraped_url": request.url
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("create_context_unit_from_url_error", error=str(e), client_id=client["client_id"], url=request.url)
         raise HTTPException(status_code=500, detail=str(e))
 
 
