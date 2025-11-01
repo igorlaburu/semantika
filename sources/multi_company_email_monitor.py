@@ -695,6 +695,15 @@ class MultiCompanyEmailMonitor:
                     # Skip non-attachments
                     if part.get_content_maintype() == "multipart":
                         continue
+                    
+                    # Debug: log all parts to understand email structure
+                    logger.debug("email_part_detected",
+                        content_type=part.get_content_type(),
+                        content_disposition=part.get("Content-Disposition"),
+                        filename=part.get_filename(),
+                        company_code=company["company_code"]
+                    )
+                    
                     if part.get("Content-Disposition") is None:
                         continue
 
