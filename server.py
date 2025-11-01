@@ -756,6 +756,8 @@ async def create_context_unit(
     Returns:
         Created context unit with id, title, summary, tags, atomic_statements
     """
+    start_time = datetime.utcnow()
+    
     try:
         from workflows.workflow_factory import get_workflow
         from core.source_content import SourceContent
@@ -859,6 +861,7 @@ async def create_context_unit(
         )
         
         # Log execution
+        duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
         await supabase.log_execution(
             client_id=client["client_id"],
             company_id=company["id"],
@@ -874,6 +877,7 @@ async def create_context_unit(
                 "has_custom_title": bool(request.title),
                 "created_via": "api"
             },
+            duration_ms=duration_ms,
             workflow_code="default"
         )
         
@@ -889,6 +893,7 @@ async def create_context_unit(
         
         # Log failed execution
         try:
+            duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
             await supabase.log_execution(
                 client_id=client["client_id"],
                 company_id=client["company_id"],
@@ -904,6 +909,7 @@ async def create_context_unit(
                     "has_custom_title": bool(request.title),
                     "error_type": type(e).__name__
                 },
+                duration_ms=duration_ms,
                 workflow_code="default"
             )
         except:
@@ -942,6 +948,8 @@ async def create_context_unit_from_url(
     Returns:
         Created context unit with id, title, summary, tags, atomic_statements
     """
+    start_time = datetime.utcnow()
+    
     try:
         from sources.web_scraper import WebScraper
         from workflows.workflow_factory import get_workflow
@@ -1069,6 +1077,7 @@ async def create_context_unit_from_url(
         )
         
         # Log execution
+        duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
         await supabase.log_execution(
             client_id=client["client_id"],
             company_id=company["id"],
@@ -1086,6 +1095,7 @@ async def create_context_unit_from_url(
                 "has_custom_title": bool(request.title),
                 "created_via": "api"
             },
+            duration_ms=duration_ms,
             workflow_code="default"
         )
         
@@ -1102,6 +1112,7 @@ async def create_context_unit_from_url(
         
         # Log failed execution
         try:
+            duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
             await supabase.log_execution(
                 client_id=client["client_id"],
                 company_id=client["company_id"],
@@ -1117,6 +1128,7 @@ async def create_context_unit_from_url(
                     "has_custom_title": bool(request.title),
                     "error_type": type(e).__name__
                 },
+                duration_ms=duration_ms,
                 workflow_code="default"
             )
         except:
