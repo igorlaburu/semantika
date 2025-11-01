@@ -629,6 +629,12 @@ Article structure:
 - Each paragraph should be 2-4 sentences
 - NO advertisement blocks or meta-content
 
+Formatting rules:
+- Use **bold** for proper names (people, organizations, brands)
+- Use **bold** for place names (cities, countries, regions)
+- For sections with clearly defined context and substantial length (3+ paragraphs), add an H2 subtitle (## Subtitle)
+- Author byline: "Redacción" (not "Sistema" or other generic names)
+
 Respond in JSON:
 {{"article": "Full article text...", "title": "...", "summary": "...", "tags": [...]}}""")
             ])
@@ -776,6 +782,12 @@ Article structure:
 - Each paragraph should be 2-4 sentences
 - You may use some or all of the atomic facts provided, based on relevance
 - NO advertisement blocks or meta-content
+
+Formatting rules:
+- Use **bold** for proper names (people, organizations, brands)
+- Use **bold** for place names (cities, countries, regions)
+- For sections with clearly defined context and substantial length (3+ paragraphs), add an H2 subtitle (## Subtitle)
+- Author byline: "Redacción" (not "Sistema" or other generic names)
 
 Respond in JSON:
 {{"article": "Full article text...", "title": "...", "summary": "...", "tags": [...]}}""")
