@@ -148,20 +148,25 @@ class OpenRouterClient:
         """Initialize OpenRouter client with LangChain."""
         try:
             # Initialize LLM clients with automatic usage tracking
-            # Using cheaper model for testing
-            self.llm_sonnet = TrackedChatOpenAI(
+            
+            # Sonnet 4.5 for high-quality content generation (news articles)
+            self.llm_sonnet_premium = TrackedChatOpenAI(
                 base_url="https://openrouter.ai/api/v1",
                 api_key=settings.openrouter_api_key,
-                model="openai/gpt-4o-mini",  # Cheaper for testing
+                model="anthropic/claude-3.5-sonnet-20241022",
                 temperature=0.0
             )
-
+            
+            # GPT-4o-mini for analysis, extraction, micro-edits, context units
             self.llm_fast = TrackedChatOpenAI(
                 base_url="https://openrouter.ai/api/v1",
                 api_key=settings.openrouter_api_key,
                 model="openai/gpt-4o-mini",
                 temperature=0.0
             )
+            
+            # Alias for backward compatibility
+            self.llm_sonnet = self.llm_fast
 
             # Initialize chains
             self._init_chains()
@@ -601,7 +606,7 @@ Respond in JSON:
             ])
 
             redact_chain = RunnableSequence(
-                redact_prompt | self.llm_sonnet | JsonOutputParser()
+                redact_prompt | self.llm_sonnet_premium | JsonOutputParser()
             )
 
             # Build tracking config
@@ -716,7 +721,7 @@ Respond in JSON:
             ])
 
             redact_rich_chain = RunnableSequence(
-                redact_rich_prompt | self.llm_sonnet | JsonOutputParser()
+                redact_rich_prompt | self.llm_sonnet_premium | JsonOutputParser()
             )
 
             config = {}
