@@ -577,9 +577,9 @@ class MultiCompanyEmailMonitor:
             
             # Log execution
             await supabase.log_execution(
-                client_id=context_unit.get("id", "00000000-0000-0000-0000-000000000000"),
+                client_id=source_metadata.get("client_id", "00000000-0000-0000-0000-000000000000"),
                 company_id=company["id"],
-                source_name=company["company_name"],
+                source_name=source_metadata.get("source_name", company["company_name"]),
                 source_type="email",
                 items_count=1,
                 status_code=200,
@@ -590,7 +590,7 @@ class MultiCompanyEmailMonitor:
                     "workflow_code": workflow_code,
                     "context_unit_id": context_unit.get("id"),
                     "content_parts": len(content_parts),
-                    "source_id": source["source_id"]
+                    "source_id": source_metadata.get("source_id")
                 },
                 workflow_code=workflow_code
             )
@@ -606,9 +606,9 @@ class MultiCompanyEmailMonitor:
             try:
                 workflow_code = source_metadata.get("workflow_code", "default")
                 await supabase.log_execution(
-                    client_id="00000000-0000-0000-0000-000000000000",
+                    client_id=source_metadata.get("client_id", "00000000-0000-0000-0000-000000000000"),
                     company_id=company.get("id"),
-                    source_name=company.get("company_name", "Unknown"),
+                    source_name=source_metadata.get("source_name", company.get("company_name", "Unknown")),
                     source_type="email",
                     items_count=0,
                     status_code=500,
@@ -746,6 +746,7 @@ class MultiCompanyEmailMonitor:
                     source_metadata={
                         "subject": subject,
                         "company_code": company["company_code"],
+                        "client_id": source["client_id"],
                         "source_id": source["source_id"],
                         "source_name": source["source_name"],
                         "workflow_code": source.get("workflow_code", "default"),
