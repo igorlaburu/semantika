@@ -269,6 +269,12 @@ class RedactNewsRichRequest(BaseModel):
     language: str = "es"
 
 
+class CreateContextUnitRequest(BaseModel):
+    """Request model for creating context unit from text."""
+    text: str
+    title: Optional[str] = None
+
+
 # ============================================
 # INGESTION ENDPOINTS
 # ============================================
@@ -712,6 +718,148 @@ async def get_context_units(
         
     except Exception as e:
         logger.error("get_context_units_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/context-units")
+async def create_context_unit(
+    request: CreateContextUnitRequest,
+    client: Dict = Depends(get_current_client)
+) -> Dict[str, Any]:
+    """
+    Create a context unit from plain text (manual entry).
+    
+    Use this endpoint to manually add context from:
+    - Pasted text from clipboard
+    - Dragged/uploaded text files
+    - Manual text entry in UI
+    - Any plain text source
+    
+    Workflow:
+    1. Receives plain text (and optional title)
+    2. Processes through default workflow (generates context unit with LLM)
+    3. Saves to press_context_units table with source_type="manual"
+    4. Returns created context unit
+    
+    Requires: X-API-Key header
+    
+    Body:
+        - text: Plain text content (required)
+        - title: Optional title suggestion (if not provided, LLM generates it)
+    
+    Returns:
+        Created context unit with id, title, summary, tags, atomic_statements
+    """
+    try:
+        from workflows.workflow_factory import get_workflow
+        from core.source_content import SourceContent
+        import uuid
+        
+        logger.info(
+            "manual_context_unit_request",
+            client_id=client["client_id"],
+            text_length=len(request.text),
+            has_title=bool(request.title)
+        )
+        
+        # Get company and organization
+        supabase = get_supabase_client()
+        
+        company_result = supabase.client.table("companies")\
+            .select("*")\
+            .eq("id", client["company_id"])\
+            .maybe_single()\
+            .execute()
+        
+        if not company_result.data:
+            raise HTTPException(status_code=404, detail="Company not found")
+        
+        company = company_result.data
+        
+        org_result = supabase.client.table("organizations")\
+            .select("*")\
+            .eq("company_id", company["id"])\
+            .eq("is_active", True)\
+            .limit(1)\
+            .execute()
+        
+        if not org_result.data:
+            raise HTTPException(status_code=404, detail="No active organization found")
+        
+        organization = org_result.data[0]
+        
+        # Create SourceContent
+        context_unit_id = str(uuid.uuid4())
+        source_content = SourceContent(
+            source_type="manual",
+            source_id=f"manual_{context_unit_id[:8]}",
+            organization_slug=organization["slug"],
+            text_content=request.text,
+            metadata={
+                "manual_entry": True,
+                "client_id": client["client_id"],
+                "company_id": company["id"]
+            },
+            title=request.title or None,
+            id=context_unit_id
+        )
+        
+        # Get workflow and process
+        workflow = get_workflow("default", company.get("settings", {}))
+        result = await workflow.process_content(source_content)
+        
+        # Extract context unit
+        context_unit = result.get("context_unit", {})
+        if not context_unit:
+            raise HTTPException(status_code=500, detail="Failed to generate context unit")
+        
+        # Save to database
+        context_unit_data = {
+            "id": context_unit.get("id"),
+            "organization_id": organization["id"],
+            "company_id": company["id"],
+            "source_type": "manual",
+            "source_id": source_content.source_id,
+            "source_metadata": {
+                "manual_entry": True,
+                "client_id": client["client_id"],
+                "created_via": "api",
+                "has_custom_title": bool(request.title)
+            },
+            "title": context_unit.get("title"),
+            "summary": context_unit.get("summary"),
+            "tags": context_unit.get("tags", []),
+            "atomic_statements": context_unit.get("atomic_statements", []),
+            "raw_text": request.text,
+            "status": "completed",
+            "processed_at": "now()"
+        }
+        
+        db_result = supabase.client.table("press_context_units")\
+            .insert(context_unit_data)\
+            .execute()
+        
+        if not db_result.data:
+            raise HTTPException(status_code=500, detail="Failed to save context unit")
+        
+        created_unit = db_result.data[0]
+        
+        logger.info(
+            "manual_context_unit_created",
+            client_id=client["client_id"],
+            context_unit_id=created_unit["id"],
+            title=created_unit.get("title", "")
+        )
+        
+        return {
+            "success": True,
+            "context_unit": created_unit
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("create_context_unit_error", error=str(e), client_id=client["client_id"])
         raise HTTPException(status_code=500, detail=str(e))
 
 
