@@ -337,7 +337,7 @@ async def execute_redact_news_rich(
                         "statement": stmt
                     })
         
-        all_statements.sort(key=lambda x: x.get("statement", {}).get("order", 0))
+        all_statements.sort(key=lambda x: x.get("statement", {}).get("order", 0) if isinstance(x.get("statement"), dict) else 0)
         
         source_text_parts = []
         for cu in context_units:
