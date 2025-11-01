@@ -941,16 +941,13 @@ async def create_context_unit_from_url(
         
         # Scrape URL
         scraper = WebScraper()
-        scrape_result = await scraper.scrape_url(request.url)
+        scrape_results = await scraper.scrape_url(request.url, extract_multiple=False)
         
-        if not scrape_result.get("success"):
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Failed to scrape URL: {scrape_result.get('error', 'Unknown error')}"
-            )
+        if not scrape_results or len(scrape_results) == 0:
+            raise HTTPException(status_code=400, detail="Failed to scrape URL or no content found")
         
-        # Extract content
-        scraped_data = scrape_result.get("data", {})
+        # Get first result (single article mode)
+        scraped_data = scrape_results[0]
         scraped_text = scraped_data.get("text", "")
         scraped_title = scraped_data.get("title", "")
         
