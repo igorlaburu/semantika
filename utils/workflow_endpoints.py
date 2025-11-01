@@ -359,6 +359,14 @@ async def execute_redact_news_rich(
         
         source_text = "\n".join(source_text_parts)
         
+        # Log source text construction for debugging multi-source fusion
+        logger.info(
+            "source_text_constructed",
+            context_units_count=len(context_units),
+            source_text_length=len(source_text),
+            source_text_preview=source_text[:500]
+        )
+        
         openrouter = get_openrouter_client()
         result = await openrouter.redact_news_rich(
             source_text=source_text,
