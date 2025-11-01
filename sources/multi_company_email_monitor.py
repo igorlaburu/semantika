@@ -126,7 +126,7 @@ class MultiCompanyEmailMonitor:
         Get routing configuration and associated source for email address.
 
         Args:
-            to_address: Full email address (e.g., 'p.demo@ekimen.ai')
+            to_address: Full email address (e.g., 'p.demo@ekimen.ai' or '"name" <p.demo@ekimen.ai>')
 
         Returns:
             Tuple of (company, organization, source) or None if not found
@@ -134,11 +134,16 @@ class MultiCompanyEmailMonitor:
         try:
             supabase = get_supabase_client()
             
+            # Extract clean email address from formats like '"name" <email@domain.com>'
+            email_pattern = r'<([^>]+)>|([^\s<>]+@[^\s<>]+)'
+            email_match = re.search(email_pattern, to_address)
+            clean_email = email_match.group(1) or email_match.group(2) if email_match else to_address
+            
             # Get email routing configuration with associated press source
-            routing = await supabase.get_email_routing_for_address(to_address)
+            routing = await supabase.get_email_routing_for_address(clean_email)
             
             if not routing:
-                logger.warn("no_routing_found", to_address=to_address)
+                logger.warn("no_routing_found", to_address=to_address, clean_email=clean_email)
                 return None
             
             # Extract source from routing
