@@ -278,6 +278,17 @@ async def schedule_sources(scheduler: AsyncIOScheduler):
         sources = await supabase.get_scheduled_sources()
 
         logger.info("sources_loaded", count=len(sources))
+        
+        # Get current source IDs from database
+        current_source_ids = {source["source_id"] for source in sources}
+        
+        # Remove jobs for sources that no longer exist in database
+        for job in scheduler.get_jobs():
+            if job.id.startswith("source_"):
+                job_source_id = job.id.replace("source_", "")
+                if job_source_id not in current_source_ids:
+                    scheduler.remove_job(job.id)
+                    logger.info("source_job_removed", job_id=job.id, reason="source_deleted_from_db")
 
         for source in sources:
             source_id = source["source_id"]
