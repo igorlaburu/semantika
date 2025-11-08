@@ -9,7 +9,7 @@ Used for:
 
 from typing import Dict, Any, List, Optional
 from sources.web_scraper import WebScraper
-from utils.openrouter_client import get_openrouter_client
+from utils.llm_client import get_llm_client
 from utils.logger import get_logger
 
 logger = get_logger("stateless_pipeline")
@@ -26,7 +26,7 @@ class StatelessPipeline:
             organization_id: Organization UUID (for usage tracking)
             client_id: Client UUID (for usage tracking)
         """
-        self.openrouter = get_openrouter_client()
+        self.openrouter = get_llm_client()
         self.organization_id = organization_id
         self.client_id = client_id
         logger.debug("stateless_pipeline_initialized")

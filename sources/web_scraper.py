@@ -11,7 +11,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from utils.logger import get_logger
-from utils.openrouter_client import get_openrouter_client
+from utils.llm_client import get_llm_client
 
 logger = get_logger("web_scraper")
 
@@ -21,7 +21,7 @@ class WebScraper:
 
     def __init__(self):
         """Initialize web scraper."""
-        self.openrouter = get_openrouter_client()
+        self.openrouter = get_llm_client()
         self.user_agent = "semantika-bot/0.1.0"
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": self.user_agent})

@@ -6,7 +6,7 @@ Standard processing pipeline for companies without custom workflows.
 from typing import Dict, Any
 from core.source_content import SourceContent
 from workflows.base_workflow import BaseWorkflow
-from utils.openrouter_client import get_openrouter_client
+from utils.llm_client import get_llm_client
 
 
 class DefaultWorkflow(BaseWorkflow):
@@ -35,8 +35,8 @@ class DefaultWorkflow(BaseWorkflow):
                 "raw_text": ""
             }
 
-        # Use OpenRouter client for LLM processing
-        openrouter = get_openrouter_client()
+        # Use LLM client for LLM processing
+        openrouter = get_llm_client()
         
         # Generate context unit with new structured format
         try:

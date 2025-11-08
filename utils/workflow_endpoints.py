@@ -37,7 +37,7 @@ async def execute_micro_edit(
     """
     try:
         # Import here to avoid circular imports
-        from utils.openrouter_client import get_openrouter_client
+        from utils.llm_client import get_llm_client
         
         # Get organization_id from client
         organization_id = client.get("organization_id")
@@ -69,8 +69,8 @@ async def execute_micro_edit(
             except Exception as e:
                 logger.warn("style_guide_not_found", style_guide_id=style_guide_id, error=str(e))
         
-        # Get OpenRouter client and perform micro-edit
-        openrouter = get_openrouter_client()
+        # Get LLM client and perform micro-edit
+        openrouter = get_llm_client()
         result = await openrouter.micro_edit(
             text=text,
             command=command,
@@ -300,7 +300,7 @@ async def execute_redact_news_rich(
         Generated news article with sources
     """
     try:
-        from utils.openrouter_client import get_openrouter_client
+        from utils.llm_client import get_llm_client
         
         supabase_client = get_supabase_client()
         organization_id = client.get("organization_id", "00000000-0000-0000-0000-000000000001")
@@ -367,7 +367,7 @@ async def execute_redact_news_rich(
             source_text_preview=source_text[:500]
         )
         
-        openrouter = get_openrouter_client()
+        openrouter = get_llm_client()
         result = await openrouter.redact_news_rich(
             source_text=source_text,
             title_suggestion=title or "",

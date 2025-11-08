@@ -5,7 +5,7 @@ Generates structured context units from any source content using LLM.
 
 from typing import Dict, Any
 from sources.base_source import SourceContent
-from utils.openrouter_client import get_openrouter_client
+from utils.llm_client import get_llm_client
 from utils.logger import get_logger
 
 logger = get_logger("context_unit_generator")
@@ -15,8 +15,8 @@ class ContextUnitGenerator:
     """Generates structured context units from source content."""
 
     def __init__(self):
-        """Initialize generator with OpenRouter client."""
-        self.openrouter = get_openrouter_client()
+        """Initialize generator with LLM client."""
+        self.openrouter = get_llm_client()
         logger.debug("context_unit_generator_initialized")
 
     async def generate(

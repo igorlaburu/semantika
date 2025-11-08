@@ -6,7 +6,7 @@ Example of company-specific workflow with custom processing.
 from typing import Dict, Any
 from sources.base_source import SourceContent
 from workflows.default.default_workflow import DefaultWorkflow
-from utils.openrouter_client import get_openrouter_client
+from utils.llm_client import get_llm_client
 from langchain_core.prompts import ChatPromptTemplate
 
 
@@ -84,7 +84,7 @@ class AcmeWorkflow(DefaultWorkflow):
     async def check_legal_compliance(self, text: str) -> Dict[str, Any]:
         """Check content for legal compliance issues."""
         try:
-            openrouter = get_openrouter_client()
+            openrouter = get_llm_client()
             
             # ACME-specific legal compliance prompt
             legal_prompt = ChatPromptTemplate.from_messages([

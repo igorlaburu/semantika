@@ -13,7 +13,7 @@ from qdrant_client.models import PointStruct
 
 from utils.logger import get_logger
 from utils.config import settings
-from utils.openrouter_client import get_openrouter_client
+from utils.llm_client import get_llm_client
 from utils.qdrant_client import get_qdrant_client
 
 logger = get_logger("core_ingest")
@@ -42,7 +42,7 @@ class IngestPipeline:
             client_id: UUID of the client
         """
         self.client_id = client_id
-        self.openrouter = get_openrouter_client()
+        self.openrouter = get_llm_client()
         self.qdrant = get_qdrant_client()
         self.embedder = get_embedding_model()
         self.text_splitter = RecursiveCharacterTextSplitter(

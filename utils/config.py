@@ -43,6 +43,20 @@ class Settings(BaseSettings):
         description="Fast model for simple tasks"
     )
 
+    # Groq Configuration
+    groq_api_key: str = Field(
+        default="",
+        description="Groq API key for ultrafast LLM inference"
+    )
+    groq_fast_model: str = Field(
+        default="mixtral-8x7b-32768",
+        description="Groq fast model (Mixtral-8x7B)"
+    )
+    groq_writer_model: str = Field(
+        default="llama3-70b-8192",
+        description="Groq writer model (Llama-3 70B) for micro-edits"
+    )
+
     # ScraperTech Configuration (Twitter)
     scrapertech_api_key: str = Field(
         default="",

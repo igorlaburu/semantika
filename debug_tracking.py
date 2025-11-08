@@ -5,7 +5,7 @@ Debug script para diagnosticar por qué no se registra el tracking de LLM.
 
 import asyncio
 import json
-from utils.openrouter_client import get_openrouter_client
+from utils.llm_client import get_llm_client
 from utils.usage_tracker import get_usage_tracker
 from utils.logger import get_logger
 
@@ -18,7 +18,7 @@ async def test_tracking():
     try:
         # 1. Test conexión con OpenRouter
         print("\n1️⃣ Testeando conexión con OpenRouter...")
-        client = get_openrouter_client()
+        client = get_llm_client()
         
         # 2. Test simple sin tracking
         print("\n2️⃣ Llamada LLM sin tracking...")

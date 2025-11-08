@@ -78,7 +78,7 @@ SIN markdown, {news_count} items exactos."""
                     self.api_url,
                     json=payload,
                     headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=60)
+                    timeout=aiohttp.ClientTimeout(total=120)
                 ) as response:
                     
                     if response.status != 200:
@@ -133,7 +133,7 @@ SIN markdown, {news_count} items exactos."""
                 return []
                 
         except Exception as e:
-            logger.error("perplexity_fetch_error", error=str(e))
+            logger.error("perplexity_fetch_error", error=str(e), error_type=type(e).__name__)
             return []
     
     async def process_news_with_workflow(
