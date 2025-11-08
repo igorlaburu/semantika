@@ -695,7 +695,7 @@ Respond in JSON:
         try:
             system_parts = [
                 f"Eres un editor quirúrgico de textos en {language}.",
-                "Cambia SOLO lo que el usuario solicita. Preserva TODO lo demás: significado, formato markdown, negritas (**texto**), saltos de línea, puntuación."
+                "Cambia SOLO lo que el usuario solicita. Preserva TODO lo demás: significado, formato markdown, negritas (**texto**), saltos de línea simples (\\n) y dobles (\\n\\n), puntuación, espaciado."
             ]
 
             if preserve_meaning:
