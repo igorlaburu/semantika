@@ -108,7 +108,7 @@ class LLMProvider(ABC):
         self._model_info = ModelInfo(
             provider=pricing['provider'],
             model_name=pricing['model_name'],
-            model_alias=pricing['model_alias'] or model_alias,
+            model_alias=pricing['model_alias'] or self.model_alias,
             price_input_per_mtok=float(pricing['price_input_per_mtok']),
             price_output_per_mtok=float(pricing['price_output_per_mtok']),
             context_window=pricing['context_window'] or 0,
