@@ -171,12 +171,12 @@ class LLMProvider(ABC):
             'pricing_id': self._model_info.pricing_id if self._model_info else None
         }
         
-        await tracker.track_usage(
+        await tracker.track(
             organization_id=tracking_config['organization_id'],
             model=f"{self.get_provider_name()}/{self.model_name}",
             operation=tracking_config.get('operation', 'unknown'),
-            prompt_tokens=usage.prompt_tokens,
-            completion_tokens=usage.completion_tokens,
+            input_tokens=usage.prompt_tokens,
+            output_tokens=usage.completion_tokens,
             client_id=tracking_config.get('client_id'),
             context_unit_id=tracking_config.get('context_unit_id'),
             metadata=metadata
