@@ -38,7 +38,7 @@ class LLMRegistry:
             self._providers['groq_fast'] = GroqProvider(
                 model_name='llama-3.3-70b-versatile',
                 model_alias='groq_fast',
-                temperature=0.0
+                temperature=0.1
             )
             
             self._providers['groq_writer'] = GroqProvider(
