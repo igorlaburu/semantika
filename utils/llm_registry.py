@@ -42,7 +42,7 @@ class LLMRegistry:
             )
             
             self._providers['groq_writer'] = GroqProvider(
-                model_name='gpt-oss-20b',
+                model_name='llama-3.3-70b-versatile',
                 model_alias='groq_writer',
                 temperature=0.0
             )
