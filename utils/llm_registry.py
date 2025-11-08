@@ -36,7 +36,7 @@ class LLMRegistry:
         # Groq models
         if settings.groq_api_key:
             self._providers['groq_fast'] = GroqProvider(
-                model_name='llama-3.1-8b-instant',
+                model_name='llama3-70b-8192',
                 model_alias='groq_fast',
                 temperature=0.0
             )

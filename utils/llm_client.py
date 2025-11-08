@@ -694,12 +694,12 @@ Respond in JSON:
         """Perform micro-editing on text using Groq ultrafast LLM."""
         try:
             system_parts = [
-                f"Eres un editor experto de textos en {language}.",
-                "Tu tarea es realizar micro-ediciones siguiendo las instrucciones específicas del usuario."
+                f"Eres un editor quirúrgico de textos en {language}.",
+                "Cambia SOLO lo que el usuario solicita. Preserva TODO lo demás: significado, formato markdown, negritas (**texto**), saltos de línea, puntuación."
             ]
 
             if preserve_meaning:
-                system_parts.append("IMPORTANTE: Preserva siempre el significado original del texto.")
+                system_parts.append("CRÍTICO: Mínima intervención. Edición quirúrgica exclusivamente en lo solicitado.")
 
             if style_guide:
                 system_parts.append(f"Sigue esta guía de estilo:\n\n{style_guide[:2000]}")
@@ -718,8 +718,10 @@ Respond in JSON:
                 user_parts.append(f"Contexto: {context}")
 
             user_parts.append("""
-Responde SOLO con JSON válido, sin texto adicional:
-{{"edited_text": "texto editado siguiendo la instrucción", "explanation": "breve explicación de los cambios realizados"}}""")
+IMPORTANTE: Responde con JSON puro. NO uses ```json ni decoración markdown.
+
+Formato exacto:
+{{"edited_text": "texto editado", "explanation": "cambios realizados"}}""")
 
             user_prompt = "\n\n".join(user_parts)
 
@@ -728,8 +730,8 @@ Responde SOLO con JSON válido, sin texto adicional:
                 ("user", user_prompt)
             ])
 
-            # Use Groq writer model for micro-edits (ultrafast)
-            provider = self.registry.get('groq_writer') if settings.groq_api_key else self.registry.get('fast')
+            # Use Groq ultrafast model for micro-edits
+            provider = self.registry.get('groq_fast') if settings.groq_api_key else self.registry.get('fast')
             
             config = {}
             if organization_id:
