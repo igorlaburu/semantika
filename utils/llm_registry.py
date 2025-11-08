@@ -36,13 +36,13 @@ class LLMRegistry:
         # Groq models
         if settings.groq_api_key:
             self._providers['groq_fast'] = GroqProvider(
-                model_name='mixtral-8x7b-32768',
+                model_name='llama-3.1-8b-instant',
                 model_alias='groq_fast',
                 temperature=0.0
             )
             
             self._providers['groq_writer'] = GroqProvider(
-                model_name='llama3-70b-8192',
+                model_name='llama-3.3-70b-versatile',
                 model_alias='groq_writer',
                 temperature=0.0
             )
