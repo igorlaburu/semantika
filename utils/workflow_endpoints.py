@@ -384,6 +384,9 @@ async def execute_redact_news_rich(
                 "id": cu["id"],
                 "title": cu.get("title", ""),
                 "summary": cu.get("summary", ""),
+                "url": cu.get("source_metadata", {}).get("url", ""),
+                "source_name": cu.get("source_metadata", {}).get("scraped_title", cu.get("title", "")),
+                "source_type": cu.get("source_type", ""),
                 "created_at": cu.get("created_at", "")
             }
             for cu in context_units
