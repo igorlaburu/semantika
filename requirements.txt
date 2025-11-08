@@ -24,7 +24,10 @@ langchain-text-splitters>=0.3.0,<0.4
 # OpenAI/OpenRouter
 openai>=1.30.0
 
-# Audio transcription (optional - heavy)
+# Audio transcription (CPU-only, no CUDA - install torch first)
+--index-url https://download.pytorch.org/whl/cpu
+torch>=2.0.0
+torchaudio>=2.0.0
 openai-whisper==20231117
 
 # Web scraping and HTTP clients
