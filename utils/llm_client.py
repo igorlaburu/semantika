@@ -375,7 +375,9 @@ Formatting rules:
 - Use **bold** for place names (cities, countries, regions)
 - For sections with clearly defined context and substantial length (3+ paragraphs), add an H2 subtitle (## Subtitle)
 
-Respond in JSON:
+IMPORTANT: Respond with ONLY raw JSON. Do NOT wrap in markdown code blocks or add any text before/after.
+
+Response format:
 {{"article": "Full article text...", "title": "...", "summary": "...", "tags": [...], "author": "Redacción"}}""")
             ])
 
@@ -480,7 +482,9 @@ Formatting rules:
 - Use **bold** for place names (cities, countries, regions)
 - For sections with clearly defined context and substantial length (3+ paragraphs), add an H2 subtitle (## Subtitle)
 
-Respond in JSON:
+IMPORTANT: Respond with ONLY raw JSON. Do NOT wrap in markdown code blocks or add any text before/after.
+
+Response format:
 {{"article": "Full article text...", "title": "...", "summary": "...", "tags": [...], "author": "Redacción"}}""")
             ])
 
