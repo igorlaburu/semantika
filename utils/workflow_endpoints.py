@@ -193,7 +193,8 @@ async def execute_redact_news(
         return result
         
     except Exception as e:
-        logger.error("redact_news_workflow_error", error=str(e))
+        import traceback
+        logger.error("redact_news_workflow_error", error=str(e), traceback=traceback.format_exc())
         raise
 
 

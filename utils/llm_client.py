@@ -401,8 +401,9 @@ Response format:
             logger.debug("redact_news_completed", article_length=len(result.get("article", "")))
             return result
         except Exception as e:
-            logger.error("redact_news_error", error=str(e))
-            return {"article": "", "title": "", "summary": "", "tags": []}
+            import traceback
+            logger.error("redact_news_error", error=str(e), traceback=traceback.format_exc())
+            return {"article": "", "title": "", "summary": "", "tags": [], "error": str(e)}
 
     async def redact_news_rich(
         self,
@@ -511,8 +512,9 @@ Response format:
             logger.debug("redact_news_rich_completed", article_length=len(result.get("article", "")))
             return result
         except Exception as e:
-            logger.error("redact_news_rich_error", error=str(e))
-            return {"article": "", "title": "", "summary": "", "tags": []}
+            import traceback
+            logger.error("redact_news_rich_error", error=str(e), traceback=traceback.format_exc())
+            return {"article": "", "title": "", "summary": "", "tags": [], "error": str(e)}
 
     async def generate_style_guide(
         self,
