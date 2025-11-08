@@ -44,6 +44,14 @@ class OpenRouterProvider(LLMProvider):
         """Return provider name."""
         return "openrouter"
     
+    def get_runnable(self):
+        """Get underlying LangChain runnable for use in chains.
+        
+        Returns:
+            ChatOpenAI instance that can be used in RunnableSequence
+        """
+        return self._client
+    
     async def ainvoke(self, messages, config: Optional[Dict] = None):
         """Invoke OpenRouter LLM.
         

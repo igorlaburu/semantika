@@ -39,6 +39,14 @@ class GroqProvider(LLMProvider):
         """Return provider name."""
         return "groq"
     
+    def get_runnable(self):
+        """Get underlying LangChain runnable for use in chains.
+        
+        Returns:
+            ChatGroq instance that can be used in RunnableSequence
+        """
+        return self._client
+    
     async def ainvoke(self, messages, config: Optional[Dict] = None):
         """Invoke Groq LLM.
         

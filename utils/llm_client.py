@@ -382,21 +382,10 @@ Response format:
             ])
 
             redact_chain = RunnableSequence(
-                redact_prompt | self.registry.get('sonnet_premium') | JsonOutputParser()
+                redact_prompt | self.registry.get('sonnet_premium').get_runnable() | JsonOutputParser()
             )
 
-            config = {}
-            if organization_id:
-                config['tracking'] = {
-                    'organization_id': organization_id,
-                    'operation': 'redact_news',
-                    'client_id': client_id
-                }
-
-            result = await redact_chain.ainvoke(
-                {"text": text[:8000]},
-                config=config
-            )
+            result = await redact_chain.ainvoke({"text": text[:8000]})
 
             logger.debug("redact_news_completed", article_length=len(result.get("article", "")))
             return result
@@ -490,24 +479,13 @@ Response format:
             ])
 
             redact_rich_chain = RunnableSequence(
-                redact_rich_prompt | self.registry.get('sonnet_premium') | JsonOutputParser()
+                redact_rich_prompt | self.registry.get('sonnet_premium').get_runnable() | JsonOutputParser()
             )
 
-            config = {}
-            if organization_id:
-                config['tracking'] = {
-                    'organization_id': organization_id,
-                    'operation': 'redact_news_rich',
-                    'client_id': client_id
-                }
-
-            result = await redact_rich_chain.ainvoke(
-                {
-                    "source_text": source_text[:12000],
-                    "user_instructions": user_instructions
-                },
-                config=config
-            )
+            result = await redact_rich_chain.ainvoke({
+                "source_text": source_text[:12000],
+                "user_instructions": user_instructions
+            })
 
             logger.debug("redact_news_rich_completed", article_length=len(result.get("article", "")))
             return result
