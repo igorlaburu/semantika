@@ -379,7 +379,10 @@ Respond in JSON:
 {{"article": "Full article text...", "title": "...", "summary": "...", "tags": [...], "author": "Redacción"}}""")
             ])
 
-            provider = self.registry.get('sonnet_premium')
+            redact_chain = RunnableSequence(
+                redact_prompt | self.registry.get('sonnet_premium') | JsonOutputParser()
+            )
+
             config = {}
             if organization_id:
                 config['tracking'] = {
@@ -388,13 +391,11 @@ Respond in JSON:
                     'client_id': client_id
                 }
 
-            response = await provider.ainvoke(
-                redact_prompt.format_messages(text=text[:8000]),
+            result = await redact_chain.ainvoke(
+                {"text": text[:8000]},
                 config=config
             )
 
-            import json
-            result = json.loads(response.content)
             logger.debug("redact_news_completed", article_length=len(result.get("article", "")))
             return result
         except Exception as e:
@@ -483,7 +484,10 @@ Respond in JSON:
 {{"article": "Full article text...", "title": "...", "summary": "...", "tags": [...], "author": "Redacción"}}""")
             ])
 
-            provider = self.registry.get('sonnet_premium')
+            redact_rich_chain = RunnableSequence(
+                redact_rich_prompt | self.registry.get('sonnet_premium') | JsonOutputParser()
+            )
+
             config = {}
             if organization_id:
                 config['tracking'] = {
@@ -492,16 +496,14 @@ Respond in JSON:
                     'client_id': client_id
                 }
 
-            response = await provider.ainvoke(
-                redact_rich_prompt.format_messages(
-                    source_text=source_text[:12000],
-                    user_instructions=user_instructions
-                ),
+            result = await redact_rich_chain.ainvoke(
+                {
+                    "source_text": source_text[:12000],
+                    "user_instructions": user_instructions
+                },
                 config=config
             )
 
-            import json
-            result = json.loads(response.content)
             logger.debug("redact_news_rich_completed", article_length=len(result.get("article", "")))
             return result
         except Exception as e:
