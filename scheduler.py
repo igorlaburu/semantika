@@ -300,29 +300,54 @@ async def schedule_sources(scheduler: AsyncIOScheduler):
             frequency_min = schedule_config.get("frequency_minutes", 60)
             
             if cron_schedule:
-                # Parse cron format: "hour minute" or full cron
-                if " " in cron_schedule:
-                    parts = cron_schedule.split()
-                    if len(parts) == 2:  # "9 0" for 9:00 AM daily
-                        hour, minute = int(parts[0]), int(parts[1])
-                        
-                        scheduler.add_job(
-                            execute_source_task,
-                            trigger=CronTrigger(hour=hour, minute=minute),
-                            args=[source],
-                            id=f"source_{source_id}",
-                            replace_existing=True,
-                            max_instances=1
-                        )
-                        
-                        logger.info(
-                            "source_scheduled_cron",
-                            source_id=source_id,
-                            source_name=source["source_name"],
-                            cron_time=f"{hour:02d}:{minute:02d}",
-                            source_type=source_type
-                        )
+                # Parse cron format: "HH:MM" (new) or "hour minute" (legacy)
+                hour = None
+                minute = None
+                
+                if ":" in cron_schedule:
+                    # New format: "08:00" (HH:MM)
+                    try:
+                        time_parts = cron_schedule.split(":")
+                        hour = int(time_parts[0])
+                        minute = int(time_parts[1])
+                        logger.debug("cron_parsed_new_format", cron=cron_schedule, hour=hour, minute=minute)
+                    except (ValueError, IndexError) as e:
+                        logger.error("cron_parse_error_new_format", cron=cron_schedule, error=str(e))
                         continue
+                        
+                elif " " in cron_schedule:
+                    # Legacy format: "8 0" (hour minute) - backwards compatibility
+                    parts = cron_schedule.split()
+                    if len(parts) == 2:
+                        try:
+                            hour = int(parts[0])
+                            minute = int(parts[1])
+                            logger.warn("cron_legacy_format_detected", 
+                                cron=cron_schedule, 
+                                source_id=source_id,
+                                suggestion=f"Update to new format: {hour:02d}:{minute:02d}")
+                        except ValueError as e:
+                            logger.error("cron_parse_error_legacy_format", cron=cron_schedule, error=str(e))
+                            continue
+                
+                if hour is not None and minute is not None:
+                    scheduler.add_job(
+                        execute_source_task,
+                        trigger=CronTrigger(hour=hour, minute=minute),
+                        args=[source],
+                        id=f"source_{source_id}",
+                        replace_existing=True,
+                        max_instances=1
+                    )
+                    
+                    logger.info(
+                        "source_scheduled_cron",
+                        source_id=source_id,
+                        source_name=source["source_name"],
+                        cron_time=f"{hour:02d}:{minute:02d}",
+                        source_type=source_type
+                    )
+                    continue
             
             # Fallback to interval scheduling for scraping and API sources
             if source_type in ["scraping", "api"] and frequency_min > 0:
