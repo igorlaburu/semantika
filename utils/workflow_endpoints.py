@@ -379,18 +379,18 @@ async def execute_redact_news_rich(
             client_id=client["client_id"]
         )
         
-        result["sources"] = [
-            {
+        result["sources"] = []
+        for cu in context_units:
+            source_metadata = cu.get("source_metadata") or {}
+            result["sources"].append({
                 "id": cu["id"],
                 "title": cu.get("title", ""),
                 "summary": cu.get("summary", ""),
-                "url": cu.get("source_metadata", {}).get("url", ""),
-                "source_name": cu.get("source_metadata", {}).get("scraped_title", cu.get("title", "")),
+                "url": source_metadata.get("url", ""),
+                "source_name": source_metadata.get("scraped_title", cu.get("title", "")),
                 "source_type": cu.get("source_type", ""),
                 "created_at": cu.get("created_at", "")
-            }
-            for cu in context_units
-        ]
+            })
         result["statements_count"] = len(all_statements)
         
         return result
