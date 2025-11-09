@@ -52,10 +52,21 @@ class PerplexityNewsConnector:
             logger.info("fetching_perplexity_news", location=location, count=news_count)
             
             # Prepare the prompt
-            prompt = f"""{news_count} noticias de {location}. Queremos recoger el contenido semantico en 10 frases para cada noticia, una frase por linea en el campo texto que resume el contenido sin estructura, tono o redacción cuidada. Solo contenido neutro.
+            prompt = f"""{news_count} noticias de {location}. Para cada noticia, extrae:
+
+1. CONTENIDO EXTENSO: 15-20 frases que capturen TODO el contenido semántico
+2. DECLARACIONES: Si hay quotes de personas, identifícalas con formato: "PERSONA: declaración textual"
+3. DATOS: Fechas, cifras, nombres completos
+4. CONTEXTO: Antecedentes relevantes
+
+Formato del texto:
+- Una frase por línea
+- Mantén orden cronológico del artículo original
+- Incluye declaraciones literales con comillas y atribución
+- Sin estructura de artículo, solo contenido semántico neutral
 
 Responde SOLO este JSON:
-{{"news": [{{"titulo": "...", "texto": "CONTENIDO SEPARADO EN LINEAS SIN ESTRUCTURA, SOLO FRASES CON EL CONTENIDO SEMANTICO DE LA NOTICIA", "fuente": "URL", "fecha": "YYYY-MM-DD"}}]}}
+{{"news": [{{"titulo": "...", "texto": "LINEA1\nLINEA2\nPERSONA: \"declaración\"\nLINEA3...", "fuente": "URL", "fecha": "YYYY-MM-DD"}}]}}
 
 SIN markdown, {news_count} items exactos."""
 
@@ -64,7 +75,7 @@ SIN markdown, {news_count} items exactos."""
                 "model": "sonar",
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.1,
-                "max_tokens": 5000
+                "max_tokens": 8000
             }
             
             headers = {
