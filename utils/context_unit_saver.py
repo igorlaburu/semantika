@@ -541,6 +541,7 @@ async def save_from_scraping(
         summary=scraping_data.get("summary"),
         content=scraping_data.get("content"),
         tags=scraping_data.get("tags"),
+        atomic_statements=scraping_data.get("atomic_statements"),
         source_type="scraping",
         source_metadata={
             "url": scraping_data.get("url"),

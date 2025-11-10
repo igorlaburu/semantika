@@ -183,6 +183,8 @@ async def parse_content(state: ScraperState) -> ScraperState:
 async def parse_article(state: ScraperState, soup: BeautifulSoup):
     """Parse article page content using LLM.
     
+    Detects if page contains multiple news items or single article.
+    
     Args:
         state: Workflow state
         soup: BeautifulSoup object
@@ -192,10 +194,30 @@ async def parse_article(state: ScraperState, soup: BeautifulSoup):
     
     # Extract title
     title_tag = soup.find('title')
-    title = title_tag.get_text(strip=True) if title_tag else "Untitled"
+    page_title = title_tag.get_text(strip=True) if title_tag else "Untitled"
     
     # Extract main content
     semantic_content = normalize_html(html)
+    
+    # Detect if this is a multi-noticia page (multiple news on same URL)
+    # Look for common news containers
+    news_blocks = soup.find_all(['article', 'div'], class_=lambda c: c and any(
+        keyword in str(c).lower() for keyword in ['noticia', 'news', 'post', 'item', 'entry']
+    ))
+    
+    # If we find multiple news blocks, parse each separately
+    if len(news_blocks) > 1:
+        logger.info("multi_noticia_detected", url=url, blocks_found=len(news_blocks))
+        await parse_multi_noticia(state, news_blocks, soup)
+    else:
+        # Single article
+        await parse_single_article(state, page_title, semantic_content)
+
+
+async def parse_single_article(state: ScraperState, page_title: str, semantic_content: str):
+    """Parse single article with LLM analysis."""
+    url = state["url"]
+    company_id = state["company_id"]
     
     # Use LLM to extract structured content
     llm_client = get_llm_client()
@@ -204,16 +226,16 @@ async def parse_article(state: ScraperState, soup: BeautifulSoup):
         # Use analyze_atomic to get title, summary, and atomic facts
         result = await llm_client.analyze_atomic(
             text=semantic_content[:8000],
-            organization_id=state["company_id"]
+            organization_id=company_id
         )
         
-        state["title"] = result.get("title", title)
+        state["title"] = result.get("title", page_title)
         state["summary"] = result.get("summary", "")
         
         # Single content item for article
         state["content_items"] = [{
             "position": 1,
-            "title": result.get("title", title),
+            "title": result.get("title", page_title),
             "summary": result.get("summary", ""),
             "content": semantic_content[:8000],
             "tags": result.get("tags", []),
@@ -222,23 +244,86 @@ async def parse_article(state: ScraperState, soup: BeautifulSoup):
         
         logger.debug("article_parsed_with_llm",
             url=url,
-            title=state["title"][:50]
+            title=state["title"][:50],
+            statements_count=len(result.get("atomic_facts", []))
         )
         
     except Exception as e:
         logger.error("llm_parse_failed_using_fallback", url=url, error=str(e))
         
         # Fallback: basic extraction
-        state["title"] = title
+        state["title"] = page_title
         state["summary"] = semantic_content[:500]
         state["content_items"] = [{
             "position": 1,
-            "title": title,
+            "title": page_title,
             "summary": semantic_content[:500],
             "content": semantic_content[:8000],
             "tags": [],
             "atomic_statements": []
         }]
+
+
+async def parse_multi_noticia(state: ScraperState, news_blocks, soup: BeautifulSoup):
+    """Parse multiple news items from same page."""
+    url = state["url"]
+    company_id = state["company_id"]
+    llm_client = get_llm_client()
+    
+    content_items = []
+    
+    for i, block in enumerate(news_blocks[:10]):  # Limit to 10 news items
+        try:
+            # Extract text from this block
+            block_text = block.get_text(separator=' ', strip=True)
+            
+            if len(block_text) < 50:  # Skip very short blocks
+                continue
+            
+            # Use LLM to analyze this block
+            result = await llm_client.analyze_atomic(
+                text=block_text[:4000],
+                organization_id=company_id
+            )
+            
+            if result.get("title"):
+                content_items.append({
+                    "position": len(content_items) + 1,
+                    "title": result.get("title", f"Noticia {i+1}"),
+                    "summary": result.get("summary", ""),
+                    "content": block_text[:4000],
+                    "tags": result.get("tags", []),
+                    "atomic_statements": result.get("atomic_facts", [])
+                })
+                
+                logger.debug("news_block_parsed",
+                    url=url,
+                    position=len(content_items),
+                    title=result.get("title", "")[:50],
+                    statements_count=len(result.get("atomic_facts", []))
+                )
+        except Exception as e:
+            logger.error("news_block_parse_error", 
+                url=url, 
+                block_index=i, 
+                error=str(e)
+            )
+            continue
+    
+    if content_items:
+        state["title"] = f"{len(content_items)} noticias de {url}"
+        state["summary"] = f"Página con {len(content_items)} noticias"
+        state["content_items"] = content_items
+        
+        logger.info("multi_noticia_parsed",
+            url=url,
+            items_extracted=len(content_items)
+        )
+    else:
+        # Fallback to single article if no blocks found
+        logger.warn("multi_noticia_fallback_to_single", url=url)
+        semantic_content = normalize_html(state["html"])
+        await parse_single_article(state, "Noticias", semantic_content)
 
 
 async def parse_index(state: ScraperState, soup: BeautifulSoup):
@@ -626,6 +711,7 @@ async def ingest_to_context(state: ScraperState) -> ScraperState:
                     "summary": item.get("summary"),
                     "content": item.get("content"),
                     "tags": item.get("tags", []),
+                    "atomic_statements": item.get("atomic_statements", []),
                     "url": url,
                     "scraped_at": datetime.utcnow().isoformat(),
                     "published_at": state.get("published_at")
