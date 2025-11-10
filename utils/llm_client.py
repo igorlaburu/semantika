@@ -337,14 +337,15 @@ Extract and respond in JSON:
 
 Follow the style guide precisely in your writing."""
             else:
-                system_prompt = f"""You are a professional journalist. Write clear, objective news articles in {language}.
+                system_prompt = f"""You are a professional journalist. Write clear, objective, comprehensive news articles in {language}.
 
 Use:
 - Inverted pyramid structure
 - Active voice
-- Short paragraphs (2-3 sentences)
+- Well-developed paragraphs (3-5 sentences each)
 - Neutral, professional tone
-- Clear, specific titles"""
+- Clear, specific titles
+- Thorough coverage of all available information"""
 
             redact_prompt = ChatPromptTemplate.from_messages([
                 ("system", system_prompt),
@@ -362,12 +363,14 @@ CRITICAL REQUIREMENTS:
 - Every fact in your article MUST be traceable to the source content
 
 Article structure:
-- Write a complete, well-structured article
+- Write a COMPREHENSIVE, well-developed article
 - Create an engaging, accurate title based ONLY on source content
 - Write a brief summary (2-3 sentences) reflecting ONLY source information
 - Generate 3-5 relevant tags from topics in the source
 - Format article with clear paragraph breaks (use \\n\\n between paragraphs)
-- Each paragraph should be 2-4 sentences
+- Each paragraph should be well-developed with 3-5 sentences providing context, details, and background
+- Aim for a complete article of at least 6-10 paragraphs that fully explores the topic
+- Develop each point thoroughly with context, implications, and relevant details from the source
 - NO advertisement blocks or meta-content
 
 Formatting rules:
@@ -413,14 +416,15 @@ Response format:
 
 Follow the style guide precisely in your writing."""
             else:
-                system_prompt = f"""You are a professional journalist. Write clear, objective news articles in {language}.
+                system_prompt = f"""You are a professional journalist. Write clear, objective, comprehensive news articles in {language}.
 
 Use:
 - Inverted pyramid structure
 - Active voice
-- Short paragraphs (2-3 sentences)
+- Well-developed paragraphs (3-5 sentences each)
 - Neutral, professional tone
-- Clear, specific titles"""
+- Clear, specific titles
+- Thorough coverage of all available information"""
 
             if title_suggestion and instructions:
                 user_instructions = f"""Title suggestion: {title_suggestion}
@@ -457,14 +461,16 @@ CRITICAL REQUIREMENTS:
 - Every fact in your article MUST be traceable to the source materials
 
 Article structure:
-- Write a complete, well-structured article that SYNTHESIZES information from ALL provided sources
+- Write a COMPREHENSIVE, well-developed article that SYNTHESIZES information from ALL provided sources
 - ALL sources marked with ## headers MUST be represented in the article - do not ignore any source
 - Create an engaging, accurate title based ONLY on source content
 - Write a brief summary (2-3 sentences) reflecting ONLY source information from ALL sources
 - Generate 3-5 relevant tags from topics in ALL the sources
 - Format article with clear paragraph breaks (use \\n\\n between paragraphs)
-- Each paragraph should be 2-4 sentences
+- Each paragraph should be well-developed with 3-5 sentences providing context, details, and background
+- Aim for a complete article of at least 8-12 paragraphs that fully explores the topic
 - Integrate facts and information from ALL context units provided, not just the first one
+- Develop each point thoroughly with context, implications, and relevant details from the sources
 - NO advertisement blocks or meta-content
 
 Formatting rules:
