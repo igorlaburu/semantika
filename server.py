@@ -1667,11 +1667,29 @@ async def enrich_context_unit(
         
         context_unit = result.data
         
-        # Calculate age
+        # Calculate age - fix malformed Supabase timestamps
         created_at = context_unit.get("created_at", "")
         if created_at:
-            dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-            age_days = (datetime.now(dt.tzinfo) - dt).days
+            try:
+                # Fix microseconds: Supabase sometimes returns 5 digits (e.g., .23697)
+                created_at_clean = created_at.replace('Z', '+00:00')
+                
+                if '.' in created_at_clean and '+' in created_at_clean:
+                    parts = created_at_clean.split('.')
+                    if len(parts) == 2:
+                        microseconds = parts[1].split('+')[0]
+                        # Pad to 6 digits
+                        microseconds = microseconds.ljust(6, '0')
+                        created_at_clean = f"{parts[0]}.{microseconds}+00:00"
+                
+                dt = datetime.fromisoformat(created_at_clean)
+                age_days = (datetime.now(dt.tzinfo) - dt).days
+            except Exception as e:
+                logger.warn("timestamp_parse_failed", 
+                    created_at=created_at, 
+                    error=str(e)
+                )
+                age_days = 0
         else:
             age_days = 0
         

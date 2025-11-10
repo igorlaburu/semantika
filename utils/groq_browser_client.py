@@ -88,8 +88,23 @@ class GroqBrowserClient:
         Returns:
             Optimized search query string
         """
-        # Extract date info
-        dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+        # Extract date info - fix malformed timestamps
+        try:
+            created_at_clean = created_at.replace('Z', '+00:00')
+            
+            # Fix microseconds: Python expects 0 or 6 digits after decimal
+            if '.' in created_at_clean and '+' in created_at_clean:
+                parts = created_at_clean.split('.')
+                if len(parts) == 2:
+                    microseconds = parts[1].split('+')[0]
+                    microseconds = microseconds.ljust(6, '0')
+                    created_at_clean = f"{parts[0]}.{microseconds}+00:00"
+            
+            dt = datetime.fromisoformat(created_at_clean)
+        except Exception:
+            # Fallback to current date if parsing fails
+            dt = datetime.now()
+        
         month_names = {
             1: 'enero', 2: 'febrero', 3: 'marzo', 4: 'abril',
             5: 'mayo', 6: 'junio', 7: 'julio', 8: 'agosto',
@@ -155,9 +170,30 @@ class GroqBrowserClient:
                 query=query
             )
             
-            # Calculate age
-            dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-            age_days = (datetime.now(dt.tzinfo) - dt).days
+            # Calculate age - fix malformed timestamps
+            try:
+                # Remove Z and handle microseconds padding
+                created_at_clean = created_at.replace('Z', '+00:00')
+                
+                # Fix microseconds: Python expects 0 or 6 digits after decimal
+                # Supabase sometimes returns 5 digits (e.g., .23697)
+                if '.' in created_at_clean and '+' in created_at_clean:
+                    parts = created_at_clean.split('.')
+                    if len(parts) == 2:
+                        microseconds = parts[1].split('+')[0]
+                        # Pad to 6 digits
+                        microseconds = microseconds.ljust(6, '0')
+                        created_at_clean = f"{parts[0]}.{microseconds}+00:00"
+                
+                dt = datetime.fromisoformat(created_at_clean)
+                age_days = (datetime.now(dt.tzinfo) - dt).days
+            except Exception as e:
+                logger.error("timestamp_parse_error", 
+                    created_at=created_at, 
+                    error=str(e)
+                )
+                # Fallback: assume 0 days if parsing fails
+                age_days = 0
             
             # Build prompt based on enrich_type
             prompts = {
