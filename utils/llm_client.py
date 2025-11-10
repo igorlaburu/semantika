@@ -156,6 +156,32 @@ Respond in JSON:
         self.analyze_atomic_chain = RunnableSequence(
             analyze_atomic_prompt | self.llm_sonnet | JsonOutputParser()
         )
+        
+        # 6b. Extract News Links from Index (for index pages)
+        extract_links_prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are a news link extractor. Identify real news articles from HTML."),
+            ("user", """Analyze this HTML from a news index page.
+Extract ONLY links to actual news articles (ignore menus, footers, navigation, etc.).
+
+For each news article, extract:
+- title: Article title from link text or nearby heading
+- url: Full article URL (make absolute if relative)
+- date: Publication date if visible (ISO format YYYY-MM-DD, or null)
+
+Return the 10 MOST RECENT news articles.
+
+HTML:
+{html}
+
+Base URL (for making relative URLs absolute): {base_url}
+
+Respond in JSON:
+{{"articles": [{{"title": "...", "url": "...", "date": "2025-11-10" or null}}, ...]}}""")
+        ])
+        
+        self.extract_links_chain = RunnableSequence(
+            extract_links_prompt | self.llm_groq_fast | JsonOutputParser()
+        )
 
         # 7. Article Structure Analyzer Chain
         article_structure_prompt = ChatPromptTemplate.from_messages([
@@ -316,6 +342,50 @@ Extract and respond in JSON:
         except Exception as e:
             logger.error("analyze_atomic_error", error=str(e))
             return {"title": "", "summary": "", "tags": [], "atomic_facts": []}
+    
+    async def extract_news_links(
+        self,
+        html: str,
+        base_url: str,
+        organization_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Extract news article links from index page HTML using Groq.
+        
+        Args:
+            html: HTML content of index page
+            base_url: Base URL for making relative URLs absolute
+            organization_id: Organization UUID for tracking
+            
+        Returns:
+            Dict with articles: [{"title": "...", "url": "...", "date": "..."}, ...]
+        """
+        try:
+            provider = self.registry.get('groq_fast')
+            config = {}
+            if organization_id:
+                config['tracking'] = {
+                    'organization_id': organization_id,
+                    'operation': 'extract_news_links'
+                }
+            
+            response = await provider.ainvoke(
+                self.extract_links_chain.first.format_messages(
+                    html=html[:16000],  # Larger for index pages
+                    base_url=base_url
+                ),
+                config=config
+            )
+            
+            import json
+            result = json.loads(response.content)
+            logger.info("extract_news_links_completed",
+                articles_found=len(result.get("articles", [])),
+                provider="groq_fast"
+            )
+            return result
+        except Exception as e:
+            logger.error("extract_news_links_error", error=str(e))
+            return {"articles": []}
 
     async def analyze_article_structure(self, text: str) -> Dict[str, Any]:
         """Analyze article structure for style guide generation."""

@@ -327,58 +327,162 @@ async def parse_multi_noticia(state: ScraperState, news_blocks, soup: BeautifulS
 
 
 async def parse_index(state: ScraperState, soup: BeautifulSoup):
-    """Parse index page to extract article links.
+    """Parse index page using Groq to extract article links, then scrape them.
     
     Args:
         state: Workflow state
         soup: BeautifulSoup object
     """
     url = state["url"]
+    html = state["html"]
+    company_id = state["company_id"]
     
-    # Extract all links
-    links = soup.find_all('a', href=True)
+    logger.info("parse_index_start", url=url)
     
-    # Filter for article links (heuristic)
-    article_links = []
-    for link in links:
-        href = link['href']
+    # Use Groq to intelligently extract news links
+    llm_client = get_llm_client()
+    
+    try:
+        result = await llm_client.extract_news_links(
+            html=html,
+            base_url=url,
+            organization_id=company_id
+        )
         
-        # Make absolute URL
-        from urllib.parse import urljoin
-        absolute_url = urljoin(url, href)
+        articles = result.get("articles", [])[:10]  # Limit to 10 most recent
         
-        # Filter out navigation, social, etc.
-        if any(skip in absolute_url.lower() for skip in [
-            'facebook.com', 'twitter.com', 'instagram.com',
-            'mailto:', 'javascript:', '#'
-        ]):
-            continue
+        logger.info("index_links_extracted",
+            url=url,
+            articles_found=len(articles)
+        )
         
-        # Get link text
-        link_text = link.get_text(strip=True)
+        if not articles:
+            logger.warn("no_articles_found_in_index", url=url)
+            state["content_items"] = []
+            return
         
-        if link_text and len(link_text) > 10:  # Meaningful link text
-            article_links.append({
-                "url": absolute_url,
-                "title": link_text
-            })
+        # Now scrape each article in parallel (max 3 concurrent)
+        content_items = await scrape_articles_from_index(
+            articles=articles,
+            company_id=company_id,
+            max_concurrent=3
+        )
+        
+        state["content_items"] = content_items
+        state["title"] = f"{len(content_items)} noticias de índice"
+        state["summary"] = f"Extraídas {len(content_items)} noticias del índice"
+        
+        logger.info("index_parsed_and_scraped",
+            url=url,
+            articles_scraped=len(content_items)
+        )
+        
+    except Exception as e:
+        logger.error("parse_index_error", url=url, error=str(e))
+        state["content_items"] = []
+
+
+async def scrape_articles_from_index(
+    articles: List[Dict[str, Any]],
+    company_id: str,
+    max_concurrent: int = 3
+) -> List[Dict[str, Any]]:
+    """Scrape multiple articles from index in parallel.
     
-    # Remove duplicates
-    seen_urls = set()
-    unique_links = []
-    for link in article_links:
-        if link["url"] not in seen_urls:
-            seen_urls.add(link["url"])
-            unique_links.append(link)
+    Args:
+        articles: List of {"title": "...", "url": "...", "date": "..."}
+        company_id: Company UUID
+        max_concurrent: Maximum concurrent requests
+        
+    Returns:
+        List of content_items with parsed articles
+    """
+    import asyncio
+    import aiohttp
     
-    # Store as content items (to be processed separately)
-    state["content_items"] = unique_links[:50]  # Limit to 50 links
+    semaphore = asyncio.Semaphore(max_concurrent)
     
-    logger.info("index_parsed",
-        url=url,
-        total_links=len(article_links),
-        unique_links=len(unique_links)
+    async def scrape_one(article: Dict[str, Any], position: int) -> Optional[Dict[str, Any]]:
+        """Scrape single article with semaphore."""
+        async with semaphore:
+            try:
+                article_url = article["url"]
+                
+                logger.debug("scraping_article_from_index",
+                    url=article_url,
+                    position=position
+                )
+                
+                # Fetch article HTML
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        article_url,
+                        timeout=aiohttp.ClientTimeout(total=30),
+                        headers={'User-Agent': 'Mozilla/5.0 (compatible; SemantikaScraper/1.0)'}
+                    ) as response:
+                        if response.status != 200:
+                            logger.warn("article_fetch_failed",
+                                url=article_url,
+                                status=response.status
+                            )
+                            return None
+                        
+                        article_html = await response.text()
+                
+                # Parse with LLM
+                from utils.content_hasher import normalize_html
+                semantic_content = normalize_html(article_html)
+                
+                llm_client = get_llm_client()
+                result = await llm_client.analyze_atomic(
+                    text=semantic_content[:8000],
+                    organization_id=company_id
+                )
+                
+                if not result.get("title"):
+                    logger.warn("article_parse_failed_no_title", url=article_url)
+                    return None
+                
+                logger.debug("article_scraped_from_index",
+                    url=article_url,
+                    title=result.get("title", "")[:50],
+                    atomic_facts=len(result.get("atomic_facts", []))
+                )
+                
+                return {
+                    "position": position,
+                    "title": result.get("title", article.get("title", "Untitled")),
+                    "summary": result.get("summary", ""),
+                    "content": semantic_content[:8000],
+                    "tags": result.get("tags", []),
+                    "atomic_statements": result.get("atomic_facts", []),
+                    "source_url": article_url,
+                    "index_date": article.get("date")
+                }
+                
+            except asyncio.TimeoutError:
+                logger.error("article_scrape_timeout", url=article.get("url"))
+                return None
+            except Exception as e:
+                logger.error("article_scrape_error",
+                    url=article.get("url"),
+                    error=str(e)
+                )
+                return None
+    
+    # Scrape all articles in parallel (with semaphore limit)
+    tasks = [scrape_one(article, i+1) for i, article in enumerate(articles)]
+    results = await asyncio.gather(*tasks)
+    
+    # Filter out None (failed scrapes)
+    content_items = [item for item in results if item is not None]
+    
+    logger.info("articles_scraped_from_index",
+        total_articles=len(articles),
+        successful_scrapes=len(content_items)
     )
+    
+    return content_items
 
 
 async def detect_changes(state: ScraperState) -> ScraperState:
