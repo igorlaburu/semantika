@@ -284,17 +284,21 @@ Extract and respond in JSON:
         self,
         text: str,
         organization_id: Optional[str] = None,
-        client_id: Optional[str] = None
+        client_id: Optional[str] = None  # Deprecated, kept for backward compatibility
     ) -> Dict[str, Any]:
-        """Analyze text and extract title, summary, tags, atomic facts."""
+        """Analyze text and extract title, summary, tags, atomic facts.
+        
+        Uses Groq Llama 3.3 70B (fast and free) for scraping tasks.
+        """
         try:
-            provider = self.registry.get('fast')
+            # Use Groq for fast, free processing (ideal for scraping)
+            provider = self.registry.get('groq_fast')
             config = {}
             if organization_id:
                 config['tracking'] = {
                     'organization_id': organization_id,
-                    'operation': 'analyze_atomic',
-                    'client_id': client_id
+                    'operation': 'analyze_atomic'
+                    # Note: client_id removed, tracking by organization_id (company) for billing
                 }
 
             response = await provider.ainvoke(
@@ -304,7 +308,10 @@ Extract and respond in JSON:
             
             import json
             result = json.loads(response.content)
-            logger.debug("analyze_atomic_completed", atomic_facts=len(result.get("atomic_facts", [])))
+            logger.debug("analyze_atomic_completed", 
+                atomic_facts=len(result.get("atomic_facts", [])),
+                provider="groq_fast"
+            )
             return result
         except Exception as e:
             logger.error("analyze_atomic_error", error=str(e))
