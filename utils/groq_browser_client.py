@@ -22,12 +22,13 @@ class GroqBrowserClient:
     """Client for Groq browser tool integration."""
     
     def __init__(self):
-        """Initialize Groq client with browser tools."""
+        """Initialize Groq client with web search capabilities."""
         if not settings.groq_api_key:
             raise ValueError("GROQ_API_KEY not configured")
         
         self.client = AsyncGroq(api_key=settings.groq_api_key)
-        self.model = "llama-3.3-70b-versatile"
+        # Use groq/compound for automatic web search (no explicit tools needed)
+        self.model = "groq/compound"
         
         logger.info("groq_browser_client_initialized", model=self.model)
     
@@ -211,7 +212,7 @@ Responde SOLO con JSON puro (sin markdown):
             
             prompt = prompts.get(enrich_type, prompts["verify"])
             
-            # Call Groq with browser tools
+            # Call Groq Compound (web search is automatic, no tools array needed)
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[
@@ -224,11 +225,6 @@ Responde SOLO con JSON puro (sin markdown):
                         "content": prompt
                     }
                 ],
-                tools=[
-                    {"type": "browser_search"},
-                    {"type": "visit_website"}
-                ],
-                tool_choice="auto",
                 temperature=0.0
             )
             
@@ -244,9 +240,9 @@ Responde SOLO con JSON puro (sin markdown):
             
             result = json.loads(content)
             
-            # Count tool calls for tracking
-            tool_calls = response.choices[0].message.tool_calls or []
-            tool_call_count = len(tool_calls)
+            # Groq Compound doesn't expose tool_calls in response
+            # Assume 1 web search was performed for tracking
+            tool_call_count = 1
             
             logger.info("enrich_context_unit_completed",
                 context_unit_id=context_unit_id,
