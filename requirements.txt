@@ -13,6 +13,9 @@ qdrant-client>=1.9.0
 # Embeddings
 fastembed==0.2.2
 
+# Content hashing
+simhash==2.1.2
+
 # LangChain (updated versions for better compatibility)
 langchain>=0.3.0,<0.4
 langchain-community>=0.3.0,<0.4
@@ -20,6 +23,7 @@ langchain-core>=0.3.0,<0.4
 langchain-openai>=0.2.0,<0.3
 langchain-groq>=0.2.0,<0.3
 langchain-text-splitters>=0.3.0,<0.4
+langgraph>=0.2.76,<0.3
 
 # OpenAI/OpenRouter
 openai>=1.30.0

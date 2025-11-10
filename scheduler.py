@@ -122,23 +122,37 @@ async def execute_source_task(source: Dict[str, Any]):
 
     try:
         if source_type == "scraping":
-            # Web scraping
+            # Web scraping using intelligent workflow
             target_url = config.get("url")
             if not target_url:
                 logger.error("scraping_source_missing_url", source_id=source_id)
                 return
 
-            extract_multiple = config.get("extract_multiple", True)
-            skip_guardrails = config.get("skip_guardrails", False)
-
-            scraper = WebScraper()
-            result = await scraper.scrape_and_ingest(
+            # Determine URL type from config (default: article)
+            url_type = config.get("url_type", "article")
+            
+            # Use new LangGraph scraper workflow
+            from sources.scraper_workflow import scrape_url
+            
+            workflow_result = await scrape_url(
+                company_id=company_id,
+                source_id=source_id,
                 url=target_url,
-                client_id=client_id,
-                extract_multiple=extract_multiple,
-                skip_guardrails=skip_guardrails
+                url_type=url_type
             )
-            logger.info("source_task_completed", source_id=source_id, result=result)
+            
+            # Extract results
+            context_units_created = len(workflow_result.get("context_unit_ids", []))
+            url_content_units = len(workflow_result.get("url_content_unit_ids", []))
+            change_type = workflow_result.get("change_info", {}).get("change_type", "unknown")
+            workflow_error = workflow_result.get("error")
+            
+            logger.info("scraping_workflow_completed", 
+                source_id=source_id, 
+                context_units=context_units_created,
+                change_type=change_type,
+                error=workflow_error
+            )
             
             # Log execution
             duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
@@ -147,15 +161,17 @@ async def execute_source_task(source: Dict[str, Any]):
                 company_id=company_id,
                 source_name=source_name,
                 source_type="scraping",
-                items_count=result.get("documents_scraped", 0),
-                status_code=200 if result.get("documents_scraped", 0) > 0 else 404,
-                status="success" if result.get("documents_scraped", 0) > 0 else "error",
-                details=f"{result.get('documents_scraped', 0)} noticias procesadas correctamente" if result.get("documents_scraped", 0) > 0 else "Página no encontrada - sitio web caído",
+                items_count=context_units_created,
+                status_code=200 if not workflow_error else 500,
+                status="success" if not workflow_error else "error",
+                details=f"{context_units_created} context units creadas (cambio: {change_type})" if not workflow_error else f"Error: {workflow_error}",
                 metadata={
                     "url": target_url,
-                    "documents_scraped": result.get("documents_scraped", 0),
-                    "documents_ingested": result.get("documents_ingested", 0),
-                    "extract_multiple": extract_multiple
+                    "url_type": url_type,
+                    "context_units_created": context_units_created,
+                    "url_content_units": url_content_units,
+                    "change_type": change_type,
+                    "monitored_url_id": workflow_result.get("monitored_url_id")
                 },
                 duration_ms=duration_ms,
                 workflow_code=source.get("workflow_code")
@@ -164,8 +180,8 @@ async def execute_source_task(source: Dict[str, Any]):
             # Update source execution stats
             await supabase.update_source_execution_stats(
                 source_id, 
-                success=result.get("documents_scraped", 0) > 0,
-                items_processed=result.get("documents_scraped", 0)
+                success=not workflow_error,
+                items_processed=context_units_created
             )
 
         elif source_type == "webhook":
