@@ -384,6 +384,9 @@ async def parse_index(state: ScraperState, soup: BeautifulSoup):
 async def detect_changes(state: ScraperState) -> ScraperState:
     """Detect changes using multi-tier detection (Node 3).
     
+    For multi-noticia pages: Always process to detect new items
+    For single articles: Use hash-based change detection
+    
     Args:
         state: Workflow state
         
@@ -392,8 +395,9 @@ async def detect_changes(state: ScraperState) -> ScraperState:
     """
     url = state["url"]
     company_id = state["company_id"]
+    url_type = state["url_type"]
     
-    logger.info("detect_changes_start", url=url)
+    logger.info("detect_changes_start", url=url, url_type=url_type)
     
     try:
         supabase = get_supabase_client()
@@ -413,24 +417,70 @@ async def detect_changes(state: ScraperState) -> ScraperState:
         
         state["old_monitored_url"] = old_monitored_url
         
-        # Detect changes
-        detector = get_change_detector()
-        
-        change_info = await detector.detect_change(
-            old_content=old_monitored_url,
-            new_html=state["html"],
-            new_title=state.get("title"),
-            new_summary=state.get("summary"),
-            company_id=company_id,
-            url=url
-        )
-        
-        state["change_info"] = change_info
-        state["should_process"] = change_info["requires_processing"]
+        # Multi-noticia pages: Check individual items instead of full page
+        content_items = state.get("content_items", [])
+        if len(content_items) > 1:
+            # Multi-noticia page: Check if we have new items
+            if old_monitored_url:
+                # Get existing url_content_units for this monitored_url
+                existing_units = supabase.client.table("url_content_units").select(
+                    "title, content_hash"
+                ).eq("monitored_url_id", old_monitored_url["id"]).execute()
+                
+                existing_titles = {u["title"] for u in (existing_units.data or [])}
+                new_items = [item for item in content_items if item.get("title") not in existing_titles]
+                
+                logger.info("multi_noticia_change_detection",
+                    url=url,
+                    total_items=len(content_items),
+                    existing_items=len(existing_titles),
+                    new_items=len(new_items)
+                )
+                
+                if new_items:
+                    # Process only new items
+                    state["content_items"] = new_items
+                    state["change_info"] = {
+                        "change_type": "new_items",
+                        "requires_processing": True,
+                        "detection_tier": 1
+                    }
+                    state["should_process"] = True
+                else:
+                    # No new items
+                    state["change_info"] = {
+                        "change_type": "no_new_items",
+                        "requires_processing": False,
+                        "detection_tier": 1
+                    }
+                    state["should_process"] = False
+            else:
+                # New URL, process all items
+                state["change_info"] = {
+                    "change_type": "new",
+                    "requires_processing": True,
+                    "detection_tier": 1
+                }
+                state["should_process"] = True
+        else:
+            # Single article: Use standard change detection
+            detector = get_change_detector()
+            
+            change_info = await detector.detect_change(
+                old_content=old_monitored_url,
+                new_html=state["html"],
+                new_title=state.get("title"),
+                new_summary=state.get("summary"),
+                company_id=company_id,
+                url=url
+            )
+            
+            state["change_info"] = change_info
+            state["should_process"] = change_info["requires_processing"]
         
         logger.info("detect_changes_completed",
             url=url,
-            change_type=change_info["change_type"],
+            change_type=state["change_info"]["change_type"],
             should_process=state["should_process"]
         )
         
