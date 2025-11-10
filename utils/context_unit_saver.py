@@ -183,14 +183,13 @@ async def save_context_unit(
             "source_id": source_id,
             "title": title,
             "summary": summary,
-            "content": content,
+            "raw_text": content,
             "tags": tags or [],
             "atomic_statements": atomic_statements or [],
             "source_type": source_type,
             "source_metadata": source_metadata or {},
-            "special_info": special_info,
-            "created_at": now,
-            "updated_at": now
+            "status": "pending",
+            "created_at": now
         }
         
         # Add embedding if generated
@@ -368,8 +367,7 @@ async def update_context_unit_embedding(
         
         # Update context unit
         update_result = supabase.client.table("press_context_units").update({
-            "embedding": embedding,
-            "updated_at": datetime.utcnow().isoformat()
+            "embedding": embedding
         }).eq("id", context_unit_id).execute()
         
         if update_result.data:
