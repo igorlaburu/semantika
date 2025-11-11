@@ -1798,10 +1798,10 @@ async def tts_synthesize(
         # rate 1.3 = 30% faster = length_scale 0.77
         length_scale = 1.0 / request.rate
 
-        # Call Piper binary
+        # Call Piper binary (note: tar extracts to piper/piper/)
         process = subprocess.Popen(
             [
-                '/app/piper/piper',
+                '/app/piper/piper/piper',
                 '--model', '/app/models/es_ES-davefx-medium.onnx',
                 '--length_scale', str(length_scale),
                 '--output-raw'
