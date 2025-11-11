@@ -32,7 +32,7 @@ COPY . .
 
 # Download and install Piper TTS
 # Extract tar in /app (creates /app/piper/ directory automatically)
-# Use LOW quality model for 2-3x faster synthesis
+# Use X_LOW quality model (carlfm) for maximum speed (28MB vs 50MB medium)
 RUN mkdir -p /app/models && \
     cd /app && \
     wget -q https://github.com/rhasspy/piper/releases/download/v1.2.0/piper_amd64.tar.gz && \
@@ -40,8 +40,8 @@ RUN mkdir -p /app/models && \
     rm piper_amd64.tar.gz && \
     chmod +x /app/piper/piper && \
     cd /app/models && \
-    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/davefx/low/es_ES-davefx-low.onnx && \
-    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/davefx/low/es_ES-davefx-low.onnx.json
+    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/carlfm/x_low/es_ES-carlfm-x_low.onnx && \
+    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/carlfm/x_low/es_ES-carlfm-x_low.onnx.json
 
 # Create non-root user for security
 RUN useradd -m -u 1000 semantika && \

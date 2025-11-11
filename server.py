@@ -1763,8 +1763,8 @@ async def tts_health(client: Dict = Depends(get_current_client)):
         "status": "ok",
         "service": "semantika-tts",
         "version": "1.0.0",
-        "model": "es_ES-davefx-low",
-        "quality": "low (2-3x faster)",
+        "model": "es_ES-carlfm-x_low",
+        "quality": "x_low (3-4x faster, 28MB)",
         "integrated": True,
         "client_id": client["client_id"]
     }
@@ -1808,12 +1808,12 @@ async def tts_synthesize(
         # rate 1.3 = 30% faster = length_scale 0.77
         length_scale = 1.0 / request.rate
 
-        # Call Piper binary with LOW quality model (2-3x faster)
+        # Call Piper binary with X_LOW quality model (3-4x faster, carlfm voice)
         # Output to stdout as WAV format
         process = subprocess.Popen(
             [
                 '/app/piper/piper',
-                '--model', '/app/models/es_ES-davefx-low.onnx',
+                '--model', '/app/models/es_ES-carlfm-x_low.onnx',
                 '--length_scale', str(length_scale),
                 '--output_file', '-'  # Output WAV to stdout
             ],
@@ -1855,7 +1855,7 @@ async def tts_synthesize(
         tracker = get_usage_tracker()
         await tracker.track(
             organization_id=client.get("organization_id", "00000000-0000-0000-0000-000000000001"),
-            model="piper/es_ES-davefx-low",
+            model="piper/es_ES-carlfm-x_low",
             operation="tts_synthesize",
             input_tokens=0,
             output_tokens=0,
