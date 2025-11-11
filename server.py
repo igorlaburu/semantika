@@ -1749,8 +1749,11 @@ class TTSRequest(BaseModel):
 
 
 @app.get("/tts/health")
-async def tts_health():
-    """TTS service health check.
+async def tts_health(client: Dict = Depends(get_current_client)):
+    """TTS service health check (requires authentication).
+
+    Args:
+        client: Authenticated client from API key
 
     Returns:
         Health status of TTS service
@@ -1760,12 +1763,16 @@ async def tts_health():
         "service": "semantika-tts",
         "version": "1.0.0",
         "model": "es_ES-davefx-medium",
-        "integrated": True
+        "integrated": True,
+        "client_id": client["client_id"]
     }
 
 
 @app.post("/tts/synthesize")
-async def tts_synthesize(request: TTSRequest):
+async def tts_synthesize(
+    request: TTSRequest,
+    client: Dict = Depends(get_current_client)
+):
     """Synthesize speech from text using Piper TTS.
 
     Args:
@@ -1780,6 +1787,7 @@ async def tts_synthesize(request: TTSRequest):
     try:
         logger.info(
             "tts_request",
+            client_id=client["client_id"],
             text_length=len(request.text),
             rate=request.rate,
             text_preview=request.text[:50]
@@ -1824,6 +1832,7 @@ async def tts_synthesize(request: TTSRequest):
 
         logger.info(
             "tts_success",
+            client_id=client["client_id"],
             audio_size=audio_size,
             estimated_duration_seconds=estimated_duration,
             text_length=len(request.text),
@@ -1841,7 +1850,11 @@ async def tts_synthesize(request: TTSRequest):
         )
 
     except subprocess.TimeoutExpired:
-        logger.error("tts_timeout", text_length=len(request.text))
+        logger.error(
+            "tts_timeout",
+            client_id=client["client_id"],
+            text_length=len(request.text)
+        )
         raise HTTPException(
             status_code=504,
             detail="TTS generation timeout (30s)"
@@ -1849,7 +1862,11 @@ async def tts_synthesize(request: TTSRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("tts_error", error=str(e))
+        logger.error(
+            "tts_error",
+            client_id=client["client_id"],
+            error=str(e)
+        )
         raise HTTPException(
             status_code=500,
             detail=f"TTS error: {str(e)}"
