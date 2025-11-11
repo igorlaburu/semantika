@@ -351,21 +351,43 @@ async def execute_redact_news_rich(
             if cu_summary:
                 source_text_parts.append(f"Resumen: {cu_summary}")
 
-            # Combine atomic statements (JSONB) + enriched statements (strings)
-            all_statements_text = []
+            # Combine atomic statements + enriched statements (both JSONB format)
+            all_statements = []
 
-            # Extract text from atomic_statements (JSONB format)
+            # Extract atomic_statements (JSONB format with order)
             if atomic_statements:
                 for stmt in atomic_statements:
-                    stmt_text = stmt.get("text", "") if isinstance(stmt, dict) else str(stmt)
-                    if stmt_text:
-                        all_statements_text.append(stmt_text)
+                    if isinstance(stmt, dict):
+                        all_statements.append(stmt)
+                    elif isinstance(stmt, str) and stmt:
+                        # Legacy string format - convert to JSONB
+                        all_statements.append({
+                            "text": stmt,
+                            "type": "fact",
+                            "order": 0,
+                            "speaker": None
+                        })
 
-            # Add enriched_statements (already strings)
+            # Extract enriched_statements (NEW: JSONB format, LEGACY: strings)
             if enriched_statements:
                 for enriched in enriched_statements:
-                    if enriched:  # Skip empty strings
-                        all_statements_text.append(enriched)
+                    if isinstance(enriched, dict):
+                        # New JSONB format
+                        all_statements.append(enriched)
+                    elif isinstance(enriched, str) and enriched:
+                        # Legacy string format - convert to JSONB
+                        all_statements.append({
+                            "text": enriched,
+                            "type": "fact",
+                            "order": 9999,  # Put enriched at end by default
+                            "speaker": None
+                        })
+
+            # Sort by order
+            all_statements.sort(key=lambda x: x.get("order", 9999))
+
+            # Extract text for rendering
+            all_statements_text = [stmt.get("text", "") for stmt in all_statements if stmt.get("text")]
 
             if all_statements_text:
                 source_text_parts.append("Hechos verificados:")

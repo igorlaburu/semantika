@@ -1717,7 +1717,99 @@ async def enrich_context_unit(
             enrich_type=request.enrich_type,
             has_error=bool(enrichment_result.get("error"))
         )
-        
+
+        # Convert enrichment results to JSONB format and save to DB
+        if not enrichment_result.get("error"):
+            # Get current atomic_statements to calculate next order number
+            atomic_statements = context_unit.get("atomic_statements", [])
+            max_order = 0
+            if atomic_statements:
+                for stmt in atomic_statements:
+                    if isinstance(stmt, dict):
+                        stmt_order = stmt.get("order", 0)
+                        if stmt_order > max_order:
+                            max_order = stmt_order
+
+            # Extract statements from enrichment result based on type
+            new_enriched_statements = []
+            next_order = max_order + 1
+
+            if request.enrich_type == "update":
+                # Extract new_developments array
+                new_developments = enrichment_result.get("new_developments", [])
+                for dev in new_developments:
+                    if isinstance(dev, str) and dev:
+                        new_enriched_statements.append({
+                            "text": dev,
+                            "type": "fact",
+                            "order": next_order,
+                            "speaker": None
+                        })
+                        next_order += 1
+
+            elif request.enrich_type == "background":
+                # Extract background_facts array
+                background_facts = enrichment_result.get("background_facts", [])
+                for fact in background_facts:
+                    if isinstance(fact, str) and fact:
+                        new_enriched_statements.append({
+                            "text": fact,
+                            "type": "context",
+                            "order": next_order,
+                            "speaker": None
+                        })
+                        next_order += 1
+
+            elif request.enrich_type == "verify":
+                # Extract latest_info string
+                latest_info = enrichment_result.get("latest_info", "")
+                if latest_info:
+                    new_enriched_statements.append({
+                        "text": latest_info,
+                        "type": "fact",
+                        "order": next_order,
+                        "speaker": None
+                    })
+
+            # Update database with new enriched_statements (append to existing)
+            if new_enriched_statements:
+                existing_enriched = context_unit.get("enriched_statements", [])
+
+                # Normalize existing enriched to JSONB format
+                normalized_existing = []
+                if existing_enriched:
+                    for item in existing_enriched:
+                        if isinstance(item, dict):
+                            normalized_existing.append(item)
+                        elif isinstance(item, str) and item:
+                            # Legacy string format - convert
+                            normalized_existing.append({
+                                "text": item,
+                                "type": "fact",
+                                "order": 9999,
+                                "speaker": None
+                            })
+
+                # Combine and save
+                updated_enriched = normalized_existing + new_enriched_statements
+
+                update_result = supabase_client.client.table("press_context_units").update({
+                    "enriched_statements": updated_enriched
+                }).eq("id", context_unit_id).execute()
+
+                if update_result.data:
+                    logger.info(
+                        "enriched_statements_saved",
+                        context_unit_id=context_unit_id,
+                        new_statements_count=len(new_enriched_statements),
+                        total_enriched_count=len(updated_enriched)
+                    )
+                else:
+                    logger.error(
+                        "enriched_statements_save_failed",
+                        context_unit_id=context_unit_id
+                    )
+
         return {
             "success": not bool(enrichment_result.get("error")),
             "context_unit_id": context_unit_id,
