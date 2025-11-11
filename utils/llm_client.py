@@ -313,9 +313,11 @@ Extract and respond in JSON:
         client_id: Optional[str] = None  # Deprecated, kept for backward compatibility
     ) -> Dict[str, Any]:
         """Analyze text and extract title, summary, tags, atomic facts.
-        
+
         Uses Groq Llama 3.3 70B (fast and free) for scraping tasks.
         """
+        import json
+
         try:
             # Use Groq for fast, free processing (ideal for scraping)
             provider = self.registry.get('groq_fast')
@@ -327,20 +329,58 @@ Extract and respond in JSON:
                     # Note: client_id removed, tracking by organization_id (company) for billing
                 }
 
+            logger.debug("analyze_atomic_start",
+                text_length=len(text),
+                slice_length=min(len(text), 8000)
+            )
+
             response = await provider.ainvoke(
                 self.analyze_atomic_chain.first.format_messages(text=text[:8000]),
                 config=config
             )
-            
-            import json
-            result = json.loads(response.content)
-            logger.debug("analyze_atomic_completed", 
+
+            logger.info("analyze_atomic_groq_response_received",
+                response_length=len(response.content),
+                response_preview=response.content[:200]
+            )
+
+            # Clean response content (remove markdown if present)
+            content = response.content
+            if content.startswith("```json"):
+                content = content[7:]
+                logger.debug("analyze_atomic_stripped_markdown", type="json")
+            elif content.startswith("```"):
+                content = content[3:]
+                logger.debug("analyze_atomic_stripped_markdown", type="generic")
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
+
+            logger.debug("analyze_atomic_parsing_json",
+                content_length=len(content),
+                content_preview=content[:200]
+            )
+
+            result = json.loads(content)
+
+            logger.info("analyze_atomic_completed",
                 atomic_facts=len(result.get("atomic_facts", [])),
+                has_title=bool(result.get("title")),
+                has_summary=bool(result.get("summary")),
                 provider="groq_fast"
             )
             return result
+        except json.JSONDecodeError as e:
+            logger.error("analyze_atomic_json_error",
+                error=str(e),
+                content_preview=content[:300] if 'content' in locals() else 'N/A'
+            )
+            return {"title": "", "summary": "", "tags": [], "atomic_facts": []}
         except Exception as e:
-            logger.error("analyze_atomic_error", error=str(e))
+            logger.error("analyze_atomic_error",
+                error=str(e),
+                error_type=type(e).__name__
+            )
             return {"title": "", "summary": "", "tags": [], "atomic_facts": []}
     
     async def extract_news_links(
