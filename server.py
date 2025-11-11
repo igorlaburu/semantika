@@ -1745,7 +1745,7 @@ async def enrich_context_unit(
 
 class TTSRequest(BaseModel):
     """Request model for TTS synthesis."""
-    text: str = Field(..., min_length=1, max_length=5000, description="Text to synthesize")
+    text: str = Field(..., min_length=1, max_length=3000, description="Text to synthesize (max 3000 chars for speed)")
     rate: float = Field(1.3, ge=0.5, le=2.0, description="Speech rate (0.5=slow, 2.0=fast)")
 
 
@@ -1794,6 +1794,15 @@ async def tts_synthesize(
             text_preview=request.text[:50]
         )
 
+        # Warn if text is long (may take >10s)
+        if len(request.text) > 2000:
+            logger.warn(
+                "tts_long_text",
+                client_id=client["client_id"],
+                text_length=len(request.text),
+                estimated_duration_seconds=len(request.text) // 200  # ~200 chars/sec
+            )
+
         # Convert rate to length_scale (inverse)
         # rate 1.3 = 30% faster = length_scale 0.77
         length_scale = 1.0 / request.rate
@@ -1814,7 +1823,7 @@ async def tts_synthesize(
 
         audio_data, error = process.communicate(
             input=request.text.encode('utf-8'),
-            timeout=30
+            timeout=15  # 15s timeout for better UX (fallback to browser TTS)
         )
 
         if process.returncode != 0:
@@ -1877,7 +1886,7 @@ async def tts_synthesize(
         )
         raise HTTPException(
             status_code=504,
-            detail="TTS generation timeout (30s)"
+            detail=f"TTS timeout (>15s) - texto demasiado largo ({len(request.text)} caracteres). Usa menos de 2000 caracteres para síntesis rápida."
         )
     except HTTPException:
         raise
