@@ -370,10 +370,35 @@ Extract and respond in JSON:
             
             # Clean HTML: remove scripts, styles to maximize useful content
             from bs4 import BeautifulSoup
+
+            logger.info("extract_news_links_html_cleaning_start",
+                html_original_length=len(html),
+                base_url=base_url
+            )
+
             soup = BeautifulSoup(html, 'html.parser')
+
+            # Count elements before cleaning
+            scripts_count = len(soup.find_all('script'))
+            styles_count = len(soup.find_all('style'))
+            iframes_count = len(soup.find_all('iframe'))
+
+            logger.debug("extract_news_links_html_elements",
+                scripts=scripts_count,
+                styles=styles_count,
+                iframes=iframes_count
+            )
+
             for tag in soup(['script', 'style', 'iframe']):
                 tag.decompose()
             cleaned_html = str(soup)
+
+            logger.info("extract_news_links_html_cleaned",
+                original_length=len(html),
+                cleaned_length=len(cleaned_html),
+                slice_length=min(len(cleaned_html), 50000),
+                html_preview=cleaned_html[:500]
+            )
 
             response = await provider.ainvoke(
                 self.extract_links_chain.first.format_messages(
@@ -385,19 +410,26 @@ Extract and respond in JSON:
 
             import json
 
+            logger.info("extract_news_links_groq_response_received",
+                response_length=len(response.content),
+                response_preview=response.content[:200]
+            )
+
             # Clean response content (remove markdown if present)
             content = response.content
             if content.startswith("```json"):
                 content = content[7:]
+                logger.debug("extract_news_links_stripped_markdown", type="json")
             elif content.startswith("```"):
                 content = content[3:]
+                logger.debug("extract_news_links_stripped_markdown", type="generic")
             if content.endswith("```"):
                 content = content[:-3]
             content = content.strip()
 
-            logger.debug("extract_news_links_parsing",
+            logger.info("extract_news_links_parsing_json",
                 content_length=len(content),
-                content_preview=content[:100]
+                content_preview=content[:300]
             )
 
             result = json.loads(content)

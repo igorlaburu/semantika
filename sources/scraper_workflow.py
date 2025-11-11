@@ -328,7 +328,7 @@ async def parse_multi_noticia(state: ScraperState, news_blocks, soup: BeautifulS
 
 async def parse_index(state: ScraperState, soup: BeautifulSoup):
     """Parse index page using Groq to extract article links, then scrape them.
-    
+
     Args:
         state: Workflow state
         soup: BeautifulSoup object
@@ -336,49 +336,85 @@ async def parse_index(state: ScraperState, soup: BeautifulSoup):
     url = state["url"]
     html = state["html"]
     company_id = state["company_id"]
-    
-    logger.info("parse_index_start", url=url)
-    
+
+    logger.info("parse_index_start",
+        url=url,
+        html_length=len(html),
+        company_id=company_id
+    )
+
     # Use Groq to intelligently extract news links
     llm_client = get_llm_client()
-    
+
     try:
+        logger.info("parse_index_calling_extract_news_links", url=url)
+
         result = await llm_client.extract_news_links(
             html=html,
             base_url=url,
             organization_id=company_id
         )
-        
+
+        logger.info("parse_index_extract_result",
+            url=url,
+            result_type=type(result).__name__,
+            result_keys=list(result.keys()) if isinstance(result, dict) else "not_dict",
+            articles_raw_count=len(result.get("articles", [])) if isinstance(result, dict) else 0
+        )
+
         articles = result.get("articles", [])[:10]  # Limit to 10 most recent
-        
+
         logger.info("index_links_extracted",
             url=url,
-            articles_found=len(articles)
+            articles_found=len(articles),
+            articles_preview=[{
+                "title": a.get("title", "")[:50],
+                "url": a.get("url", "")[:80]
+            } for a in articles[:3]]
         )
-        
+
         if not articles:
-            logger.warn("no_articles_found_in_index", url=url)
+            logger.warn("no_articles_found_in_index",
+                url=url,
+                result=result
+            )
             state["content_items"] = []
             return
-        
+
         # Now scrape each article in parallel (max 3 concurrent)
+        logger.info("parse_index_starting_article_scraping",
+            url=url,
+            article_count=len(articles)
+        )
+
         content_items = await scrape_articles_from_index(
             articles=articles,
             company_id=company_id,
             max_concurrent=3
         )
-        
+
+        logger.info("parse_index_article_scraping_completed",
+            url=url,
+            items_scraped=len(content_items)
+        )
+
         state["content_items"] = content_items
         state["title"] = f"{len(content_items)} noticias de índice"
         state["summary"] = f"Extraídas {len(content_items)} noticias del índice"
-        
+
         logger.info("index_parsed_and_scraped",
             url=url,
             articles_scraped=len(content_items)
         )
-        
+
     except Exception as e:
-        logger.error("parse_index_error", url=url, error=str(e))
+        logger.error("parse_index_error",
+            url=url,
+            error=str(e),
+            error_type=type(e).__name__
+        )
+        import traceback
+        logger.error("parse_index_traceback", traceback=traceback.format_exc())
         state["content_items"] = []
 
 
