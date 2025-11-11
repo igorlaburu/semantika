@@ -391,7 +391,28 @@ Listar context units del cliente.
       "title": "Título del documento",
       "summary": "Resumen corto...",
       "content": "Contenido completo...",
-      "atomic_statements": ["Afirmación 1", "Afirmación 2"],
+      "atomic_statements": [
+        {
+          "text": "La Gran Recogida se celebrará el 7 y 8 de noviembre",
+          "type": "fact",
+          "order": 1,
+          "speaker": null
+        },
+        {
+          "text": "Necesitamos un radar móvil",
+          "type": "quote",
+          "order": 2,
+          "speaker": "Asociación vecinal"
+        }
+      ],
+      "enriched_statements": [
+        {
+          "text": "5.000 voluntarios participarán en la Gran Recogida",
+          "type": "fact",
+          "order": 16,
+          "speaker": null
+        }
+      ],
       "loaded_at": "2025-11-11T10:00:00Z",
       "metadata": {}
     }
@@ -399,6 +420,21 @@ Listar context units del cliente.
   "total": 45
 }
 ```
+
+**Formato Unificado de Statements**:
+
+Tanto `atomic_statements` como `enriched_statements` usan el mismo formato JSONB:
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `text` | string | Contenido del statement |
+| `type` | string | `"fact"`, `"quote"`, `"context"` |
+| `order` | number | Orden de aparición (secuencial) |
+| `speaker` | string\|null | Atribución (para quotes) |
+
+**Atomic vs Enriched**:
+- **Atomic**: Extraídos del contenido original durante ingesta
+- **Enriched**: Añadidos posteriormente via `/enrich` con búsqueda web
 
 ---
 
@@ -467,7 +503,7 @@ Crear context unit desde URL (con workflow inteligente).
 
 #### `POST /api/v1/context-units/{context_unit_id}/enrich`
 
-Enriquecer context unit con información adicional.
+Enriquecer context unit con información adicional usando búsqueda web en tiempo real.
 
 **Headers**: `X-API-Key`, `Content-Type: application/json`
 
@@ -481,22 +517,45 @@ Enriquecer context unit con información adicional.
 ```
 
 **Tipos de enriquecimiento**:
-- `"update"`: Actualizar con información reciente
-- `"background"`: Agregar contexto histórico
-- `"verify"`: Verificar hechos con fuentes externas
+- `"update"`: Actualizar con información reciente (busca novedades, desarrollos)
+- `"background"`: Agregar contexto histórico (busca antecedentes, historia previa)
+- `"verify"`: Verificar hechos con fuentes externas (valida vigencia)
 
 **Respuesta**:
 ```json
 {
-  "status": "success",
+  "success": true,
   "context_unit_id": "uuid-123",
-  "enrichment": {
-    "type": "background",
-    "content": "Contexto histórico agregado...",
-    "sources": ["url1", "url2"]
-  }
+  "context_unit_title": "Título del Context Unit",
+  "enrich_type": "background",
+  "age_days": 5,
+  "result": {
+    "background_facts": ["antecedente1", "antecedente2"],
+    "historical_context": "explicación breve del contexto",
+    "sources": ["url1", "url2"],
+    "suggestion": "cómo añadir contexto al artículo"
+  },
+  "timestamp": "2025-11-11T10:00:00Z"
 }
 ```
+
+**Importante**: Los enriched statements se guardan automáticamente en la BD en formato JSONB:
+```json
+{
+  "text": "El statement enriquecido",
+  "type": "fact",
+  "order": 16,
+  "speaker": null
+}
+```
+
+Los `order` se calculan automáticamente después del último `atomic_statement`.
+
+**Notas**:
+- Usa Groq Compound con web search automática
+- Los statements enriquecidos se **acumulan** (no reemplazan los anteriores)
+- Se factura como operación "simple" (microedición)
+- Compatible con formato legacy (migración automática)
 
 ---
 
