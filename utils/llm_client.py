@@ -368,9 +368,16 @@ Extract and respond in JSON:
                     'operation': 'extract_news_links'
                 }
             
+            # Clean HTML: remove scripts, styles to maximize useful content
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html, 'html.parser')
+            for tag in soup(['script', 'style', 'iframe']):
+                tag.decompose()
+            cleaned_html = str(soup)
+
             response = await provider.ainvoke(
                 self.extract_links_chain.first.format_messages(
-                    html=html[:16000],  # Larger for index pages
+                    html=cleaned_html[:50000],  # Increased for index pages
                     base_url=base_url
                 ),
                 config=config
