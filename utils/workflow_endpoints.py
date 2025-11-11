@@ -344,8 +344,9 @@ async def execute_redact_news_rich(
         for cu in context_units:
             cu_title = cu.get("title", "Sin título")
             cu_summary = cu.get("summary", "")
-            atomic_statements = cu.get("atomic_statements", [])
-            enriched_statements = cu.get("enriched_statements", [])
+            # Handle NULL values from DB (use 'or []' to convert None to [])
+            atomic_statements = cu.get("atomic_statements") or []
+            enriched_statements = cu.get("enriched_statements") or []
 
             source_text_parts.append(f"## {cu_title}")
             if cu_summary:
@@ -399,8 +400,9 @@ async def execute_redact_news_rich(
         source_text = "\n".join(source_text_parts)
 
         # Count total statements (atomic + enriched)
-        total_atomic = sum(len(cu.get("atomic_statements", [])) for cu in context_units)
-        total_enriched = sum(len(cu.get("enriched_statements", [])) for cu in context_units)
+        # Handle NULL values from DB (use 'or []' to convert None to [])
+        total_atomic = sum(len(cu.get("atomic_statements") or []) for cu in context_units)
+        total_enriched = sum(len(cu.get("enriched_statements") or []) for cu in context_units)
 
         # Log source text construction for debugging multi-source fusion
         logger.info(
