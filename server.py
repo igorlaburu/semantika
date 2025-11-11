@@ -7,10 +7,12 @@ Version: 2025-10-28
 
 from datetime import datetime
 from typing import Dict, Optional, Any, List
+import subprocess
+import io
 
 from fastapi import FastAPI, Request, Header, HTTPException, Depends
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field
 
 from utils.logger import get_logger
 from utils.config import settings
@@ -1734,6 +1736,124 @@ async def enrich_context_unit(
             error=str(e)
         )
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# TTS ENDPOINTS (Piper TTS)
+# ============================================
+
+class TTSRequest(BaseModel):
+    """Request model for TTS synthesis."""
+    text: str = Field(..., min_length=1, max_length=5000, description="Text to synthesize")
+    rate: float = Field(1.3, ge=0.5, le=2.0, description="Speech rate (0.5=slow, 2.0=fast)")
+
+
+@app.get("/tts/health")
+async def tts_health():
+    """TTS service health check.
+
+    Returns:
+        Health status of TTS service
+    """
+    return {
+        "status": "ok",
+        "service": "semantika-tts",
+        "version": "1.0.0",
+        "model": "es_ES-davefx-medium",
+        "integrated": True
+    }
+
+
+@app.post("/tts/synthesize")
+async def tts_synthesize(request: TTSRequest):
+    """Synthesize speech from text using Piper TTS.
+
+    Args:
+        request: TTSRequest with text and rate
+
+    Returns:
+        WAV audio stream
+
+    Raises:
+        HTTPException: If synthesis fails
+    """
+    try:
+        logger.info(
+            "tts_request",
+            text_length=len(request.text),
+            rate=request.rate,
+            text_preview=request.text[:50]
+        )
+
+        # Convert rate to length_scale (inverse)
+        # rate 1.3 = 30% faster = length_scale 0.77
+        length_scale = 1.0 / request.rate
+
+        # Call Piper binary
+        process = subprocess.Popen(
+            [
+                '/app/piper/piper',
+                '--model', '/app/models/es_ES-davefx-medium.onnx',
+                '--length_scale', str(length_scale),
+                '--output-raw'
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+
+        audio_data, error = process.communicate(
+            input=request.text.encode('utf-8'),
+            timeout=30
+        )
+
+        if process.returncode != 0:
+            error_msg = error.decode('utf-8', errors='ignore')
+            logger.error(
+                "piper_tts_error",
+                returncode=process.returncode,
+                error=error_msg[:200]
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f"TTS synthesis failed: {error_msg[:100]}"
+            )
+
+        audio_size = len(audio_data)
+        estimated_duration = audio_size // 32000  # Rough estimate
+
+        logger.info(
+            "tts_success",
+            audio_size=audio_size,
+            estimated_duration_seconds=estimated_duration,
+            text_length=len(request.text),
+            rate=request.rate
+        )
+
+        return StreamingResponse(
+            io.BytesIO(audio_data),
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition": "attachment; filename=speech.wav",
+                "Content-Length": str(audio_size),
+                "Cache-Control": "public, max-age=3600"
+            }
+        )
+
+    except subprocess.TimeoutExpired:
+        logger.error("tts_timeout", text_length=len(request.text))
+        raise HTTPException(
+            status_code=504,
+            detail="TTS generation timeout (30s)"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("tts_error", error=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"TTS error: {str(e)}"
+        )
 
 
 if __name__ == "__main__":

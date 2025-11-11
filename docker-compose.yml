@@ -27,22 +27,6 @@ services:
     networks:
       - semantika-network
 
-  semantika-tts:
-    build:
-      context: ./docker/piper
-      dockerfile: Dockerfile
-    container_name: semantika-tts
-    expose:
-      - "5000"
-    restart: unless-stopped
-    networks:
-      - semantika-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
 networks:
   semantika-network:
     driver: bridge

@@ -9,10 +9,13 @@ ENV PYTHONUNBUFFERED=1 \
 
 # Install system dependencies
 # ffmpeg needed for Whisper audio processing
+# wget and curl needed for Piper TTS download
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     gcc \
     g++ \
+    wget \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -26,6 +29,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
+
+# Download and install Piper TTS
+RUN mkdir -p /app/piper /app/models && \
+    cd /app/piper && \
+    wget -q https://github.com/rhasspy/piper/releases/download/v1.2.0/piper_amd64.tar.gz && \
+    tar -xzf piper_amd64.tar.gz && \
+    rm piper_amd64.tar.gz && \
+    chmod +x piper && \
+    cd /app/models && \
+    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/davefx/medium/es_ES-davefx-medium.onnx && \
+    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/davefx/medium/es_ES-davefx-medium.onnx.json
 
 # Create non-root user for security
 RUN useradd -m -u 1000 semantika && \
