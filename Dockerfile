@@ -36,14 +36,14 @@ RUN mkdir -p /app/piper /app/models && \
     wget -q https://github.com/rhasspy/piper/releases/download/v1.2.0/piper_amd64.tar.gz && \
     tar -xzf piper_amd64.tar.gz && \
     rm piper_amd64.tar.gz && \
-    chmod +x piper && \
     cd /app/models && \
     wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/davefx/medium/es_ES-davefx-medium.onnx && \
     wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/davefx/medium/es_ES-davefx-medium.onnx.json
 
 # Create non-root user for security
 RUN useradd -m -u 1000 semantika && \
-    chown -R semantika:semantika /app
+    chown -R semantika:semantika /app && \
+    chmod +x /app/piper/piper
 
 USER semantika
 
