@@ -375,14 +375,36 @@ Extract and respond in JSON:
                 ),
                 config=config
             )
-            
+
             import json
-            result = json.loads(response.content)
+
+            # Clean response content (remove markdown if present)
+            content = response.content
+            if content.startswith("```json"):
+                content = content[7:]
+            elif content.startswith("```"):
+                content = content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
+
+            logger.debug("extract_news_links_parsing",
+                content_length=len(content),
+                content_preview=content[:100]
+            )
+
+            result = json.loads(content)
             logger.info("extract_news_links_completed",
                 articles_found=len(result.get("articles", [])),
                 provider="groq_fast"
             )
             return result
+        except json.JSONDecodeError as e:
+            logger.error("extract_news_links_json_error",
+                error=str(e),
+                content_preview=content[:200] if 'content' in locals() else 'N/A'
+            )
+            return {"articles": []}
         except Exception as e:
             logger.error("extract_news_links_error", error=str(e))
             return {"articles": []}
