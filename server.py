@@ -1718,98 +1718,6 @@ async def enrich_context_unit(
             has_error=bool(enrichment_result.get("error"))
         )
 
-        # Convert enrichment results to JSONB format and save to DB
-        if not enrichment_result.get("error"):
-            # Get current atomic_statements to calculate next order number
-            atomic_statements = context_unit.get("atomic_statements", [])
-            max_order = 0
-            if atomic_statements:
-                for stmt in atomic_statements:
-                    if isinstance(stmt, dict):
-                        stmt_order = stmt.get("order", 0)
-                        if stmt_order > max_order:
-                            max_order = stmt_order
-
-            # Extract statements from enrichment result based on type
-            new_enriched_statements = []
-            next_order = max_order + 1
-
-            if request.enrich_type == "update":
-                # Extract new_developments array
-                new_developments = enrichment_result.get("new_developments", [])
-                for dev in new_developments:
-                    if isinstance(dev, str) and dev:
-                        new_enriched_statements.append({
-                            "text": dev,
-                            "type": "fact",
-                            "order": next_order,
-                            "speaker": None
-                        })
-                        next_order += 1
-
-            elif request.enrich_type == "background":
-                # Extract background_facts array
-                background_facts = enrichment_result.get("background_facts", [])
-                for fact in background_facts:
-                    if isinstance(fact, str) and fact:
-                        new_enriched_statements.append({
-                            "text": fact,
-                            "type": "context",
-                            "order": next_order,
-                            "speaker": None
-                        })
-                        next_order += 1
-
-            elif request.enrich_type == "verify":
-                # Extract latest_info string
-                latest_info = enrichment_result.get("latest_info", "")
-                if latest_info:
-                    new_enriched_statements.append({
-                        "text": latest_info,
-                        "type": "fact",
-                        "order": next_order,
-                        "speaker": None
-                    })
-
-            # Update database with new enriched_statements (append to existing)
-            if new_enriched_statements:
-                existing_enriched = context_unit.get("enriched_statements", [])
-
-                # Normalize existing enriched to JSONB format
-                normalized_existing = []
-                if existing_enriched:
-                    for item in existing_enriched:
-                        if isinstance(item, dict):
-                            normalized_existing.append(item)
-                        elif isinstance(item, str) and item:
-                            # Legacy string format - convert
-                            normalized_existing.append({
-                                "text": item,
-                                "type": "fact",
-                                "order": 9999,
-                                "speaker": None
-                            })
-
-                # Combine and save
-                updated_enriched = normalized_existing + new_enriched_statements
-
-                update_result = supabase_client.client.table("press_context_units").update({
-                    "enriched_statements": updated_enriched
-                }).eq("id", context_unit_id).execute()
-
-                if update_result.data:
-                    logger.info(
-                        "enriched_statements_saved",
-                        context_unit_id=context_unit_id,
-                        new_statements_count=len(new_enriched_statements),
-                        total_enriched_count=len(updated_enriched)
-                    )
-                else:
-                    logger.error(
-                        "enriched_statements_save_failed",
-                        context_unit_id=context_unit_id
-                    )
-
         return {
             "success": not bool(enrichment_result.get("error")),
             "context_unit_id": context_unit_id,
@@ -1825,6 +1733,158 @@ async def enrich_context_unit(
     except Exception as e:
         logger.error(
             "enrich_context_unit_error",
+            context_unit_id=context_unit_id,
+            error=str(e)
+        )
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class SaveEnrichedStatementsRequest(BaseModel):
+    """Request model for saving enriched statements."""
+    statements: List[Dict[str, Any]]
+    append: bool = True
+
+
+@app.patch("/api/v1/context-units/{context_unit_id}/enriched-statements")
+async def save_enriched_statements(
+    context_unit_id: str,
+    request: SaveEnrichedStatementsRequest,
+    client: Dict = Depends(get_current_client)
+):
+    """
+    Save user-selected enriched statements to context unit.
+
+    This endpoint allows selective saving of enriched statements after
+    user review. The web backend calls this after user selection.
+
+    Args:
+        context_unit_id: UUID of context unit
+        request: Statements to save and append mode
+        client: Authenticated client data
+
+    Returns:
+        Success status with count information
+    """
+    try:
+        logger.info(
+            "save_enriched_statements_request",
+            context_unit_id=context_unit_id,
+            statements_count=len(request.statements),
+            append=request.append,
+            client_id=client["client_id"]
+        )
+
+        # Get context unit from database
+        result = supabase_client.client.table("press_context_units")\
+            .select("*")\
+            .eq("id", context_unit_id)\
+            .eq("company_id", client["company_id"])\
+            .maybe_single()\
+            .execute()
+
+        if not result.data:
+            logger.warn(
+                "context_unit_not_found",
+                context_unit_id=context_unit_id,
+                client_id=client["client_id"]
+            )
+            raise HTTPException(status_code=404, detail="Context unit not found")
+
+        context_unit = result.data
+
+        # Get current atomic_statements to calculate next order number
+        atomic_statements = context_unit.get("atomic_statements", [])
+        existing_enriched = context_unit.get("enriched_statements", [])
+
+        max_order = 0
+
+        # Find max order from atomic_statements
+        if atomic_statements:
+            for stmt in atomic_statements:
+                if isinstance(stmt, dict):
+                    stmt_order = stmt.get("order", 0)
+                    if stmt_order > max_order:
+                        max_order = stmt_order
+
+        # Find max order from existing enriched_statements
+        if existing_enriched and request.append:
+            for stmt in existing_enriched:
+                if isinstance(stmt, dict):
+                    stmt_order = stmt.get("order", 0)
+                    if stmt_order > max_order:
+                        max_order = stmt_order
+
+        # Add order and speaker to new statements
+        next_order = max_order + 1
+        new_statements = []
+
+        for stmt in request.statements:
+            if not isinstance(stmt, dict) or not stmt.get("text"):
+                continue
+
+            new_stmt = {
+                "text": stmt.get("text"),
+                "type": stmt.get("type", "fact"),
+                "order": next_order,
+                "speaker": stmt.get("speaker", None)
+            }
+            new_statements.append(new_stmt)
+            next_order += 1
+
+        # Prepare final enriched_statements array
+        if request.append:
+            # Normalize existing enriched to JSONB format
+            normalized_existing = []
+            if existing_enriched:
+                for item in existing_enriched:
+                    if isinstance(item, dict):
+                        normalized_existing.append(item)
+                    elif isinstance(item, str) and item:
+                        # Legacy string format - convert
+                        normalized_existing.append({
+                            "text": item,
+                            "type": "fact",
+                            "order": 9999,
+                            "speaker": None
+                        })
+
+            final_statements = normalized_existing + new_statements
+        else:
+            # Replace all
+            final_statements = new_statements
+
+        # Update database
+        update_result = supabase_client.client.table("press_context_units").update({
+            "enriched_statements": final_statements
+        }).eq("id", context_unit_id).execute()
+
+        if not update_result.data:
+            logger.error(
+                "enriched_statements_save_failed",
+                context_unit_id=context_unit_id
+            )
+            raise HTTPException(status_code=500, detail="Failed to save enriched statements")
+
+        logger.info(
+            "enriched_statements_saved",
+            context_unit_id=context_unit_id,
+            statements_added=len(new_statements),
+            total_enriched=len(final_statements),
+            append=request.append
+        )
+
+        return {
+            "success": True,
+            "context_unit_id": context_unit_id,
+            "statements_added": len(new_statements),
+            "total_enriched": len(final_statements)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "save_enriched_statements_error",
             context_unit_id=context_unit_id,
             error=str(e)
         )
