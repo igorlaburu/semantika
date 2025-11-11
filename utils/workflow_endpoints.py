@@ -344,26 +344,49 @@ async def execute_redact_news_rich(
         for cu in context_units:
             cu_title = cu.get("title", "Sin título")
             cu_summary = cu.get("summary", "")
-            statements = cu.get("atomic_statements", [])
-            
+            atomic_statements = cu.get("atomic_statements", [])
+            enriched_statements = cu.get("enriched_statements", [])
+
             source_text_parts.append(f"## {cu_title}")
             if cu_summary:
                 source_text_parts.append(f"Resumen: {cu_summary}")
-            
-            if statements:
-                source_text_parts.append("Hechos atómicos:")
-                for stmt in statements:
+
+            # Combine atomic statements (JSONB) + enriched statements (strings)
+            all_statements_text = []
+
+            # Extract text from atomic_statements (JSONB format)
+            if atomic_statements:
+                for stmt in atomic_statements:
                     stmt_text = stmt.get("text", "") if isinstance(stmt, dict) else str(stmt)
+                    if stmt_text:
+                        all_statements_text.append(stmt_text)
+
+            # Add enriched_statements (already strings)
+            if enriched_statements:
+                for enriched in enriched_statements:
+                    if enriched:  # Skip empty strings
+                        all_statements_text.append(enriched)
+
+            if all_statements_text:
+                source_text_parts.append("Hechos verificados:")
+                for stmt_text in all_statements_text:
                     source_text_parts.append(f"- {stmt_text}")
-            
+
             source_text_parts.append("")
         
         source_text = "\n".join(source_text_parts)
-        
+
+        # Count total statements (atomic + enriched)
+        total_atomic = sum(len(cu.get("atomic_statements", [])) for cu in context_units)
+        total_enriched = sum(len(cu.get("enriched_statements", [])) for cu in context_units)
+
         # Log source text construction for debugging multi-source fusion
         logger.info(
             "source_text_constructed",
             context_units_count=len(context_units),
+            atomic_statements_count=total_atomic,
+            enriched_statements_count=total_enriched,
+            total_statements=total_atomic + total_enriched,
             source_text_length=len(source_text),
             source_text_preview=source_text[:500]
         )
