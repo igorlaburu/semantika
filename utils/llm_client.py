@@ -370,6 +370,7 @@ Extract and respond in JSON:
             
             # Clean HTML: remove scripts, styles to maximize useful content
             from bs4 import BeautifulSoup
+            import json
 
             logger.info("extract_news_links_html_cleaning_start",
                 html_original_length=len(html),
@@ -389,26 +390,37 @@ Extract and respond in JSON:
                 iframes=iframes_count
             )
 
+            # Remove scripts, styles, iframes
             for tag in soup(['script', 'style', 'iframe']):
                 tag.decompose()
-            cleaned_html = str(soup)
+
+            # Extract only body content (skip head entirely)
+            body = soup.find('body')
+            if body:
+                cleaned_html = str(body)
+                logger.debug("extract_news_links_body_extracted", body_found=True)
+            else:
+                cleaned_html = str(soup)
+                logger.warn("extract_news_links_no_body_found", using_full_html=True)
+
+            # Limit to 30k chars (~9k tokens, well under 12k Groq limit)
+            slice_size = 30000
+            html_slice = cleaned_html[:slice_size]
 
             logger.info("extract_news_links_html_cleaned",
                 original_length=len(html),
                 cleaned_length=len(cleaned_html),
-                slice_length=min(len(cleaned_html), 50000),
-                html_preview=cleaned_html[:500]
+                slice_length=len(html_slice),
+                html_preview=html_slice[:500]
             )
 
             response = await provider.ainvoke(
                 self.extract_links_chain.first.format_messages(
-                    html=cleaned_html[:50000],  # Increased for index pages
+                    html=html_slice,
                     base_url=base_url
                 ),
                 config=config
             )
-
-            import json
 
             logger.info("extract_news_links_groq_response_received",
                 response_length=len(response.content),
