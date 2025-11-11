@@ -31,8 +31,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Download and install Piper TTS
-RUN mkdir -p /app/piper /app/models && \
-    cd /app/piper && \
+# Extract tar in /app (creates /app/piper/ directory automatically)
+RUN mkdir -p /app/models && \
+    cd /app && \
     wget -q https://github.com/rhasspy/piper/releases/download/v1.2.0/piper_amd64.tar.gz && \
     tar -xzf piper_amd64.tar.gz && \
     rm piper_amd64.tar.gz && \
