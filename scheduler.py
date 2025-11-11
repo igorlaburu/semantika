@@ -347,43 +347,105 @@ async def schedule_sources(scheduler: AsyncIOScheduler):
                             continue
                 
                 if hour is not None and minute is not None:
-                    scheduler.add_job(
-                        execute_source_task,
-                        trigger=CronTrigger(hour=hour, minute=minute),
-                        args=[source],
-                        id=f"source_{source_id}",
-                        replace_existing=True,
-                        max_instances=1
-                    )
-                    
-                    logger.info(
-                        "source_scheduled_cron",
-                        source_id=source_id,
-                        source_name=source["source_name"],
-                        cron_time=f"{hour:02d}:{minute:02d}",
-                        source_type=source_type
-                    )
+                    job_id = f"source_{source_id}"
+                    existing_job = scheduler.get_job(job_id)
+
+                    # Check if job needs to be added/updated
+                    needs_update = False
+                    if existing_job is None:
+                        needs_update = True
+                        logger.debug("cron_job_new", source_id=source_id)
+                    else:
+                        # Check if cron trigger changed
+                        if isinstance(existing_job.trigger, CronTrigger):
+                            # Compare hour and minute fields
+                            existing_hour = list(existing_job.trigger.fields[5])[0] if existing_job.trigger.fields[5] else None
+                            existing_minute = list(existing_job.trigger.fields[6])[0] if existing_job.trigger.fields[6] else None
+                            if existing_hour != hour or existing_minute != minute:
+                                needs_update = True
+                                logger.debug("cron_job_changed",
+                                    source_id=source_id,
+                                    old_time=f"{existing_hour}:{existing_minute}" if existing_hour is not None else "unknown",
+                                    new_time=f"{hour:02d}:{minute:02d}"
+                                )
+                        else:
+                            needs_update = True
+                            logger.debug("cron_job_trigger_type_changed", source_id=source_id)
+
+                    if needs_update:
+                        scheduler.add_job(
+                            execute_source_task,
+                            trigger=CronTrigger(hour=hour, minute=minute),
+                            args=[source],
+                            id=job_id,
+                            replace_existing=True,
+                            max_instances=1
+                        )
+
+                        logger.info(
+                            "source_scheduled_cron",
+                            source_id=source_id,
+                            source_name=source["source_name"],
+                            cron_time=f"{hour:02d}:{minute:02d}",
+                            source_type=source_type
+                        )
+                    else:
+                        logger.debug("cron_job_unchanged_skipping",
+                            source_id=source_id,
+                            source_name=source["source_name"],
+                            cron_time=f"{hour:02d}:{minute:02d}"
+                        )
                     continue
             
             # Fallback to interval scheduling for scraping and API sources
             if source_type in ["scraping", "api"] and frequency_min > 0:
-                # Schedule source with interval trigger
-                scheduler.add_job(
-                    execute_source_task,
-                    trigger=IntervalTrigger(minutes=frequency_min),
-                    args=[source],
-                    id=f"source_{source_id}",
-                    replace_existing=True,
-                    max_instances=1
-                )
+                job_id = f"source_{source_id}"
+                existing_job = scheduler.get_job(job_id)
 
-                logger.info(
-                    "source_scheduled_interval",
-                    source_id=source_id,
-                    source_name=source["source_name"],
-                    frequency_min=frequency_min,
-                    source_type=source_type
-                )
+                # Check if job needs to be added/updated
+                needs_update = False
+                if existing_job is None:
+                    needs_update = True
+                    logger.debug("interval_job_new", source_id=source_id)
+                else:
+                    # Check if trigger changed
+                    if isinstance(existing_job.trigger, IntervalTrigger):
+                        existing_interval = existing_job.trigger.interval.total_seconds() / 60
+                        if abs(existing_interval - frequency_min) > 0.1:
+                            needs_update = True
+                            logger.debug("interval_job_changed",
+                                source_id=source_id,
+                                old_interval=existing_interval,
+                                new_interval=frequency_min
+                            )
+                    else:
+                        needs_update = True
+                        logger.debug("interval_job_trigger_type_changed", source_id=source_id)
+
+                if needs_update:
+                    # Schedule source with interval trigger
+                    scheduler.add_job(
+                        execute_source_task,
+                        trigger=IntervalTrigger(minutes=frequency_min),
+                        args=[source],
+                        id=job_id,
+                        replace_existing=True,
+                        max_instances=1
+                    )
+
+                    logger.info(
+                        "source_scheduled_interval",
+                        source_id=source_id,
+                        source_name=source["source_name"],
+                        frequency_min=frequency_min,
+                        source_type=source_type
+                    )
+                else:
+                    logger.debug("interval_job_unchanged_skipping",
+                        source_id=source_id,
+                        source_name=source["source_name"],
+                        frequency_min=frequency_min
+                    )
 
         # Schedule daily TTL cleanup at 3 AM
         scheduler.add_job(
