@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from utils.logger import get_logger
 from utils.config import settings
 from utils.supabase_client import get_supabase_client
+from utils.usage_tracker import get_usage_tracker
 from core_ingest import IngestPipeline
 
 # Initialize logger
@@ -1837,6 +1838,24 @@ async def tts_synthesize(
             estimated_duration_seconds=estimated_duration,
             text_length=len(request.text),
             rate=request.rate
+        )
+
+        # Track usage as simple operation (microedición)
+        tracker = get_usage_tracker()
+        await tracker.track(
+            organization_id=client.get("organization_id", "00000000-0000-0000-0000-000000000001"),
+            model="piper/es_ES-davefx-medium",
+            operation="tts_synthesize",
+            input_tokens=0,
+            output_tokens=0,
+            client_id=client["client_id"],
+            metadata={
+                "text_length": len(request.text),
+                "audio_size": audio_size,
+                "rate": request.rate,
+                "duration_seconds": estimated_duration,
+                "usage_type": "simple"  # Microedición
+            }
         )
 
         return StreamingResponse(
