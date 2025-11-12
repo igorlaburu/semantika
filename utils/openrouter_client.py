@@ -821,6 +821,7 @@ Respond in JSON format:
                 "user_instructions": user_instructions
             }, config=config)
 
+            # Debug: verify LLM returns statements_used field
             logger.debug(
                 "redact_news_rich_completed",
                 article_length=len(result.get("article", "")),
