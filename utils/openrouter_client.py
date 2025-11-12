@@ -153,7 +153,7 @@ class OpenRouterClient:
             self.llm_sonnet_premium = TrackedChatOpenAI(
                 base_url="https://openrouter.ai/api/v1",
                 api_key=settings.openrouter_api_key,
-                model="anthropic/claude-3.5-sonnet-20241022",
+                model="anthropic/claude-sonnet-4.5-20250514",
                 temperature=0.0
             )
             
@@ -816,10 +816,21 @@ Respond in JSON format:
                     'client_id': client_id
                 }
 
-            result = await redact_rich_chain.ainvoke({
+            # Test without JsonOutputParser to see raw LLM response
+            logger.info("redact_news_rich_calling_llm", source_text_length=len(source_text[:12000]))
+
+            # Call LLM directly without parser first
+            raw_response = await (redact_rich_prompt | self.llm_sonnet_premium).ainvoke({
                 "source_text": source_text[:12000],
                 "user_instructions": user_instructions
             }, config=config)
+
+            logger.info("redact_news_rich_raw_response",
+                       raw_response_type=type(raw_response).__name__,
+                       raw_content_preview=str(raw_response.content)[:500] if hasattr(raw_response, 'content') else str(raw_response)[:500])
+
+            # Now parse it
+            result = JsonOutputParser().parse(raw_response.content if hasattr(raw_response, 'content') else str(raw_response))
 
             # Debug: verify LLM returns statements_used field
             logger.debug(
