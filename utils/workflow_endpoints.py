@@ -341,14 +341,22 @@ async def execute_redact_news_rich(
         all_statements.sort(key=lambda x: x.get("statement", {}).get("order", 0) if isinstance(x.get("statement"), dict) else 0)
         
         source_text_parts = []
+        # Keep mapping of context_unit_id to title for statements_used processing
+        cu_id_to_title = {}
+
         for cu in context_units:
+            cu_id = cu.get("id")
             cu_title = cu.get("title", "Sin título")
             cu_summary = cu.get("summary", "")
+
+            # Store mapping for later
+            cu_id_to_title[cu_id] = cu_title
+
             # Handle NULL values from DB (use 'or []' to convert None to [])
             atomic_statements = cu.get("atomic_statements") or []
             enriched_statements = cu.get("enriched_statements") or []
 
-            source_text_parts.append(f"## {cu_title}")
+            source_text_parts.append(f"## {cu_title} [CU:{cu_id}]")
             if cu_summary:
                 source_text_parts.append(f"Resumen: {cu_summary}")
 
@@ -387,13 +395,14 @@ async def execute_redact_news_rich(
             # Sort by order
             all_statements.sort(key=lambda x: x.get("order", 9999))
 
-            # Extract text for rendering
-            all_statements_text = [stmt.get("text", "") for stmt in all_statements if stmt.get("text")]
-
-            if all_statements_text:
+            if all_statements:
                 source_text_parts.append("Hechos verificados:")
-                for stmt_text in all_statements_text:
-                    source_text_parts.append(f"- {stmt_text}")
+                for stmt in all_statements:
+                    stmt_text = stmt.get("text", "")
+                    stmt_order = stmt.get("order", 0)
+                    if stmt_text:
+                        # Include order number for LLM tracking
+                        source_text_parts.append(f"- [{stmt_order}] {stmt_text}")
 
             source_text_parts.append("")
         
@@ -439,7 +448,54 @@ async def execute_redact_news_rich(
                 "created_at": cu.get("created_at", "")
             })
         result["statements_count"] = len(all_statements)
-        
+
+        # Extract and normalize statements_used tracking
+        statements_used_raw = result.get("statements_used", {})
+        statements_used_normalized = {}
+
+        if statements_used_raw:
+            # Create reverse mapping: title -> cu_id for fallback
+            title_to_cu_id = {v: k for k, v in cu_id_to_title.items()}
+
+            for key, order_numbers in statements_used_raw.items():
+                # Check if key is already a UUID (context_unit_id)
+                if key in cu_id_to_title:
+                    # Key is already a valid context_unit_id
+                    statements_used_normalized[key] = order_numbers
+                elif key in title_to_cu_id:
+                    # Key is a title, map to context_unit_id
+                    cu_id = title_to_cu_id[key]
+                    statements_used_normalized[cu_id] = order_numbers
+                else:
+                    # Try to extract CU ID from format like "CU:uuid" or similar
+                    if ":" in key:
+                        potential_uuid = key.split(":")[-1].strip()
+                        if potential_uuid in cu_id_to_title:
+                            statements_used_normalized[potential_uuid] = order_numbers
+                        else:
+                            logger.warn(
+                                "statements_used_key_not_mapped",
+                                key=key,
+                                available_cu_ids=list(cu_id_to_title.keys())
+                            )
+                    else:
+                        logger.warn(
+                            "statements_used_key_unknown_format",
+                            key=key
+                        )
+
+            result["statements_used"] = statements_used_normalized
+
+            logger.info(
+                "statements_tracking_processed",
+                raw_keys=list(statements_used_raw.keys()),
+                normalized_count=len(statements_used_normalized),
+                total_statements_tracked=sum(len(v) for v in statements_used_normalized.values())
+            )
+        else:
+            result["statements_used"] = {}
+            logger.warn("statements_used_not_returned_by_llm")
+
         return result
         
     except Exception as e:

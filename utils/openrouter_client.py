@@ -788,8 +788,15 @@ Formatting rules:
 - Use **bold** for place names (cities, countries, regions)
 - For sections with clearly defined context and substantial length (3+ paragraphs), add an H2 subtitle (## Subtitle)
 
+Statement tracking:
+- Each statement in source materials has an order number
+- Track which statement order numbers you actually used when writing the article
+- Group by context unit: identify which statements from which source you used
+- Return statements_used as object mapping source title/id to array of order numbers used
+- If you used statements with order 1, 3, 5 from first source and 16, 17 from second source: {{"source_1": [1, 3, 5], "source_2": [16, 17]}}
+
 Respond in JSON:
-{{"article": "Full article text...", "title": "...", "summary": "...", "tags": [...], "author": "Redacción"}}""")
+{{"article": "Full article text...", "title": "...", "summary": "...", "tags": [...], "author": "Redacción", "statements_used": {{}}}}""")
             ])
 
             redact_rich_chain = RunnableSequence(
