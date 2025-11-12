@@ -788,15 +788,20 @@ Formatting rules:
 - Use **bold** for place names (cities, countries, regions)
 - For sections with clearly defined context and substantial length (3+ paragraphs), add an H2 subtitle (## Subtitle)
 
-Statement tracking:
-- Each statement in source materials has an order number
-- Track which statement order numbers you actually used when writing the article
-- Group by context unit: identify which statements from which source you used
-- Return statements_used as object mapping source title/id to array of order numbers used
-- If you used statements with order 1, 3, 5 from first source and 16, 17 from second source: {{"source_1": [1, 3, 5], "source_2": [16, 17]}}
+MANDATORY STATEMENT TRACKING:
+- CRITICAL: You MUST track which statements you use from each context unit
+- Each statement has an order number in brackets like [0], [1], [2], etc.
+- Each source has a context unit ID in the header like ## Title [CU:uuid-here]
+- Extract the UUID from [CU:uuid] markers in the source headers
+- For EACH context unit UUID, list ALL statement order numbers you actually used in your article
+- Example: If you used statements [0], [3], [5] from context unit "5f038203-bb89-4543-910a-dead6d1dfdd1":
+  {{"5f038203-bb89-4543-910a-dead6d1dfdd1": [0, 3, 5]}}
+- If using multiple context units, include all of them:
+  {{"uuid-1": [0, 1, 3], "uuid-2": [16, 17, 20]}}
+- The statements_used field is REQUIRED in your response - do not omit it
 
-Respond in JSON:
-{{"article": "Full article text...", "title": "...", "summary": "...", "tags": [...], "author": "Redacción", "statements_used": {{}}}}""")
+Respond in JSON format:
+{{"article": "Full article text...", "title": "...", "summary": "...", "tags": [...], "author": "Redacción", "statements_used": {{"context-unit-uuid": [0, 1, 3]}}}}""")
             ])
 
             redact_rich_chain = RunnableSequence(
