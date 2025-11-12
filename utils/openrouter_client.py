@@ -823,7 +823,10 @@ Respond in JSON format:
 
             logger.debug(
                 "redact_news_rich_completed",
-                article_length=len(result.get("article", ""))
+                article_length=len(result.get("article", "")),
+                result_keys=list(result.keys()),
+                has_statements_used="statements_used" in result,
+                statements_used_value=result.get("statements_used", "NOT_PRESENT")
             )
             return result
 
