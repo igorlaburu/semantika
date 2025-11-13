@@ -153,7 +153,7 @@ class OpenRouterClient:
             self.llm_sonnet_premium = TrackedChatOpenAI(
                 base_url="https://openrouter.ai/api/v1",
                 api_key=settings.openrouter_api_key,
-                model="anthropic/claude-sonnet-4.5-20250514",
+                model="anthropic/claude-sonnet-4.5",
                 temperature=0.0
             )
             
