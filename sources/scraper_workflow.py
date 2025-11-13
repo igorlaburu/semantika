@@ -839,8 +839,9 @@ async def save_url_content(state: ScraperState) -> ScraperState:
                 "updated_at": datetime.utcnow().isoformat()
             }
             
-            result = supabase.client.table("url_content_units").insert(
-                url_content_data
+            result = supabase.client.table("url_content_units").upsert(
+                url_content_data,
+                on_conflict="monitored_url_id,content_position"
             ).execute()
             
             if result.data and len(result.data) > 0:
