@@ -654,6 +654,7 @@ Article structure:
 - Write a COMPREHENSIVE, well-developed article that SYNTHESIZES information from ALL provided sources
 - ALL sources marked with ## headers MUST be represented in the article - do not ignore any source
 - Create an engaging, accurate title based ONLY on source content
+- Title capitalization: Use sentence case (only capitalize first word and proper nouns/place names), not title case
 - Write a brief summary (2-3 sentences) reflecting ONLY source information from ALL sources
 - Generate 3-5 relevant tags from topics in ALL the sources
 - Format article with clear paragraph breaks (use \\n\\n between paragraphs)
