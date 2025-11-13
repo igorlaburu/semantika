@@ -1,8 +1,8 @@
 # Documentación API y Servicios - Sistema Ekimen
 
-**Versión**: 0.1.2
-**Última actualización**: 2025-11-11
-**Base URL**: `https://api.semantika.es`
+**Versión**: 0.2.0
+**Última actualización**: 2025-11-13
+**Base URL**: `https://api.ekimen.ai`
 
 ---
 
