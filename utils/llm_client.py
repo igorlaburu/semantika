@@ -668,22 +668,49 @@ Formatting rules:
 - Use **bold** for place names (cities, countries, regions)
 - For sections with clearly defined context and substantial length (3+ paragraphs), add an H2 subtitle (## Subtitle)
 
+MANDATORY STATEMENT TRACKING:
+- CRITICAL: You MUST track which statements you use from each context unit
+- Each statement has an order number in brackets like [0], [1], [2], etc.
+- Each source has a context unit ID in the header like ## Title [CU:uuid-here]
+- Extract the UUID from [CU:uuid] markers in the source headers
+- For EACH context unit UUID, list ALL statement order numbers you actually used in your article
+- Example: If you used statements [0], [3], [5] from context unit "5f038203-bb89-4543-910a-dead6d1dfdd1":
+  {{"5f038203-bb89-4543-910a-dead6d1dfdd1": [0, 3, 5]}}
+- If using multiple context units, include all of them:
+  {{"uuid-1": [0, 1, 3], "uuid-2": [16, 17, 20]}}
+- The statements_used field is REQUIRED in your response - do not omit it
+
 IMPORTANT: Respond with ONLY raw JSON. Do NOT wrap in markdown code blocks or add any text before/after.
 
 Response format:
-{{"article": "Full article text...", "title": "...", "summary": "...", "tags": [...], "author": "Redacción"}}""")
+{{"article": "Full article text...", "title": "...", "summary": "...", "tags": [...], "author": "Redacción", "statements_used": {{"context-unit-uuid": [0, 1, 3]}}}}""")
             ])
 
             redact_rich_chain = RunnableSequence(
                 redact_rich_prompt | self.registry.get('sonnet_premium').get_runnable() | JsonOutputParser()
             )
 
-            result = await redact_rich_chain.ainvoke({
+            # Debug: call LLM and inspect raw response
+            logger.info("redact_news_rich_calling_llm", source_text_length=len(source_text[:12000]))
+
+            # Call LLM directly to see raw response
+            raw_response = await (redact_rich_prompt | self.registry.get('sonnet_premium').get_runnable()).ainvoke({
                 "source_text": source_text[:12000],
                 "user_instructions": user_instructions
             })
 
-            logger.debug("redact_news_rich_completed", article_length=len(result.get("article", "")))
+            logger.info("redact_news_rich_raw_response",
+                       raw_response_type=type(raw_response).__name__,
+                       raw_content_preview=str(raw_response.content)[:500] if hasattr(raw_response, 'content') else str(raw_response)[:500])
+
+            # Parse the response
+            result = JsonOutputParser().parse(raw_response.content if hasattr(raw_response, 'content') else str(raw_response))
+
+            logger.debug("redact_news_rich_completed",
+                        article_length=len(result.get("article", "")),
+                        result_keys=list(result.keys()),
+                        has_statements_used="statements_used" in result,
+                        statements_used_value=result.get("statements_used", "NOT_PRESENT"))
             return result
         except Exception as e:
             import traceback
