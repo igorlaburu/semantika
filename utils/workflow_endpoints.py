@@ -392,8 +392,13 @@ async def execute_redact_news_rich(
                             "speaker": None
                         })
 
-            # Sort by order
+            # Sort by order first
             all_statements.sort(key=lambda x: x.get("order", 9999))
+
+            # CRITICAL: Renumber sequentially to avoid duplicate orders
+            # This ensures atomic statements [0,1,2...] and enriched statements continue [N, N+1, N+2...]
+            for idx, stmt in enumerate(all_statements):
+                stmt["order"] = idx
 
             if all_statements:
                 source_text_parts.append("Hechos verificados:")
