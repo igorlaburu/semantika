@@ -146,6 +146,8 @@ Respond in JSON:
    - Be independently understandable
    - Be factual and verifiable
 
+CRITICAL: Respond in Spanish (español). ALL fields (title, summary, tags, atomic_facts) MUST be in Spanish.
+
 Text:
 {text}
 
