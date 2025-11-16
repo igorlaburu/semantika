@@ -135,18 +135,34 @@ Respond in JSON:
 
         # 6. Analyze Atomic Chain (title + summary + tags + atomic facts)
         analyze_atomic_prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are a content analyst specializing in fact extraction."),
-            ("user", """Analyze this content and extract:
-1. A clear, concise title
-2. A summary (2-3 sentences)
-3. 3-5 relevant tags
-4. Atomic facts: self-contained statements of facts. Each fact should:
-   - Be a complete sentence
-   - Contain one single fact
-   - Be independently understandable
-   - Be factual and verifiable
+            ("system", "You are a news content analyst specializing in extracting newsworthy facts from web pages."),
+            ("user", """Analyze this web page content and extract ONLY newsworthy, time-sensitive information.
 
-CRITICAL: Respond in Spanish (español). ALL fields (title, summary, tags, atomic_facts) MUST be in Spanish.
+FOCUS ON:
+- Recent events, news, announcements
+- Current alerts, warnings, or updates
+- Specific dates, deadlines, or scheduled events
+- Changes in status or new developments
+
+IGNORE:
+- Generic institutional descriptions (e.g., "X is an organization that...")
+- Static navigation menus, headers, footers
+- General background information
+- Permanent features or services descriptions
+
+IF the page contains NO newsworthy content (only generic/static information), respond with:
+{{"title": "Sin contenido noticioso", "summary": "La página no contiene información novedosa o de actualidad", "tags": [], "atomic_facts": []}}
+
+IF there IS newsworthy content, extract:
+1. A clear, specific title focused on the NEWS/EVENT
+2. A summary (2-3 sentences) of what happened, when, and where
+3. 3-5 relevant tags
+4. Atomic facts: ONLY facts about specific events/news, not generic descriptions
+
+CRITICAL:
+- Respond in Spanish (español). ALL fields MUST be in Spanish.
+- Be strict: only extract facts about actual news/events/alerts
+- If uncertain whether content is newsworthy, err on the side of marking it as "Sin contenido noticioso"
 
 Text:
 {text}
