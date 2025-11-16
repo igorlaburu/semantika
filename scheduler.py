@@ -359,8 +359,10 @@ async def schedule_sources(scheduler: AsyncIOScheduler):
                         # Check if cron trigger changed
                         if isinstance(existing_job.trigger, CronTrigger):
                             # Compare hour and minute fields
-                            existing_hour = list(existing_job.trigger.fields[5])[0] if existing_job.trigger.fields[5] else None
-                            existing_minute = list(existing_job.trigger.fields[6])[0] if existing_job.trigger.fields[6] else None
+                            # APScheduler CronTrigger fields are BaseField objects, not lists
+                            # Access first expression value directly
+                            existing_hour = existing_job.trigger.fields[5].expressions[0].first if existing_job.trigger.fields[5].expressions else None
+                            existing_minute = existing_job.trigger.fields[6].expressions[0].first if existing_job.trigger.fields[6].expressions else None
                             if existing_hour != hour or existing_minute != minute:
                                 needs_update = True
                                 logger.debug("cron_job_changed",
