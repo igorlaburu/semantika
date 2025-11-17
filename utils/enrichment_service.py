@@ -198,7 +198,10 @@ Resumen: {summary}
 Responde SOLO con JSON puro (sin markdown):
 {{
     "has_updates": true/false,
-    "new_developments": ["desarrollo1", "desarrollo2"],
+    "new_developments": [
+        {{"text": "desarrollo1", "source_url": "url_fuente1"}},
+        {{"text": "desarrollo2", "source_url": "url_fuente2"}}
+    ],
     "sources": ["url1", "url2"],
     "suggestion": "qué añadir al context unit"
 }}""",
@@ -212,7 +215,10 @@ Resumen: {summary}
 
 Responde SOLO con JSON puro (sin markdown):
 {{
-    "background_facts": ["antecedente1", "antecedente2"],
+    "background_facts": [
+        {{"text": "antecedente1", "source_url": "url_fuente1"}},
+        {{"text": "antecedente2", "source_url": "url_fuente2"}}
+    ],
     "historical_context": "explicación breve del contexto",
     "sources": ["url1", "url2"],
     "suggestion": "cómo añadir contexto al artículo"
@@ -230,7 +236,9 @@ Responde SOLO con JSON puro (sin markdown):
 {{
     "is_current": true/false,
     "status": "vigente|obsoleta|actualizada",
-    "issues": ["problema1 si existe"],
+    "issues": [
+        {{"text": "problema1 si existe", "source_url": "url_fuente1"}}
+    ],
     "latest_info": "información más reciente encontrada",
     "sources": ["url1"],
     "suggestion": "usar sin cambios|actualizar|descartar"
