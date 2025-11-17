@@ -440,6 +440,110 @@ curl http://localhost:8000/auth/user \
 
 ---
 
+## Row Level Security (RLS) - IMPORTANTE
+
+**El backend tiene RLS activado en todas las tablas principales.** Esto significa que:
+
+✅ **NO necesitas filtrar manualmente por `company_id`** en tus queries
+✅ **RLS filtra automáticamente** según el usuario logueado
+✅ **Más seguro** - imposible acceder a datos de otras empresas
+
+### Configurar Cliente Supabase con JWT
+
+**IMPORTANTE:** Debes crear el cliente Supabase con el `access_token` del login:
+
+```javascript
+import { createClient } from '@supabase/supabase-js'
+
+// Después del login exitoso
+const loginResponse = await fetch('http://localhost:8000/auth/login', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ email, password })
+})
+
+const { access_token, company } = await loginResponse.json()
+
+// Crear cliente Supabase con el JWT del usuario
+const supabase = createClient(
+  'https://isqvgddijyweardygoah.supabase.co',
+  'YOUR_SUPABASE_ANON_KEY', // Anon key pública
+  {
+    global: {
+      headers: {
+        Authorization: `Bearer ${access_token}` // ← JWT del usuario
+      }
+    }
+  }
+)
+```
+
+### Queries SIN Filtrar por company_id
+
+```javascript
+// ❌ MAL - Filtro manual innecesario
+const { data } = await supabase
+  .from('press_context_units')
+  .select('*')
+  .eq('company_id', session.company.id) // ← NO HACER ESTO
+
+// ✅ BIEN - RLS filtra automáticamente
+const { data } = await supabase
+  .from('press_context_units')
+  .select('*')
+  .order('created_at', { ascending: false })
+  // RLS automáticamente solo devuelve datos de tu company
+```
+
+### Tablas con RLS Activo
+
+Estas tablas **ya tienen RLS** configurado (no filtres manualmente):
+
+- ✅ `press_context_units` - Contextos informativos
+- ✅ `press_articles` - Artículos/borradores
+- ✅ `press_news` - Noticias
+- ✅ `sources` - Fuentes/ejecuciones
+- ✅ `executions` - Log de ejecuciones
+- ✅ `press_styles` - Estilos periodísticos
+- ✅ `monitored_urls` - URLs monitorizadas
+- ✅ `url_content_units` - Unidades de contenido
+
+### Actualizar Token en el Cliente
+
+Cuando hagas refresh del token, actualiza el cliente:
+
+```javascript
+async function refreshAndUpdateClient() {
+  const refreshToken = localStorage.getItem('refresh_token')
+
+  const response = await fetch('http://localhost:8000/auth/refresh', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh_token: refreshToken })
+  })
+
+  const { access_token } = await response.json()
+
+  // Actualizar token en localStorage
+  localStorage.setItem('access_token', access_token)
+
+  // Recrear cliente Supabase con nuevo token
+  supabase = createClient(
+    'https://isqvgddijyweardygoah.supabase.co',
+    'YOUR_SUPABASE_ANON_KEY',
+    {
+      global: {
+        headers: {
+          Authorization: `Bearer ${access_token}`
+        }
+      }
+    }
+  )
+}
+```
+
+---
+
 ## Próximos Pasos
 
 1. Implementar formularios de signup/login en el frontend
