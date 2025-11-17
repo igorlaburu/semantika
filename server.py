@@ -241,7 +241,7 @@ async def auth_signup(request: SignupRequest) -> Dict:
             .maybe_single()\
             .execute()
 
-        if existing_company.data:
+        if existing_company and existing_company.data:
             logger.warn("signup_company_exists",
                 cif=cif_normalized,
                 company_name=existing_company.data["company_name"]
