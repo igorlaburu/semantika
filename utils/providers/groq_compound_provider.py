@@ -91,15 +91,17 @@ class GroqCompoundProvider(LLMProvider):
         if tracking_config:
             usage = self._extract_usage(response)
             if usage:
-                # Add web search cost to metadata
-                # We'll update this with actual cost once you confirm pricing
-                search_cost = tracking_config.get('web_search_cost', 0.005)  # Placeholder
+                # Web search cost: average between basic ($0.005) and advanced ($0.008)
+                search_cost = tracking_config.get('web_search_cost', 0.0065)
 
-                if usage:
-                    # Add search cost to metadata (not to total - that's model cost only)
-                    tracking_config.setdefault('metadata', {})
-                    tracking_config['metadata']['web_search_cost'] = search_cost
-                    tracking_config['metadata']['estimated_total_with_search'] = usage.cost_usd + search_cost
+                # Calculate total cost (model tokens + web search)
+                actual_total = usage.cost_usd + search_cost
+
+                # Track search cost separately in metadata
+                tracking_config.setdefault('metadata', {})
+                tracking_config['metadata']['web_search_cost'] = search_cost
+                tracking_config['metadata']['model_tokens_cost'] = usage.cost_usd
+                tracking_config['metadata']['total_cost_with_search'] = actual_total
 
                 await self._track_usage(usage, tracking_config)
 

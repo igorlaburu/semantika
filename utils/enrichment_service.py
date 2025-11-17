@@ -257,7 +257,7 @@ Responde SOLO con JSON puro (sin markdown):
                         'operation': f'enrich_{enrich_type}',
                         'client_id': client_id,
                         'context_unit_id': context_unit_id,
-                        'web_search_cost': 0.005,  # Placeholder - will update with actual pricing
+                        'web_search_cost': 0.0065,  # Average: basic ($0.005) + advanced ($0.008) / 2
                         'metadata': {
                             'enrich_type': enrich_type,
                             'query': query,
