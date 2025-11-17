@@ -252,6 +252,7 @@ async def auth_signup(request: SignupRequest) -> Dict:
             )
 
         # Create company first
+        logger.debug("creating_company", cif=cif_normalized, name=request.company_name)
         company_result = supabase.client.table("companies")\
             .insert({
                 "company_code": cif_normalized,
@@ -261,7 +262,10 @@ async def auth_signup(request: SignupRequest) -> Dict:
             })\
             .execute()
 
-        if not company_result.data:
+        logger.debug("company_insert_result", result_type=str(type(company_result)), has_data=hasattr(company_result, 'data') if company_result else False)
+
+        if not company_result or not company_result.data:
+            logger.error("company_creation_failed", result=str(company_result))
             raise HTTPException(status_code=500, detail="Failed to create company")
 
         company = company_result.data[0]
@@ -275,6 +279,7 @@ async def auth_signup(request: SignupRequest) -> Dict:
 
         # Create user in Supabase Auth with company_id in metadata
         # Use supabase client's auth methods directly
+        logger.debug("creating_auth_user", email=request.email, company_id=company_id)
         auth_response = supabase.client.auth.sign_up({
             "email": request.email,
             "password": request.password,
@@ -285,6 +290,8 @@ async def auth_signup(request: SignupRequest) -> Dict:
                 }
             }
         })
+
+        logger.debug("auth_signup_result", result_type=str(type(auth_response)), has_user=hasattr(auth_response, 'user') if auth_response else False)
 
         if not auth_response or not auth_response.user:
             # Rollback: delete company if user creation failed
