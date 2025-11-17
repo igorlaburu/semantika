@@ -12,7 +12,6 @@ qdrant-client>=1.9.0
 
 # Authentication
 PyJWT>=2.8.0
-gotrue>=2.10.0
 
 # Embeddings
 fastembed==0.2.2

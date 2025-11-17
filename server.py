@@ -274,18 +274,8 @@ async def auth_signup(request: SignupRequest) -> Dict:
         )
 
         # Create user in Supabase Auth with company_id in metadata
-        from gotrue import SyncGoTrueClient
-
-        auth_client = SyncGoTrueClient(
-            url=f"{settings.supabase_url}/auth/v1",
-            headers={
-                "apikey": settings.supabase_key,
-                "Authorization": f"Bearer {settings.supabase_key}"
-            }
-        )
-
-        # Sign up user with company_id in metadata (trigger will use it)
-        auth_response = auth_client.sign_up({
+        # Use supabase client's auth methods directly
+        auth_response = supabase.client.auth.sign_up({
             "email": request.email,
             "password": request.password,
             "options": {
@@ -296,7 +286,7 @@ async def auth_signup(request: SignupRequest) -> Dict:
             }
         })
 
-        if not auth_response.user:
+        if not auth_response or not auth_response.user:
             # Rollback: delete company if user creation failed
             supabase.client.table("companies").delete().eq("id", company_id).execute()
             raise HTTPException(status_code=500, detail="Failed to create user")
@@ -354,22 +344,14 @@ async def auth_login(request: LoginRequest) -> Dict:
     """
     try:
         # Use Supabase auth to login
-        from gotrue import SyncGoTrueClient
+        supabase = get_supabase_client()
 
-        auth_client = SyncGoTrueClient(
-            url=f"{settings.supabase_url}/auth/v1",
-            headers={
-                "apikey": settings.supabase_key,
-                "Authorization": f"Bearer {settings.supabase_key}"
-            }
-        )
-
-        response = auth_client.sign_in_with_password({
+        response = supabase.client.auth.sign_in_with_password({
             "email": request.email,
             "password": request.password
         })
 
-        if not response.session:
+        if not response or not response.session:
             raise HTTPException(status_code=401, detail="Invalid credentials")
 
         logger.info("user_logged_in",
@@ -411,19 +393,11 @@ async def auth_refresh(request: RefreshTokenRequest) -> Dict:
         }
     """
     try:
-        from gotrue import SyncGoTrueClient
+        supabase = get_supabase_client()
 
-        auth_client = SyncGoTrueClient(
-            url=f"{settings.supabase_url}/auth/v1",
-            headers={
-                "apikey": settings.supabase_key,
-                "Authorization": f"Bearer {settings.supabase_key}"
-            }
-        )
+        response = supabase.client.auth.refresh_session(request.refresh_token)
 
-        response = auth_client.refresh_session(request.refresh_token)
-
-        if not response.session:
+        if not response or not response.session:
             raise HTTPException(status_code=401, detail="Invalid refresh token")
 
         return {
@@ -459,17 +433,8 @@ async def auth_logout(authorization: Optional[str] = Header(None)) -> Dict:
 
         token = parts[1]
 
-        from gotrue import SyncGoTrueClient
-
-        auth_client = SyncGoTrueClient(
-            url=f"{settings.supabase_url}/auth/v1",
-            headers={
-                "apikey": settings.supabase_key,
-                "Authorization": f"Bearer {token}"
-            }
-        )
-
-        auth_client.sign_out()
+        supabase = get_supabase_client()
+        supabase.client.auth.sign_out()
 
         logger.info("user_logged_out")
 
