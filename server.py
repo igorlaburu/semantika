@@ -175,6 +175,195 @@ async def get_me(client: Dict = Depends(get_current_client)) -> Dict:
     }
 
 
+# ============================================
+# AUTHENTICATION ENDPOINTS (Supabase Auth)
+# ============================================
+
+class LoginRequest(BaseModel):
+    """Request model for login."""
+    email: str
+    password: str
+
+
+class RefreshTokenRequest(BaseModel):
+    """Request model for token refresh."""
+    refresh_token: str
+
+
+@app.post("/auth/login")
+async def auth_login(request: LoginRequest) -> Dict:
+    """
+    Login with email and password using Supabase Auth.
+
+    Returns JWT access token and refresh token.
+
+    Body:
+        - email: User email
+        - password: User password
+
+    Returns:
+        {
+            "access_token": "...",
+            "refresh_token": "...",
+            "expires_in": 3600,
+            "user": {...}
+        }
+    """
+    try:
+        # Use Supabase auth to login
+        from gotrue import SyncGoTrueClient
+
+        auth_client = SyncGoTrueClient(
+            url=f"{settings.supabase_url}/auth/v1",
+            headers={
+                "apikey": settings.supabase_key,
+                "Authorization": f"Bearer {settings.supabase_key}"
+            }
+        )
+
+        response = auth_client.sign_in_with_password({
+            "email": request.email,
+            "password": request.password
+        })
+
+        if not response.session:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+
+        logger.info("user_logged_in",
+            email=request.email,
+            user_id=response.user.id
+        )
+
+        return {
+            "access_token": response.session.access_token,
+            "refresh_token": response.session.refresh_token,
+            "expires_in": response.session.expires_in,
+            "user": {
+                "id": response.user.id,
+                "email": response.user.email,
+                "created_at": response.user.created_at
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("login_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Login failed")
+
+
+@app.post("/auth/refresh")
+async def auth_refresh(request: RefreshTokenRequest) -> Dict:
+    """
+    Refresh access token using refresh token.
+
+    Body:
+        - refresh_token: Valid refresh token
+
+    Returns:
+        {
+            "access_token": "...",
+            "refresh_token": "...",
+            "expires_in": 3600
+        }
+    """
+    try:
+        from gotrue import SyncGoTrueClient
+
+        auth_client = SyncGoTrueClient(
+            url=f"{settings.supabase_url}/auth/v1",
+            headers={
+                "apikey": settings.supabase_key,
+                "Authorization": f"Bearer {settings.supabase_key}"
+            }
+        )
+
+        response = auth_client.refresh_session(request.refresh_token)
+
+        if not response.session:
+            raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+        return {
+            "access_token": response.session.access_token,
+            "refresh_token": response.session.refresh_token,
+            "expires_in": response.session.expires_in
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("refresh_token_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Token refresh failed")
+
+
+@app.post("/auth/logout")
+async def auth_logout(authorization: Optional[str] = Header(None)) -> Dict:
+    """
+    Logout current user (invalidate token).
+
+    Requires: Authorization header with Bearer token
+
+    Returns:
+        {"success": true}
+    """
+    try:
+        if not authorization:
+            raise HTTPException(status_code=401, detail="Authorization header required")
+
+        parts = authorization.split()
+        if len(parts) != 2 or parts[0].lower() != "bearer":
+            raise HTTPException(status_code=401, detail="Invalid authorization header")
+
+        token = parts[1]
+
+        from gotrue import SyncGoTrueClient
+
+        auth_client = SyncGoTrueClient(
+            url=f"{settings.supabase_url}/auth/v1",
+            headers={
+                "apikey": settings.supabase_key,
+                "Authorization": f"Bearer {token}"
+            }
+        )
+
+        auth_client.sign_out()
+
+        logger.info("user_logged_out")
+
+        return {"success": True}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("logout_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Logout failed")
+
+
+@app.get("/auth/user")
+async def auth_get_user() -> Dict:
+    """
+    Get current authenticated user info (from JWT).
+
+    Requires: Authorization header with Bearer token
+
+    Returns:
+        User information including company_id, role, etc.
+    """
+    from utils.supabase_auth import get_current_user_from_jwt
+
+    user = await get_current_user_from_jwt()
+
+    return {
+        "id": user["id"],
+        "email": user["email"],
+        "name": user.get("name"),
+        "company_id": user["company_id"],
+        "organization_id": user.get("organization_id"),
+        "role": user.get("role"),
+        "is_active": user["is_active"]
+    }
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Global exception handler to log all errors."""

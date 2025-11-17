@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     # Supabase Configuration
     supabase_url: str = Field(..., description="Supabase project URL")
     supabase_key: str = Field(..., description="Supabase service role key")
+    supabase_jwt_secret: str = Field(..., description="Supabase JWT secret for token verification")
 
     # Qdrant Configuration
     qdrant_url: str = Field(
