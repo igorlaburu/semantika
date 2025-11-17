@@ -190,6 +190,149 @@ class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
 
+class SignupRequest(BaseModel):
+    """Request model for user signup."""
+    email: str
+    password: str
+    company_name: str
+    cif: str  # Company tax ID (CIF in Spain)
+    tier: str = "starter"  # starter, pro, unlimited
+
+
+@app.post("/auth/signup")
+async def auth_signup(request: SignupRequest) -> Dict:
+    """
+    Sign up new user with a new company.
+
+    Currently only allows creating new companies (1 user per company limit).
+
+    Body:
+        - email: User email
+        - password: User password
+        - company_name: Company name
+        - cif: Company tax ID (CIF)
+        - tier: Company tier (starter/pro/unlimited, default: starter)
+
+    Returns:
+        {
+            "access_token": "...",
+            "refresh_token": "...",
+            "user": {...},
+            "company": {...}
+        }
+    """
+    try:
+        # Validate tier
+        valid_tiers = ["starter", "pro", "unlimited"]
+        if request.tier not in valid_tiers:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid tier. Must be one of: {', '.join(valid_tiers)}"
+            )
+
+        # Normalize CIF (uppercase, remove spaces)
+        cif_normalized = request.cif.upper().replace(" ", "")
+
+        # Check if company with this CIF already exists
+        supabase = get_supabase_client()
+        existing_company = supabase.client.table("companies")\
+            .select("id, company_code, company_name")\
+            .eq("company_code", cif_normalized)\
+            .maybe_single()\
+            .execute()
+
+        if existing_company.data:
+            logger.warn("signup_company_exists",
+                cif=cif_normalized,
+                company_name=existing_company.data["company_name"]
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="Una empresa con este CIF ya está registrada. Por ahora solo permitimos nuevas empresas."
+            )
+
+        # Create company first
+        company_result = supabase.client.table("companies")\
+            .insert({
+                "company_code": cif_normalized,
+                "company_name": request.company_name,
+                "tier": request.tier,
+                "is_active": True
+            })\
+            .execute()
+
+        if not company_result.data:
+            raise HTTPException(status_code=500, detail="Failed to create company")
+
+        company = company_result.data[0]
+        company_id = company["id"]
+
+        logger.info("company_created",
+            company_id=company_id,
+            cif=cif_normalized,
+            name=request.company_name
+        )
+
+        # Create user in Supabase Auth with company_id in metadata
+        from gotrue import SyncGoTrueClient
+
+        auth_client = SyncGoTrueClient(
+            url=f"{settings.supabase_url}/auth/v1",
+            headers={
+                "apikey": settings.supabase_key,
+                "Authorization": f"Bearer {settings.supabase_key}"
+            }
+        )
+
+        # Sign up user with company_id in metadata (trigger will use it)
+        auth_response = auth_client.sign_up({
+            "email": request.email,
+            "password": request.password,
+            "options": {
+                "data": {
+                    "company_id": company_id,
+                    "name": request.email.split("@")[0]  # Default name from email
+                }
+            }
+        })
+
+        if not auth_response.user:
+            # Rollback: delete company if user creation failed
+            supabase.client.table("companies").delete().eq("id", company_id).execute()
+            raise HTTPException(status_code=500, detail="Failed to create user")
+
+        logger.info("user_created",
+            email=request.email,
+            user_id=auth_response.user.id,
+            company_id=company_id
+        )
+
+        # Return JWT tokens
+        return {
+            "access_token": auth_response.session.access_token if auth_response.session else None,
+            "refresh_token": auth_response.session.refresh_token if auth_response.session else None,
+            "expires_in": auth_response.session.expires_in if auth_response.session else None,
+            "user": {
+                "id": auth_response.user.id,
+                "email": auth_response.user.email,
+                "created_at": auth_response.user.created_at
+            },
+            "company": {
+                "id": company_id,
+                "name": request.company_name,
+                "cif": cif_normalized,
+                "tier": request.tier
+            },
+            "message": "Usuario y empresa creados correctamente. Revisa tu email para confirmar la cuenta."
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("signup_error", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Signup failed: {str(e)}")
+
+
 @app.post("/auth/login")
 async def auth_login(request: LoginRequest) -> Dict:
     """
