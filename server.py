@@ -361,9 +361,36 @@ async def auth_login(request: LoginRequest) -> Dict:
         if not response or not response.session:
             raise HTTPException(status_code=401, detail="Invalid credentials")
 
+        # Get user from database to get company_id
+        user_result = supabase.client.table("users")\
+            .select("id, email, name, company_id, role")\
+            .eq("auth_user_id", response.user.id)\
+            .single()\
+            .execute()
+
+        if not user_result or not user_result.data:
+            raise HTTPException(status_code=404, detail="User not found in database")
+
+        user_data = user_result.data
+        company_id = user_data.get("company_id")
+
+        if not company_id:
+            raise HTTPException(status_code=403, detail="User must be assigned to a company")
+
+        # Get company info
+        company_result = supabase.client.table("companies")\
+            .select("id, company_name, company_code, tier")\
+            .eq("id", company_id)\
+            .single()\
+            .execute()
+
+        if not company_result or not company_result.data:
+            raise HTTPException(status_code=404, detail="Company not found")
+
         logger.info("user_logged_in",
             email=request.email,
-            user_id=response.user.id
+            user_id=response.user.id,
+            company_id=company_id
         )
 
         return {
@@ -371,9 +398,16 @@ async def auth_login(request: LoginRequest) -> Dict:
             "refresh_token": response.session.refresh_token,
             "expires_in": response.session.expires_in,
             "user": {
-                "id": response.user.id,
-                "email": response.user.email,
-                "created_at": response.user.created_at
+                "id": user_data["id"],
+                "email": user_data["email"],
+                "name": user_data.get("name"),
+                "role": user_data.get("role")
+            },
+            "company": {
+                "id": company_result.data["id"],
+                "name": company_result.data["company_name"],
+                "cif": company_result.data["company_code"],
+                "tier": company_result.data["tier"]
             }
         }
 
