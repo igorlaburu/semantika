@@ -5,7 +5,7 @@ Handles all HTTP requests for document ingestion, search, and aggregation.
 Version: 2025-10-28
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Optional, Any, List
 import subprocess
 import io
@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from utils.logger import get_logger
 from utils.config import settings
 from utils.supabase_client import get_supabase_client
+from utils.supabase_auth import get_current_user_from_jwt
 from utils.usage_tracker import get_usage_tracker
 from core_ingest import IngestPipeline
 
@@ -2392,6 +2393,345 @@ async def tts_synthesize(
             status_code=500,
             detail=f"TTS error: {str(e)}"
         )
+
+
+# ============================================
+# DATA ACCESS ENDPOINTS (JWT Protected)
+# ============================================
+
+@app.get("/api/v1/context-units")
+async def list_context_units(
+    user: Dict = Depends(get_current_user_from_jwt),
+    limit: int = 20,
+    offset: int = 0,
+    timePeriod: str = "24h",
+    source: str = "all",
+    topic: str = "all",
+    starred: bool = False
+) -> Dict:
+    """
+    Get filtered and paginated list of context units.
+
+    RLS automatically filters by company_id from JWT.
+    """
+    try:
+        # Validate limit
+        if limit < 1 or limit > 100:
+            raise HTTPException(status_code=400, detail="Limit must be between 1 and 100")
+
+        company_id = user["company_id"]
+        supabase = get_supabase_client()
+
+        # Build query
+        query = supabase.client.table("press_context_units")\
+            .select("*", count="exact")\
+            .eq("company_id", company_id)
+
+        # Time period filter
+        if timePeriod != "all":
+            now = datetime.utcnow()
+            if timePeriod == "24h":
+                cutoff = now - timedelta(hours=24)
+            elif timePeriod == "week":
+                cutoff = now - timedelta(days=7)
+            elif timePeriod == "month":
+                cutoff = now - timedelta(days=30)
+            else:
+                raise HTTPException(status_code=400, detail="Invalid timePeriod. Use: 24h, week, month, all")
+
+            query = query.gte("created_at", cutoff.isoformat())
+
+        # Source filter
+        if source != "all":
+            query = query.eq("source_type", source)
+
+        # Topic filter (tag in array)
+        if topic != "all":
+            query = query.contains("tags", [topic])
+
+        # Starred filter
+        if starred:
+            query = query.eq("is_starred", True)
+
+        # Order and paginate
+        result = query.order("created_at", desc=True)\
+            .range(offset, offset + limit - 1)\
+            .execute()
+
+        total = result.count if hasattr(result, 'count') else 0
+        items = result.data or []
+
+        return {
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(items) < total
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("list_context_units_error", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to fetch context units: {str(e)}")
+
+
+@app.get("/api/v1/context-units/filter-options")
+async def get_filter_options(
+    user: Dict = Depends(get_current_user_from_jwt)
+) -> Dict:
+    """
+    Get available filter options (sources and topics) for context units.
+
+    Returns unique source_types and tags with counts.
+    """
+    try:
+        company_id = user["company_id"]
+        supabase = get_supabase_client()
+
+        # Get source types with counts
+        sources_query = f"""
+        SELECT
+            source_type as value,
+            source_type as label,
+            COUNT(*) as count
+        FROM press_context_units
+        WHERE company_id = '{company_id}'
+        GROUP BY source_type
+        ORDER BY count DESC;
+        """
+        sources_result = supabase.client.rpc('exec_sql', {'sql': sources_query}).execute()
+
+        # Get topics (tags) with counts
+        topics_query = f"""
+        SELECT
+            tag as value,
+            tag as label,
+            COUNT(*) as count
+        FROM press_context_units, unnest(tags) as tag
+        WHERE company_id = '{company_id}'
+        GROUP BY tag
+        ORDER BY count DESC;
+        """
+        topics_result = supabase.client.rpc('exec_sql', {'sql': topics_query}).execute()
+
+        return {
+            "sources": sources_result.data or [],
+            "topics": topics_result.data or []
+        }
+
+    except Exception as e:
+        logger.error("get_filter_options_error", error=str(e))
+        # Fallback: query directly from table
+        try:
+            # Simple fallback without SQL aggregation
+            all_units = supabase.client.table("press_context_units")\
+                .select("source_type, tags")\
+                .eq("company_id", company_id)\
+                .execute()
+
+            # Manual aggregation
+            sources_map = {}
+            topics_map = {}
+
+            for unit in all_units.data or []:
+                source_type = unit.get("source_type")
+                if source_type:
+                    sources_map[source_type] = sources_map.get(source_type, 0) + 1
+
+                for tag in unit.get("tags") or []:
+                    topics_map[tag] = topics_map.get(tag, 0) + 1
+
+            sources = [{"value": k, "label": k, "count": v} for k, v in sources_map.items()]
+            topics = [{"value": k, "label": k, "count": v} for k, v in topics_map.items()]
+
+            sources.sort(key=lambda x: x["count"], reverse=True)
+            topics.sort(key=lambda x: x["count"], reverse=True)
+
+            return {"sources": sources, "topics": topics}
+
+        except Exception as fallback_error:
+            logger.error("get_filter_options_fallback_error", error=str(fallback_error))
+            raise HTTPException(status_code=500, detail="Failed to fetch filter options")
+
+
+@app.get("/api/v1/context-units/{context_unit_id}")
+async def get_context_unit(
+    context_unit_id: str,
+    user: Dict = Depends(get_current_user_from_jwt)
+) -> Dict:
+    """Get a single context unit by ID."""
+    try:
+        company_id = user["company_id"]
+        supabase = get_supabase_client()
+
+        result = supabase.client.table("press_context_units")\
+            .select("*")\
+            .eq("id", context_unit_id)\
+            .eq("company_id", company_id)\
+            .single()\
+            .execute()
+
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Context unit not found")
+
+        return result.data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("get_context_unit_error", error=str(e), context_unit_id=context_unit_id)
+        raise HTTPException(status_code=500, detail="Failed to fetch context unit")
+
+
+@app.get("/api/v1/articles")
+async def list_articles(
+    user: Dict = Depends(get_current_user_from_jwt),
+    status: str = "all",
+    limit: int = 20,
+    offset: int = 0
+) -> Dict:
+    """
+    Get paginated list of articles (borradores or publicados).
+
+    RLS automatically filters by company_id from JWT.
+    """
+    try:
+        if limit < 1 or limit > 100:
+            raise HTTPException(status_code=400, detail="Limit must be between 1 and 100")
+
+        company_id = user["company_id"]
+        supabase = get_supabase_client()
+
+        # Build query
+        query = supabase.client.table("press_articles")\
+            .select("*", count="exact")\
+            .eq("company_id", company_id)
+
+        # Status filter
+        if status != "all":
+            query = query.eq("estado", status)
+
+        # Order and paginate
+        result = query.order("updated_at", desc=True)\
+            .range(offset, offset + limit - 1)\
+            .execute()
+
+        total = result.count if hasattr(result, 'count') else 0
+        items = result.data or []
+
+        return {
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(items) < total
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("list_articles_error", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to fetch articles: {str(e)}")
+
+
+@app.get("/api/v1/articles/{article_id}")
+async def get_article(
+    article_id: str,
+    user: Dict = Depends(get_current_user_from_jwt)
+) -> Dict:
+    """Get a single article by ID."""
+    try:
+        company_id = user["company_id"]
+        supabase = get_supabase_client()
+
+        result = supabase.client.table("press_articles")\
+            .select("*")\
+            .eq("id", article_id)\
+            .eq("company_id", company_id)\
+            .single()\
+            .execute()
+
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Article not found")
+
+        return result.data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("get_article_error", error=str(e), article_id=article_id)
+        raise HTTPException(status_code=500, detail="Failed to fetch article")
+
+
+@app.get("/api/v1/executions")
+async def list_executions(
+    user: Dict = Depends(get_current_user_from_jwt),
+    limit: int = 20,
+    offset: int = 0
+) -> Dict:
+    """
+    Get paginated list of executions/sources.
+
+    RLS automatically filters by company_id from JWT.
+    """
+    try:
+        if limit < 1 or limit > 100:
+            raise HTTPException(status_code=400, detail="Limit must be between 1 and 100")
+
+        company_id = user["company_id"]
+        supabase = get_supabase_client()
+
+        result = supabase.client.table("executions")\
+            .select("*", count="exact")\
+            .eq("company_id", company_id)\
+            .order("timestamp", desc=True)\
+            .range(offset, offset + limit - 1)\
+            .execute()
+
+        total = result.count if hasattr(result, 'count') else 0
+        items = result.data or []
+
+        return {
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(items) < total
+        }
+
+    except Exception as e:
+        logger.error("list_executions_error", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to fetch executions: {str(e)}")
+
+
+@app.get("/api/v1/styles")
+async def list_styles(
+    user: Dict = Depends(get_current_user_from_jwt)
+) -> Dict:
+    """
+    Get list of available press styles.
+
+    Returns active styles for the user's company.
+    """
+    try:
+        company_id = user["company_id"]
+        supabase = get_supabase_client()
+
+        result = supabase.client.table("press_styles")\
+            .select("*")\
+            .eq("company_id", company_id)\
+            .eq("is_active", True)\
+            .order("created_at", desc=True)\
+            .execute()
+
+        return {
+            "items": result.data or []
+        }
+
+    except Exception as e:
+        logger.error("list_styles_error", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to fetch styles: {str(e)}")
 
 
 if __name__ == "__main__":
