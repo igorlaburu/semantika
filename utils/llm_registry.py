@@ -3,6 +3,7 @@
 from typing import Dict, Optional
 from utils.providers.openrouter_provider import OpenRouterProvider
 from utils.providers.groq_provider import GroqProvider
+from utils.providers.groq_compound_provider import GroqCompoundProvider
 from utils.config import settings
 from utils.logger import get_logger
 
@@ -40,14 +41,19 @@ class LLMRegistry:
                 model_alias='groq_fast',
                 temperature=0.1
             )
-            
+
             self._providers['groq_writer'] = GroqProvider(
                 model_name='openai/gpt-oss-20b',
                 model_alias='groq_writer',
                 temperature=0.0
             )
-        
-        logger.info("llm_registry_initialized", 
+
+            self._providers['groq_compound'] = GroqCompoundProvider(
+                model_name='groq/compound',
+                model_alias='groq_compound'
+            )
+
+        logger.info("llm_registry_initialized",
             models=list(self._providers.keys())
         )
     

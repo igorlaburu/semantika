@@ -1739,6 +1739,131 @@ async def enrich_context_unit(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/v1/context-units/{context_unit_id}/enrichment")
+async def enrichment_context_unit(
+    context_unit_id: str,
+    request: EnrichContextUnitRequest,
+    client: Dict = Depends(get_current_client)
+):
+    """
+    Enrich context unit with real-time web search using EnrichmentService (NEW).
+
+    This endpoint uses Groq Compound model with automatic web search to:
+    - Find updates on news stories (enrich_type=update)
+    - Discover historical context (enrich_type=background)
+    - Verify information currency (enrich_type=verify)
+
+    This is the new implementation using provider architecture with automatic
+    usage tracking. Once validated, will replace /enrich endpoint.
+
+    Args:
+        context_unit_id: UUID of context unit to enrich
+        request: Enrichment parameters
+        client: Authenticated client data
+
+    Returns:
+        Enrichment results with suggestions and sources
+    """
+    try:
+        logger.info(
+            "enrichment_context_unit_request",
+            context_unit_id=context_unit_id,
+            enrich_type=request.enrich_type,
+            client_id=client["client_id"]
+        )
+
+        # Validate enrich_type
+        if request.enrich_type not in ["update", "background", "verify"]:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid enrich_type. Must be: update, background, or verify"
+            )
+
+        # Get context unit from database
+        result = supabase_client.client.table("press_context_units")\
+            .select("*")\
+            .eq("id", context_unit_id)\
+            .eq("company_id", client["company_id"])\
+            .maybe_single()\
+            .execute()
+
+        if not result.data:
+            logger.warn(
+                "context_unit_not_found",
+                context_unit_id=context_unit_id,
+                client_id=client["client_id"]
+            )
+            raise HTTPException(status_code=404, detail="Context unit not found")
+
+        context_unit = result.data
+
+        # Calculate age - fix malformed Supabase timestamps
+        created_at = context_unit.get("created_at", "")
+        if created_at:
+            try:
+                created_at_clean = created_at.replace('Z', '+00:00')
+
+                if '.' in created_at_clean and '+' in created_at_clean:
+                    parts = created_at_clean.split('.')
+                    if len(parts) == 2:
+                        microseconds = parts[1].split('+')[0]
+                        microseconds = microseconds.ljust(6, '0')
+                        created_at_clean = f"{parts[0]}.{microseconds}+00:00"
+
+                dt = datetime.fromisoformat(created_at_clean)
+                age_days = (datetime.now(dt.tzinfo) - dt).days
+            except Exception as e:
+                logger.warn("timestamp_parse_failed",
+                    created_at=created_at,
+                    error=str(e)
+                )
+                age_days = 0
+        else:
+            age_days = 0
+
+        # Enrich using EnrichmentService (NEW)
+        from utils.enrichment_service import get_enrichment_service
+
+        enrichment_service = get_enrichment_service()
+        enrichment_result = await enrichment_service.enrich_context_unit(
+            title=context_unit.get("title", ""),
+            summary=context_unit.get("summary", ""),
+            created_at=created_at,
+            tags=context_unit.get("tags", []),
+            enrich_type=request.enrich_type,
+            organization_id=client.get("organization_id", "00000000-0000-0000-0000-000000000001"),
+            context_unit_id=context_unit_id,
+            client_id=client["client_id"]
+        )
+
+        logger.info(
+            "enrichment_context_unit_completed",
+            context_unit_id=context_unit_id,
+            enrich_type=request.enrich_type,
+            has_error=bool(enrichment_result.get("error"))
+        )
+
+        return {
+            "success": not bool(enrichment_result.get("error")),
+            "context_unit_id": context_unit_id,
+            "context_unit_title": context_unit.get("title", ""),
+            "enrich_type": request.enrich_type,
+            "age_days": age_days,
+            "result": enrichment_result,
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "enrichment_context_unit_error",
+            context_unit_id=context_unit_id,
+            error=str(e)
+        )
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 class SaveEnrichedStatementsRequest(BaseModel):
     """Request model for saving enriched statements."""
     statements: List[Dict[str, Any]]
