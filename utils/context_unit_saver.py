@@ -92,6 +92,7 @@ async def save_context_unit(
     source_type: str = "manual",
     source_metadata: Optional[Dict[str, Any]] = None,
     url_content_unit_id: Optional[str] = None,
+    category: Optional[str] = None,
     special_info: bool = False,
     force_save: bool = False,
     check_duplicates: bool = True,
@@ -188,6 +189,7 @@ async def save_context_unit(
             "atomic_statements": atomic_statements or [],
             "source_type": source_type,
             "source_metadata": source_metadata or {},
+            "category": category,
             "status": "pending",
             "created_at": now
         }
@@ -524,13 +526,13 @@ async def save_from_scraping(
     scraping_data: Dict[str, Any]
 ) -> Dict[str, Any]:
     """Save context unit from scraping source.
-    
+
     Args:
         company_id: Company UUID
         source_id: Source UUID
         url_content_unit_id: URL content unit UUID (for traceability)
         scraping_data: Dict with scraped content
-        
+
     Returns:
         Save result
     """
@@ -542,6 +544,7 @@ async def save_from_scraping(
         content=scraping_data.get("content"),
         tags=scraping_data.get("tags"),
         atomic_statements=scraping_data.get("atomic_statements"),
+        category=scraping_data.get("category"),
         source_type="scraping",
         source_metadata={
             "url": scraping_data.get("url"),

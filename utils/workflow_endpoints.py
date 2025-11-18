@@ -541,6 +541,49 @@ async def execute_redact_news_rich(
             result["statements_used"] = {}
             logger.warn("statements_used_not_returned_by_llm")
 
+        # CATEGORY INHERITANCE LOGIC
+        # Determine category from context unit with most statements used
+        category = None
+        if statements_used_normalized:
+            # Find context_unit with most statements used
+            max_statements = 0
+            max_cu_id = None
+            max_cu_created_at = None
+
+            for cu_id, statement_orders in statements_used_normalized.items():
+                count = len(statement_orders)
+                # Get created_at for tie-breaking (use most recent)
+                cu_created_at = next((cu.get("created_at") for cu in context_units if cu["id"] == cu_id), None)
+
+                # If more statements, or same count but more recent, use this one
+                if count > max_statements or (count == max_statements and cu_created_at and cu_created_at > max_cu_created_at):
+                    max_statements = count
+                    max_cu_id = cu_id
+                    max_cu_created_at = cu_created_at
+
+            # Get category from selected context unit
+            if max_cu_id:
+                selected_cu = next((cu for cu in context_units if cu["id"] == max_cu_id), None)
+                if selected_cu:
+                    category = selected_cu.get("category")
+                    logger.info(
+                        "article_category_inherited",
+                        category=category,
+                        from_context_unit=max_cu_id,
+                        statements_count=max_statements
+                    )
+
+        # Fallback: if no category determined, use first context unit's category
+        if not category and context_units:
+            category = context_units[0].get("category")
+            logger.info(
+                "article_category_fallback",
+                category=category,
+                from_context_unit=context_units[0]["id"]
+            )
+
+        result["category"] = category
+
         return result
         
     except Exception as e:

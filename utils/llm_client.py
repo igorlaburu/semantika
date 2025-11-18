@@ -133,7 +133,7 @@ Respond in JSON:
             analyze_prompt | self.llm_sonnet | JsonOutputParser()
         )
 
-        # 6. Analyze Atomic Chain (title + summary + tags + atomic facts)
+        # 6. Analyze Atomic Chain (title + summary + tags + atomic facts + category)
         analyze_atomic_prompt = ChatPromptTemplate.from_messages([
             ("system", "You are a news content analyst specializing in extracting newsworthy facts from web pages."),
             ("user", """Analyze this web page content and extract ONLY newsworthy, time-sensitive information.
@@ -151,24 +151,39 @@ IGNORE:
 - Permanent features or services descriptions
 
 IF the page contains NO newsworthy content (only generic/static information), respond with:
-{{"title": "Sin contenido noticioso", "summary": "La página no contiene información novedosa o de actualidad", "tags": [], "atomic_facts": []}}
+{{"title": "Sin contenido noticioso", "summary": "La página no contiene información novedosa o de actualidad", "tags": [], "atomic_facts": [], "category": "general"}}
 
 IF there IS newsworthy content, extract:
 1. A clear, specific title focused on the NEWS/EVENT
 2. A summary (2-3 sentences) of what happened, when, and where
 3. 3-5 relevant tags
 4. Atomic facts: ONLY facts about specific events/news, not generic descriptions
+5. Classify into ONE category from this list:
+   - política: Government, legislation, councils, elections, institutions
+   - economía: Business, employment, finance, commerce, industry
+   - sociedad: Social services, education, housing, citizenship
+   - cultura: Cultural events, art, heritage, festivals, museums
+   - deportes: Sports competitions, teams, facilities
+   - tecnología: Innovation, digital, science, R&D, startups
+   - medio_ambiente: Sustainability, climate, energy, waste, natural spaces
+   - infraestructuras: Urbanism, transport, public works, mobility
+   - seguridad: Police, emergencies, civil protection, firefighters
+   - salud: Healthcare, medicine, hospitals, wellness, prevention
+   - turismo: Tourism promotion, hospitality, visitors
+   - internacional: Foreign relations, cooperation, partnerships
+   - general: Miscellaneous, not clearly classifiable
 
 CRITICAL:
 - Respond in Spanish (español). ALL fields MUST be in Spanish.
 - Be strict: only extract facts about actual news/events/alerts
 - If uncertain whether content is newsworthy, err on the side of marking it as "Sin contenido noticioso"
+- Choose the MOST relevant category. If unclear, use "general".
 
 Text:
 {text}
 
 Respond in JSON:
-{{"title": "...", "summary": "...", "tags": [...], "atomic_facts": ["fact 1", "fact 2", ...]}}""")
+{{"title": "...", "summary": "...", "tags": [...], "atomic_facts": ["fact 1", "fact 2", ...], "category": "política|economía|sociedad|cultura|deportes|tecnología|medio_ambiente|infraestructuras|seguridad|salud|turismo|internacional|general"}}""")
         ])
 
         self.analyze_atomic_chain = RunnableSequence(

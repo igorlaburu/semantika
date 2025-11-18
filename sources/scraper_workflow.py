@@ -239,7 +239,8 @@ async def parse_single_article(state: ScraperState, page_title: str, semantic_co
             "summary": result.get("summary", ""),
             "content": semantic_content[:8000],
             "tags": result.get("tags", []),
-            "atomic_statements": result.get("atomic_facts", [])
+            "atomic_statements": result.get("atomic_facts", []),
+            "category": result.get("category")
         }]
         
         logger.debug("article_parsed_with_llm",
@@ -293,7 +294,8 @@ async def parse_multi_noticia(state: ScraperState, news_blocks, soup: BeautifulS
                     "summary": result.get("summary", ""),
                     "content": block_text[:4000],
                     "tags": result.get("tags", []),
-                    "atomic_statements": result.get("atomic_facts", [])
+                    "atomic_statements": result.get("atomic_facts", []),
+                    "category": result.get("category")
                 })
                 
                 logger.debug("news_block_parsed",
@@ -492,6 +494,7 @@ async def scrape_articles_from_index(
                     "content": semantic_content[:8000],
                     "tags": result.get("tags", []),
                     "atomic_statements": result.get("atomic_facts", []),
+                    "category": result.get("category"),
                     "source_url": article_url,
                     "index_date": article.get("date")
                 }
@@ -903,6 +906,7 @@ async def ingest_to_context(state: ScraperState) -> ScraperState:
                     "content": item.get("content"),
                     "tags": item.get("tags", []),
                     "atomic_statements": item.get("atomic_statements", []),
+                    "category": item.get("category"),
                     "url": url,
                     "scraped_at": datetime.utcnow().isoformat(),
                     "published_at": state.get("published_at")

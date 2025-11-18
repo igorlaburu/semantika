@@ -2407,6 +2407,7 @@ async def list_context_units(
     timePeriod: str = "24h",
     source: str = "all",
     topic: str = "all",
+    category: str = "all",
     starred: bool = False
 ) -> Dict:
     """
@@ -2449,6 +2450,10 @@ async def list_context_units(
         if topic != "all":
             query = query.contains("tags", [topic])
 
+        # Category filter
+        if category != "all":
+            query = query.eq("category", category)
+
         # Starred filter
         if starred:
             query = query.eq("is_starred", True)
@@ -2481,9 +2486,9 @@ async def get_filter_options(
     user: Dict = Depends(get_current_user_from_jwt)
 ) -> Dict:
     """
-    Get available filter options (sources and topics) for context units.
+    Get available filter options (sources, topics, and categories) for context units.
 
-    Returns unique source_types and tags with counts.
+    Returns unique source_types, tags, and categories with counts.
     """
     try:
         company_id = user["company_id"]
@@ -2515,9 +2520,23 @@ async def get_filter_options(
         """
         topics_result = supabase.client.rpc('exec_sql', {'sql': topics_query}).execute()
 
+        # Get categories with counts
+        categories_query = f"""
+        SELECT
+            category as value,
+            category as label,
+            COUNT(*) as count
+        FROM press_context_units
+        WHERE company_id = '{company_id}' AND category IS NOT NULL
+        GROUP BY category
+        ORDER BY count DESC;
+        """
+        categories_result = supabase.client.rpc('exec_sql', {'sql': categories_query}).execute()
+
         return {
             "sources": sources_result.data or [],
-            "topics": topics_result.data or []
+            "topics": topics_result.data or [],
+            "categories": categories_result.data or []
         }
 
     except Exception as e:
@@ -2526,13 +2545,14 @@ async def get_filter_options(
         try:
             # Simple fallback without SQL aggregation
             all_units = supabase.client.table("press_context_units")\
-                .select("source_type, tags")\
+                .select("source_type, tags, category")\
                 .eq("company_id", company_id)\
                 .execute()
 
             # Manual aggregation
             sources_map = {}
             topics_map = {}
+            categories_map = {}
 
             for unit in all_units.data or []:
                 source_type = unit.get("source_type")
@@ -2542,13 +2562,19 @@ async def get_filter_options(
                 for tag in unit.get("tags") or []:
                     topics_map[tag] = topics_map.get(tag, 0) + 1
 
+                category = unit.get("category")
+                if category:
+                    categories_map[category] = categories_map.get(category, 0) + 1
+
             sources = [{"value": k, "label": k, "count": v} for k, v in sources_map.items()]
             topics = [{"value": k, "label": k, "count": v} for k, v in topics_map.items()]
+            categories = [{"value": k, "label": k, "count": v} for k, v in categories_map.items()]
 
             sources.sort(key=lambda x: x["count"], reverse=True)
             topics.sort(key=lambda x: x["count"], reverse=True)
+            categories.sort(key=lambda x: x["count"], reverse=True)
 
-            return {"sources": sources, "topics": topics}
+            return {"sources": sources, "topics": topics, "categories": categories}
 
         except Exception as fallback_error:
             logger.error("get_filter_options_fallback_error", error=str(fallback_error))
@@ -2588,6 +2614,7 @@ async def get_context_unit(
 async def list_articles(
     user: Dict = Depends(get_current_user_from_jwt),
     status: str = "all",
+    category: str = "all",
     limit: int = 20,
     offset: int = 0
 ) -> Dict:
@@ -2611,6 +2638,10 @@ async def list_articles(
         # Status filter
         if status != "all":
             query = query.eq("estado", status)
+
+        # Category filter
+        if category != "all":
+            query = query.eq("category", category)
 
         # Order and paginate
         result = query.order("updated_at", desc=True)\
