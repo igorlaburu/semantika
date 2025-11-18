@@ -308,16 +308,38 @@ async def execute_redact_news_rich(
         
         context_units = []
         for cu_id in context_unit_ids:
-            # Fetch context unit with source information (JOIN with sources table)
+            # Fetch context unit
             result = supabase_client.client.table("press_context_units")\
-                .select("*, sources!left(source_name, description, tags)")\
+                .select("*")\
                 .eq("id", cu_id)\
                 .eq("company_id", client["company_id"])\
                 .maybe_single()\
                 .execute()
 
             if result.data:
-                context_units.append(result.data)
+                cu_data = result.data
+
+                # Try to fetch source information if source_id is a valid UUID
+                source_id = cu_data.get("source_id")
+                if source_id:
+                    try:
+                        # Try to parse as UUID and fetch from sources table
+                        import uuid
+                        uuid.UUID(source_id)  # Validate UUID format
+
+                        source_result = supabase_client.client.table("sources")\
+                            .select("source_name, description, tags")\
+                            .eq("source_id", source_id)\
+                            .maybe_single()\
+                            .execute()
+
+                        if source_result.data:
+                            cu_data["sources"] = source_result.data
+                    except (ValueError, Exception):
+                        # source_id is not a valid UUID, skip source lookup
+                        pass
+
+                context_units.append(cu_data)
         
         if not context_units:
             raise ValueError("No context units found for provided IDs")
