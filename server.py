@@ -2051,11 +2051,21 @@ async def enrichment_context_unit(
             client_id=client["client_id"]
         )
 
+        # Detect empty results
+        has_content = False
+        if request.enrich_type == "update":
+            has_content = enrichment_result.get("has_updates", False) and len(enrichment_result.get("new_developments", [])) > 0
+        elif request.enrich_type == "background":
+            has_content = len(enrichment_result.get("background_facts", [])) > 0
+        elif request.enrich_type == "verify":
+            has_content = len(enrichment_result.get("issues", [])) > 0 or enrichment_result.get("status") != "vigente"
+
         logger.info(
             "enrichment_context_unit_completed",
             context_unit_id=context_unit_id,
             enrich_type=request.enrich_type,
-            has_error=bool(enrichment_result.get("error"))
+            has_error=bool(enrichment_result.get("error")),
+            has_content=has_content
         )
 
         return {
@@ -2064,6 +2074,7 @@ async def enrichment_context_unit(
             "context_unit_title": context_unit.get("title", ""),
             "enrich_type": request.enrich_type,
             "age_days": age_days,
+            "has_content": has_content,  # NEW: Frontend can check this
             "result": enrichment_result,
             "timestamp": datetime.utcnow().isoformat() + "Z"
         }
