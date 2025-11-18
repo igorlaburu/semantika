@@ -308,13 +308,14 @@ async def execute_redact_news_rich(
         
         context_units = []
         for cu_id in context_unit_ids:
+            # Fetch context unit with source information (JOIN with sources table)
             result = supabase_client.client.table("press_context_units")\
-                .select("*")\
+                .select("*, sources!left(source_name, description, tags)")\
                 .eq("id", cu_id)\
                 .eq("company_id", client["company_id"])\
                 .maybe_single()\
                 .execute()
-            
+
             if result.data:
                 context_units.append(result.data)
         
@@ -357,6 +358,23 @@ async def execute_redact_news_rich(
             enriched_statements = cu.get("enriched_statements") or []
 
             source_text_parts.append(f"## {cu_title} [CU:{cu_id}]")
+
+            # Add source information (name and tags from sources table)
+            sources_data = cu.get("sources")
+            if sources_data:
+                source_name = sources_data.get("source_name", "")
+                source_tags = sources_data.get("tags", [])
+
+                if source_name:
+                    source_text_parts.append(f"Fuente: {source_name}")
+
+                if source_tags:
+                    # Filter out technical tags (scraping, api, webhook, index)
+                    relevant_tags = [t for t in source_tags if t not in ["scraping", "api", "webhook", "index"]]
+                    if relevant_tags:
+                        tags_str = ", ".join(relevant_tags)
+                        source_text_parts.append(f"Etiquetas de fuente: {tags_str}")
+
             if cu_summary:
                 source_text_parts.append(f"Resumen: {cu_summary}")
 
