@@ -32,10 +32,10 @@ class GroqCompoundProvider(LLMProvider):
             raise ValueError("GROQ_API_KEY not configured")
 
         # Use AsyncGroq (native Groq client, not LangChain)
-        # Timeout set to 60s for web search operations
+        # No timeout - let Groq take as long as needed for web search
+        # (web searches can take longer than 60s)
         self._client = AsyncGroq(
-            api_key=settings.groq_api_key,
-            timeout=60.0
+            api_key=settings.groq_api_key
         )
 
         logger.debug("groq_compound_provider_initialized",
