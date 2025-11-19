@@ -49,7 +49,7 @@ class LLMRegistry:
             )
 
             self._providers['groq_compound'] = GroqCompoundProvider(
-                model_name='groq/compound',
+                model_name='compound',
                 model_alias='groq_compound'
             )
 

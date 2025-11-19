@@ -19,11 +19,11 @@ logger = get_logger("groq_compound_provider")
 class GroqCompoundProvider(LLMProvider):
     """Groq Compound provider using AsyncGroq for web search."""
 
-    def __init__(self, model_name: str = "groq/compound", model_alias: str = "groq_compound"):
+    def __init__(self, model_name: str = "compound", model_alias: str = "groq_compound"):
         """Initialize Groq Compound provider.
 
         Args:
-            model_name: Full model name (default: 'groq/compound')
+            model_name: Full model name (default: 'compound')
             model_alias: Friendly alias (default: 'groq_compound')
         """
         super().__init__(model_name, model_alias)
