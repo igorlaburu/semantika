@@ -260,6 +260,7 @@ Responde SOLO con JSON puro (sin markdown):
                     }
                 ],
                 config={
+                    'temperature': 0.0,
                     'tracking': {
                         'organization_id': organization_id,
                         'operation': f'enrich_{enrich_type}',
