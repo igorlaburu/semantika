@@ -156,6 +156,9 @@ class EnrichmentService:
         Returns:
             Enrichment result with suggestions and sources
         """
+        import time
+        start_time = time.time()
+
         try:
             # Build search query
             query = self.build_search_query(title, summary, created_at, tags, enrich_type)
@@ -279,11 +282,20 @@ Responde SOLO con JSON puro (sin markdown):
             # Parse response
             content = response.choices[0].message.content
 
+            # Log raw response for debugging
+            logger.debug("enrichment_raw_response",
+                context_unit_id=context_unit_id,
+                enrich_type=enrich_type,
+                content_length=len(content) if content else 0,
+                content_preview=content[:200] if content else "NONE"
+            )
+
             # Validate content exists
             if not content:
                 logger.error("enrichment_empty_response",
                     context_unit_id=context_unit_id,
-                    enrich_type=enrich_type
+                    enrich_type=enrich_type,
+                    full_response=str(response)[:500]
                 )
                 return {
                     "error": "Empty response from LLM",
@@ -311,19 +323,23 @@ Responde SOLO con JSON puro (sin markdown):
 
             result = json.loads(content)
 
+            duration_ms = int((time.time() - start_time) * 1000)
             logger.info("enrich_context_unit_completed",
                 context_unit_id=context_unit_id,
                 enrich_type=enrich_type,
-                has_result=bool(result)
+                has_result=bool(result),
+                duration_ms=duration_ms
             )
 
             return result
 
         except json.JSONDecodeError as e:
+            duration_ms = int((time.time() - start_time) * 1000)
             logger.error("enrichment_json_parse_error",
                 context_unit_id=context_unit_id,
                 enrich_type=enrich_type,
                 error=str(e),
+                duration_ms=duration_ms,
                 content_preview=content[:500] if 'content' in locals() else "",
                 content_length=len(content) if 'content' in locals() else 0,
                 raw_response=response.choices[0].message.content[:1000] if response and response.choices else "no response"
@@ -335,10 +351,13 @@ Responde SOLO con JSON puro (sin markdown):
             }
 
         except Exception as e:
+            duration_ms = int((time.time() - start_time) * 1000)
             logger.error("enrichment_error",
                 context_unit_id=context_unit_id,
                 enrich_type=enrich_type,
-                error=str(e)
+                error=str(e),
+                duration_ms=duration_ms,
+                error_type=type(e).__name__
             )
             return {
                 "error": "Enrichment failed",
