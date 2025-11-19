@@ -278,12 +278,35 @@ Responde SOLO con JSON puro (sin markdown):
             # Parse response
             content = response.choices[0].message.content
 
+            # Validate content exists
+            if not content:
+                logger.error("enrichment_empty_response",
+                    context_unit_id=context_unit_id,
+                    enrich_type=enrich_type
+                )
+                return {
+                    "error": "Empty response from LLM",
+                    "details": "The model returned an empty response"
+                }
+
             # Clean markdown if present
             if content.startswith("```json"):
                 content = content[7:]
             if content.endswith("```"):
                 content = content[:-3]
             content = content.strip()
+
+            # Validate content after cleaning
+            if not content:
+                logger.error("enrichment_empty_after_cleaning",
+                    context_unit_id=context_unit_id,
+                    enrich_type=enrich_type,
+                    raw_content=response.choices[0].message.content
+                )
+                return {
+                    "error": "Empty response after cleaning",
+                    "details": "The response was empty after removing markdown"
+                }
 
             result = json.loads(content)
 
@@ -298,12 +321,16 @@ Responde SOLO con JSON puro (sin markdown):
         except json.JSONDecodeError as e:
             logger.error("enrichment_json_parse_error",
                 context_unit_id=context_unit_id,
+                enrich_type=enrich_type,
                 error=str(e),
-                content=content[:500] if 'content' in locals() else ""
+                content_preview=content[:500] if 'content' in locals() else "",
+                content_length=len(content) if 'content' in locals() else 0,
+                raw_response=response.choices[0].message.content[:1000] if response and response.choices else "no response"
             )
             return {
                 "error": "Failed to parse response",
-                "details": str(e)
+                "details": str(e),
+                "content_preview": content[:200] if 'content' in locals() else ""
             }
 
         except Exception as e:
