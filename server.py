@@ -644,7 +644,7 @@ async def ingest_text(
     client: Dict = Depends(get_current_client)
 ) -> Dict[str, Any]:
     """
-    Ingest text document.
+    Ingest text document (LEGACY - use POST /context-units instead).
 
     Requires: X-API-Key header
 
@@ -658,17 +658,64 @@ async def ingest_text(
         Ingestion result with stats
     """
     try:
-        pipeline = IngestPipeline(client_id=client["client_id"])
+        supabase = get_supabase_client()
 
-        result = await pipeline.ingest_text(
-            text=request.text,
+        # Get company for client
+        company_result = supabase.client.table("companies")\
+            .select("*")\
+            .eq("id", client["company_id"])\
+            .maybe_single()\
+            .execute()
+
+        if not company_result.data:
+            raise HTTPException(status_code=404, detail="Company not found")
+
+        company = company_result.data
+
+        # Use unified ingester
+        ingest_result = await ingest_context_unit(
+            # Input
+            raw_text=request.text,
             title=request.title,
-            metadata=request.metadata,
-            skip_guardrails=request.skip_guardrails
+
+            # Required metadata
+            company_id=company["id"],
+            source_type="api",
+            source_id=f"legacy_ingest_{client['client_id'][:8]}",
+
+            # Optional metadata
+            source_metadata={
+                "legacy_endpoint": "/ingest/text",
+                "client_id": client["client_id"],
+                "custom_metadata": request.metadata or {},
+                "skip_guardrails": request.skip_guardrails
+            },
+
+            # Control flags
+            generate_embedding_flag=True,
+            check_duplicates=True
         )
 
-        return result
+        if ingest_result["success"]:
+            return {
+                "success": True,
+                "context_unit_id": ingest_result["context_unit_id"],
+                "generated_fields": ingest_result.get("generated_fields", []),
+                "message": "Text ingested successfully"
+            }
+        elif ingest_result.get("duplicate"):
+            return {
+                "success": False,
+                "duplicate": True,
+                "duplicate_id": ingest_result.get("duplicate_id"),
+                "similarity": ingest_result.get("similarity"),
+                "message": "Duplicate content detected"
+            }
+        else:
+            raise HTTPException(status_code=500, detail=ingest_result.get("error", "Unknown error"))
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("ingest_text_endpoint_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
@@ -680,7 +727,7 @@ async def ingest_url(
     client: Dict = Depends(get_current_client)
 ) -> Dict[str, Any]:
     """
-    Scrape URL and ingest content.
+    Scrape URL and ingest content (LEGACY - use POST /context-units/from-url instead).
 
     Requires: X-API-Key header
 
@@ -695,17 +742,106 @@ async def ingest_url(
     try:
         from sources.web_scraper import WebScraper
 
-        scraper = WebScraper()
+        supabase = get_supabase_client()
 
-        result = await scraper.scrape_and_ingest(
-            url=request.url,
-            client_id=client["client_id"],
-            extract_multiple=request.extract_multiple,
-            skip_guardrails=request.skip_guardrails
+        # Get company for client
+        company_result = supabase.client.table("companies")\
+            .select("*")\
+            .eq("id", client["company_id"])\
+            .maybe_single()\
+            .execute()
+
+        if not company_result.data:
+            raise HTTPException(status_code=404, detail="Company not found")
+
+        company = company_result.data
+
+        # Scrape URL
+        scraper = WebScraper()
+        scrape_results = await scraper.scrape_url(
+            request.url,
+            extract_multiple=request.extract_multiple
         )
 
-        return result
+        if not scrape_results or len(scrape_results) == 0:
+            raise HTTPException(status_code=400, detail="Failed to scrape URL or no content found")
 
+        # Ingest all scraped results
+        ingested_units = []
+        duplicates = []
+        errors = []
+
+        for i, scraped_data in enumerate(scrape_results):
+            scraped_text = scraped_data.get("text", "")
+            scraped_title = scraped_data.get("title", "")
+
+            if not scraped_text:
+                errors.append({
+                    "index": i,
+                    "error": "No content extracted"
+                })
+                continue
+
+            # Use unified ingester
+            ingest_result = await ingest_context_unit(
+                # Input
+                raw_text=scraped_text,
+                title=scraped_title,
+
+                # Required metadata
+                company_id=company["id"],
+                source_type="api",
+                source_id=f"legacy_url_{client['client_id'][:8]}_{i}",
+
+                # Optional metadata
+                source_metadata={
+                    "legacy_endpoint": "/ingest/url",
+                    "client_id": client["client_id"],
+                    "url": request.url,
+                    "extract_multiple": request.extract_multiple,
+                    "skip_guardrails": request.skip_guardrails,
+                    "article_index": i
+                },
+
+                # Control flags
+                generate_embedding_flag=True,
+                check_duplicates=True
+            )
+
+            if ingest_result["success"]:
+                ingested_units.append({
+                    "context_unit_id": ingest_result["context_unit_id"],
+                    "title": scraped_title,
+                    "generated_fields": ingest_result.get("generated_fields", [])
+                })
+            elif ingest_result.get("duplicate"):
+                duplicates.append({
+                    "index": i,
+                    "duplicate_id": ingest_result.get("duplicate_id"),
+                    "similarity": ingest_result.get("similarity"),
+                    "title": scraped_title
+                })
+            else:
+                errors.append({
+                    "index": i,
+                    "error": ingest_result.get("error", "Unknown error"),
+                    "title": scraped_title
+                })
+
+        return {
+            "success": True,
+            "url": request.url,
+            "total_scraped": len(scrape_results),
+            "ingested": len(ingested_units),
+            "duplicates": len(duplicates),
+            "errors": len(errors),
+            "units": ingested_units,
+            "duplicate_details": duplicates,
+            "error_details": errors
+        }
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("ingest_url_endpoint_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
@@ -1393,47 +1529,62 @@ async def create_context_unit_from_url(
         # Set ID manually after creation
         source_content.id = context_unit_id
         
-        # Get workflow and process
-        workflow = get_workflow("default", company.get("settings", {}))
-        result = await workflow.process_content(source_content)
-        
-        # Extract context unit
-        context_unit = result.get("context_unit", {})
-        if not context_unit:
-            raise HTTPException(status_code=500, detail="Failed to generate context unit")
-        
-        # Save to database
-        context_unit_data = {
-            "id": context_unit.get("id"),
-            "organization_id": organization["id"],
-            "company_id": company["id"],
-            "source_type": "scraping",
-            "source_id": source_content.source_id,
-            "source_metadata": {
+        # Use unified ingester (API endpoints skip novelty verification)
+        ingest_result = await ingest_context_unit(
+            # Input
+            raw_text=scraped_text,
+            title=final_title,  # Pre-generated or scraped title
+
+            # LLM will generate: summary, tags, category, atomic_statements (if needed)
+
+            # Required metadata
+            company_id=company["id"],
+            source_type="scraping",
+            source_id=source_content.source_id,
+
+            # Optional metadata
+            source_metadata={
                 "url": request.url,
                 "scraped_title": scraped_title,
                 "client_id": client["client_id"],
                 "created_via": "api",
                 "manual_scraping": True,
-                "has_custom_title": bool(request.title)
+                "has_custom_title": bool(request.title),
+                "organization_id": organization["id"]
             },
-            "title": context_unit.get("title"),
-            "summary": context_unit.get("summary"),
-            "tags": context_unit.get("tags", []),
-            "atomic_statements": context_unit.get("atomic_statements", []),
-            "raw_text": scraped_text,
-            "status": "completed",
-            "processed_at": "now()"
-        }
-        
-        db_result = supabase.client.table("press_context_units")\
-            .insert(context_unit_data)\
-            .execute()
-        
-        if not db_result.data:
-            raise HTTPException(status_code=500, detail="Failed to save context unit")
-        
-        created_unit = db_result.data[0]
+
+            # Control flags
+            generate_embedding_flag=True,
+            check_duplicates=True  # Semantic dedup
+        )
+
+        if not ingest_result["success"]:
+            error_msg = ingest_result.get("error", "Unknown error")
+            if ingest_result.get("duplicate"):
+                logger.warn(
+                    "url_context_unit_duplicate",
+                    client_id=client["client_id"],
+                    url=request.url,
+                    duplicate_id=ingest_result.get("duplicate_id"),
+                    similarity=ingest_result.get("similarity")
+                )
+                # Return existing unit
+                existing_result = supabase.client.table("press_context_units")\
+                    .select("*")\
+                    .eq("id", ingest_result["duplicate_id"])\
+                    .single()\
+                    .execute()
+                created_unit = existing_result.data if existing_result.data else {}
+            else:
+                raise HTTPException(status_code=500, detail=f"Failed to create context unit: {error_msg}")
+        else:
+            # Fetch created unit
+            created_result = supabase.client.table("press_context_units")\
+                .select("*")\
+                .eq("id", ingest_result["context_unit_id"])\
+                .single()\
+                .execute()
+            created_unit = created_result.data if created_result.data else {}
         
         logger.info(
             "url_context_unit_created",
