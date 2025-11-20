@@ -3203,6 +3203,102 @@ async def semantic_search(
         raise HTTPException(status_code=500, detail=f"Semantic search failed: {str(e)}")
 
 
+# ============================================================================
+# TEMPORARY ENDPOINT - DELETE AFTER USE
+# ============================================================================
+@app.post("/admin/regenerate-embeddings")
+async def regenerate_all_embeddings_endpoint(
+    x_api_key: str = Header(..., alias="x-api-key")
+):
+    """TEMPORARY: Regenerate embeddings for all context units without embeddings."""
+    try:
+        # Validate API key
+        client = await get_current_client(x_api_key)
+
+        logger.info("regenerate_embeddings_start", client_id=client.get("id"))
+
+        # Import here to avoid loading model on startup
+        from fastembed import TextEmbedding
+
+        # Initialize embedding model (768d multilingual)
+        model = TextEmbedding(
+            model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+        )
+
+        # Get all context units without embeddings
+        supabase = get_supabase_client()
+        result = supabase.client.table("press_context_units")\
+            .select("id, title, summary")\
+            .is_("embedding", "null")\
+            .limit(1000)\
+            .execute()
+
+        units = result.data
+        total_units = len(units)
+
+        if total_units == 0:
+            return {
+                "success": True,
+                "message": "All context units already have embeddings",
+                "units_processed": 0
+            }
+
+        logger.info("units_without_embeddings_found", count=total_units)
+
+        # Process each unit
+        processed = 0
+        errors = 0
+
+        for unit in units:
+            try:
+                unit_id = unit['id']
+                title = unit.get('title', '')
+                summary = unit.get('summary', '')
+
+                # Generate combined text (same as embedding_generator.py)
+                text = f"{title} | {summary}"[:512]
+
+                # Generate embedding
+                embeddings_list = list(model.embed([text]))
+                embedding = embeddings_list[0].tolist()
+
+                # Format as PostgreSQL array string
+                embedding_str = '[' + ','.join(str(x) for x in embedding) + ']'
+
+                # Update database
+                supabase.client.table("press_context_units")\
+                    .update({"embedding": embedding_str})\
+                    .eq("id", unit_id)\
+                    .execute()
+
+                processed += 1
+
+                if processed % 10 == 0:
+                    logger.info("regenerate_progress", processed=processed, total=total_units)
+
+            except Exception as e:
+                logger.error("regenerate_unit_error", unit_id=unit.get('id'), error=str(e))
+                errors += 1
+                continue
+
+        logger.info("regenerate_embeddings_complete",
+                   processed=processed,
+                   errors=errors,
+                   total=total_units)
+
+        return {
+            "success": True,
+            "units_processed": processed,
+            "errors": errors,
+            "total_units": total_units
+        }
+
+    except Exception as e:
+        logger.error("regenerate_embeddings_error", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to regenerate embeddings: {str(e)}")
+# ============================================================================
+
+
 if __name__ == "__main__":
     import uvicorn
 
