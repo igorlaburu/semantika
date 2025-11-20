@@ -27,15 +27,15 @@ def get_fastembed_model():
         try:
             from fastembed import TextEmbedding
             
-            # Use English model (works reasonably well for Spanish)
-            # sentence-transformers/all-MiniLM-L6-v2
-            # 384 dimensions, primarily English but acceptable for Spanish
+            # Use FastEmbed default model (what was actually used before)
+            # BAAI/bge-small-en-v1.5
+            # 384 dimensions - this is FastEmbed's default when no model specified
             _fastembed_model = TextEmbedding(
-                model_name="sentence-transformers/all-MiniLM-L6-v2"
+                model_name="BAAI/bge-small-en-v1.5"
             )
 
             logger.info("fastembed_initialized",
-                model="all-MiniLM-L6-v2",
+                model="bge-small-en-v1.5",
                 dimensions=384
             )
         except Exception as e:
