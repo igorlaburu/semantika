@@ -12,6 +12,8 @@ from datetime import datetime
 from utils.logger import get_logger
 from utils.config import settings
 from utils.supabase_client import get_supabase_client
+from utils.unified_context_verifier import verify_novelty
+from utils.unified_context_ingester import ingest_context_unit
 from workflows.workflow_factory import get_workflow
 from core.source_content import SourceContent
 
@@ -230,41 +232,73 @@ SIN markdown, {news_count} items exactos."""
                             "raw_text": news_item.get("texto", "")
                         }
                     
-                    # Save to database
+                    # Phase 1: Verify novelty
+                    verification_result = await verify_novelty(
+                        source_type="perplexity",
+                        content_data={
+                            "title": news_item.get("titulo"),
+                            "source_id": source["source_id"],
+                            "date_published": news_item.get("fecha")
+                        },
+                        company_id=company["id"]
+                    )
+
+                    if not verification_result["is_novel"]:
+                        logger.info("perplexity_news_duplicate_skipped",
+                            title=news_item.get("titulo", "")[:50],
+                            reason=verification_result["reason"],
+                            duplicate_id=verification_result.get("duplicate_id")
+                        )
+                        continue
+
+                    # Phase 2: Ingest context unit with unified ingester
                     try:
-                        supabase = get_supabase_client()
-                        
-                        # Convert atomic_statements to proper format
-                        atomic_statements = context_unit.get("atomic_statements", [])
-                        if atomic_statements and isinstance(atomic_statements[0], str):
-                            # Convert from string array to object array
-                            atomic_statements = [
-                                {
-                                    "order": i + 1,
-                                    "type": "fact",
-                                    "speaker": None,
-                                    "text": statement
-                                }
-                                for i, statement in enumerate(atomic_statements)
-                            ]
-                        
-                        context_unit_data = {
-                            "id": context_unit.get("id"),
-                            "company_id": company["id"],
-                            "source_type": "api",
-                            "title": context_unit.get("title"),
-                            "summary": context_unit.get("summary"),
-                            "atomic_statements": atomic_statements,
-                            "tags": context_unit.get("tags"),
-                            "raw_text": context_unit.get("raw_text"),
-                            "status": "completed"
-                        }
-                        
-                        db_result = supabase.client.table("press_context_units").insert(context_unit_data).execute()
-                        logger.info("context_unit_saved", context_unit_id=context_unit.get("id"), title=context_unit.get("title"))
-                        
+                        ingest_result = await ingest_context_unit(
+                            # Pre-generated fields from Perplexity
+                            title=news_item.get("titulo"),
+                            raw_text=news_item.get("texto"),
+
+                            # LLM will generate: summary, tags, category, atomic_statements
+                            # (Uses GPT-4o-mini via unified_context_ingester)
+
+                            # Required metadata
+                            company_id=company["id"],
+                            source_type="perplexity",
+                            source_id=source["source_id"],
+
+                            # Optional metadata
+                            source_metadata={
+                                "perplexity_query": location,
+                                "perplexity_source": news_item.get("fuente"),
+                                "perplexity_date": news_item.get("fecha"),
+                                "perplexity_index": i + 1
+                            },
+
+                            # Control flags
+                            generate_embedding_flag=True,
+                            check_duplicates=True
+                        )
+
+                        if ingest_result["success"]:
+                            logger.info("perplexity_news_ingested",
+                                title=news_item.get("titulo", "")[:50],
+                                context_unit_id=ingest_result["context_unit_id"],
+                                generated_fields=ingest_result.get("generated_fields", [])
+                            )
+                        elif ingest_result.get("duplicate"):
+                            logger.info("perplexity_news_duplicate",
+                                title=news_item.get("titulo", "")[:50],
+                                duplicate_id=ingest_result.get("duplicate_id"),
+                                similarity=ingest_result.get("similarity")
+                            )
+                        else:
+                            logger.error("perplexity_news_ingest_failed",
+                                title=news_item.get("titulo", "")[:50],
+                                error=ingest_result.get("error")
+                            )
+
                     except Exception as save_error:
-                        logger.error("context_unit_save_failed", 
+                        logger.error("perplexity_news_ingest_error",
                             error=str(save_error),
                             title=news_item.get("titulo", "")
                         )
