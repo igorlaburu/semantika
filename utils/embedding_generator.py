@@ -22,38 +22,39 @@ _fastembed_model = None
 def get_fastembed_model():
     """Get or initialize FastEmbed model (lazy loading)."""
     global _fastembed_model
-    
+
     if _fastembed_model is None:
         try:
             from fastembed import TextEmbedding
-            
-            # Use FastEmbed default model (what was actually used before)
-            # BAAI/bge-small-en-v1.5
-            # 384 dimensions - this is FastEmbed's default when no model specified
+
+            # Multilingual model for better Spanish/Basque support
+            # sentence-transformers/paraphrase-multilingual-mpnet-base-v2
+            # 768 dimensions - Optimized for 50+ languages
             _fastembed_model = TextEmbedding(
-                model_name="BAAI/bge-small-en-v1.5"
+                model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
             )
 
             logger.info("fastembed_initialized",
-                model="bge-small-en-v1.5",
-                dimensions=384
+                model="paraphrase-multilingual-mpnet-base-v2",
+                dimensions=768,
+                languages="50+ (including Spanish and Basque)"
             )
         except Exception as e:
             logger.error("fastembed_initialization_failed", error=str(e))
             raise
-    
+
     return _fastembed_model
 
 
 async def generate_embedding_fastembed(text: str) -> List[float]:
     """Generate embedding using local FastEmbed.
-    
+
     Args:
         text: Text to embed (title + summary recommended)
-        
+
     Returns:
-        384-dimensional embedding vector
-        
+        768-dimensional embedding vector (multilingual model)
+
     Raises:
         Exception: If embedding generation fails
     """
@@ -82,7 +83,7 @@ async def generate_embedding_fastembed(text: str) -> List[float]:
 
 
 async def generate_embedding_openai(text: str) -> List[float]:
-    """Generate embedding using OpenAI API (fallback).
+    """Generate embedding using OpenAI API (legacy fallback - not recommended).
     
     Args:
         text: Text to embed
@@ -134,21 +135,21 @@ async def generate_embedding(
     context_unit_id: Optional[str] = None
 ) -> List[float]:
     """Generate embedding for content (title + summary).
-    
+
     Strategy:
-    1. Try FastEmbed (local, free, 80-85% quality for Spanish)
-    2. Fallback to OpenAI if FastEmbed fails and API key available
-    
+    1. Use FastEmbed multilingual model (local, free, optimized for Spanish/Basque)
+    2. Fallback to OpenAI only if FastEmbed fails (rare)
+
     Args:
         title: Content title
         summary: Content summary (optional)
-        force_openai: Force use of OpenAI API
+        force_openai: Force use of OpenAI API (not recommended)
         company_id: Company UUID for logging
         context_unit_id: Context unit UUID for logging
-        
+
     Returns:
-        384-dimensional embedding vector
-        
+        768-dimensional embedding vector
+
     Raises:
         Exception: If all methods fail
     """
@@ -165,56 +166,40 @@ async def generate_embedding(
         force_openai=force_openai
     )
     
-    # Try OpenAI first if forced
+    # Try OpenAI first if explicitly forced (not recommended)
     if force_openai:
         try:
             embedding = await generate_embedding_openai(text)
-            logger.info("embedding_generated",
+            logger.warn("openai_forced_used",
                 company_id=company_id,
                 context_unit_id=context_unit_id,
-                method="openai",
-                dimensions=len(embedding)
+                dimensions=len(embedding),
+                message="Using OpenAI instead of local multilingual model"
             )
             return embedding
         except Exception as e:
             logger.warn("openai_forced_but_failed", error=str(e))
             # Fall through to FastEmbed
-    
-    # TODO: MIGRATION NEEDED - Embeddings via OpenRouter/OpenAI
-    # ============================================================
-    # CURRENT: Using OpenRouter API for embeddings (openai/text-embedding-3-small)
-    #          - Cost: ~$0.02 per 1M tokens (~$1-5/month estimated)
-    #          - Dimensions: 1536 truncated to 384
-    #          - Scalable but has API cost
-    #
-    # FUTURE MIGRATION PLAN:
-    # 1. Switch to local multilingual model: sentence-transformers/paraphrase-multilingual-mpnet-base-v2
-    # 2. Migrate database: ALTER COLUMN embedding TYPE vector(768)
-    # 3. Regenerate ALL existing embeddings (~30+ context units)
-    # 4. Update search function to use 768d vectors
-    # 5. Benefits: Better Spanish support, no API cost, faster
-    # 6. Considerations: Requires ~300MB RAM, 100-200ms CPU per embedding
-    # 7. VPS Impact: May need more resources for concurrent searches
-    #
-    # See CLAUDE.md for full migration guide
-    # ============================================================
 
-    # Try FastEmbed first
+    # Use FastEmbed multilingual model (primary method)
     try:
         embedding = await generate_embedding_fastembed(text)
         logger.info("embedding_generated",
             company_id=company_id,
             context_unit_id=context_unit_id,
-            method="fastembed",
+            method="fastembed_multilingual",
             dimensions=len(embedding)
         )
         return embedding
 
     except Exception as fastembed_error:
-        logger.warn("fastembed_failed_trying_openai", error=str(fastembed_error))
+        logger.error("fastembed_failed", error=str(fastembed_error))
 
-        # Fallback to OpenAI via OpenRouter
+        # Fallback to OpenAI via OpenRouter (rare, only if FastEmbed fails)
         if settings.openrouter_api_key:
+            logger.warn("falling_back_to_openai",
+                message="FastEmbed failed, using OpenAI fallback"
+            )
             try:
                 embedding = await generate_embedding_openai(text)
                 logger.info("embedding_generated",
@@ -240,13 +225,13 @@ async def generate_embeddings_batch(
     force_openai: bool = False
 ) -> List[List[float]]:
     """Generate embeddings for multiple items in batch.
-    
+
     Args:
         items: List of dicts with 'title' and optional 'summary'
-        force_openai: Force use of OpenAI API
-        
+        force_openai: Force use of OpenAI API (not recommended)
+
     Returns:
-        List of 384-dimensional embedding vectors
+        List of 768-dimensional embedding vectors
     """
     logger.debug("batch_embedding_start", count=len(items), force_openai=force_openai)
     
@@ -274,7 +259,7 @@ async def generate_embeddings_batch(
                 error=str(emb)
             )
             failed_count += 1
-            valid_embeddings.append([0.0] * 384)  # Zero vector for failed items
+            valid_embeddings.append([0.0] * 768)  # Zero vector for failed items
         else:
             valid_embeddings.append(emb)
     
@@ -355,13 +340,13 @@ async def generate_context_unit_embedding(
     force_openai: bool = False
 ) -> List[float]:
     """Generate embedding for a context unit.
-    
+
     Args:
         context_unit: Dict with 'title', 'summary', 'id', 'company_id'
-        force_openai: Force use of OpenAI API
-        
+        force_openai: Force use of OpenAI API (not recommended)
+
     Returns:
-        384-dimensional embedding vector
+        768-dimensional embedding vector
     """
     return await generate_embedding(
         title=context_unit.get("title", ""),
@@ -377,13 +362,13 @@ async def generate_url_content_embedding(
     force_openai: bool = False
 ) -> List[float]:
     """Generate embedding for a URL content unit.
-    
+
     Args:
         url_content: Dict with 'title', 'summary', 'id', 'company_id'
-        force_openai: Force use of OpenAI API
-        
+        force_openai: Force use of OpenAI API (not recommended)
+
     Returns:
-        384-dimensional embedding vector
+        768-dimensional embedding vector
     """
     return await generate_embedding(
         title=url_content.get("title", ""),
