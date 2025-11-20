@@ -27,15 +27,15 @@ def get_fastembed_model():
         try:
             from fastembed import TextEmbedding
             
-            # Use multilingual model optimized for Spanish
-            # sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
-            # 384 dimensions, supports 50+ languages including Spanish
+            # Use English model (works reasonably well for Spanish)
+            # sentence-transformers/all-MiniLM-L6-v2
+            # 384 dimensions, primarily English but acceptable for Spanish
             _fastembed_model = TextEmbedding(
-                model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+                model_name="sentence-transformers/all-MiniLM-L6-v2"
             )
-            
-            logger.info("fastembed_initialized", 
-                model="paraphrase-multilingual-MiniLM-L12-v2",
+
+            logger.info("fastembed_initialized",
+                model="all-MiniLM-L6-v2",
                 dimensions=384
             )
         except Exception as e:
