@@ -2977,14 +2977,10 @@ async def semantic_search(
             max_days=request.max_days
         )
 
-        # Generate embedding for query
-        from utils.embedding_generator import generate_embedding
+        # Generate embedding for query using FastEmbed (MUST match DB embeddings)
+        from utils.embedding_generator import generate_embedding_fastembed
 
-        query_embedding = await generate_embedding(
-            title=request.query,
-            summary=None,
-            company_id=company_id
-        )
+        query_embedding = await generate_embedding_fastembed(request.query)
 
         logger.debug("query_embedding_generated",
             company_id=company_id,
