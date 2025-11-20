@@ -20,6 +20,7 @@ from utils.supabase_client import get_supabase_client
 from utils.supabase_auth import get_current_user_from_jwt
 from utils.usage_tracker import get_usage_tracker
 from utils.llm_registry import get_llm_registry
+from utils.unified_context_ingester import ingest_context_unit
 from core_ingest import IngestPipeline
 
 # Initialize logger
@@ -1165,45 +1166,59 @@ async def create_context_unit(
         # Set ID manually after creation
         source_content.id = context_unit_id
         
-        # Get workflow and process
-        workflow = get_workflow("default", company.get("settings", {}))
-        result = await workflow.process_content(source_content)
-        
-        # Extract context unit
-        context_unit = result.get("context_unit", {})
-        if not context_unit:
-            raise HTTPException(status_code=500, detail="Failed to generate context unit")
-        
-        # Save to database
-        context_unit_data = {
-            "id": context_unit.get("id"),
-            "organization_id": organization["id"],
-            "company_id": company["id"],
-            "source_type": "manual",
-            "source_id": source_content.source_id,
-            "source_metadata": {
+        # Use unified ingester (API endpoints skip novelty verification)
+        ingest_result = await ingest_context_unit(
+            # Input
+            raw_text=request.text,
+            title=request.title,  # Pre-generated title (optional)
+
+            # LLM will generate: summary, tags, category, atomic_statements (if needed)
+
+            # Required metadata
+            company_id=company["id"],
+            source_type="manual",
+            source_id=source_content.source_id,
+
+            # Optional metadata
+            source_metadata={
                 "manual_entry": True,
                 "client_id": client["client_id"],
                 "created_via": "api",
-                "has_custom_title": bool(request.title)
+                "has_custom_title": bool(request.title),
+                "organization_id": organization["id"]
             },
-            "title": context_unit.get("title"),
-            "summary": context_unit.get("summary"),
-            "tags": context_unit.get("tags", []),
-            "atomic_statements": context_unit.get("atomic_statements", []),
-            "raw_text": request.text,
-            "status": "completed",
-            "processed_at": "now()"
-        }
-        
-        db_result = supabase.client.table("press_context_units")\
-            .insert(context_unit_data)\
-            .execute()
-        
-        if not db_result.data:
-            raise HTTPException(status_code=500, detail="Failed to save context unit")
-        
-        created_unit = db_result.data[0]
+
+            # Control flags
+            generate_embedding_flag=True,
+            check_duplicates=True  # Semantic dedup even for manual
+        )
+
+        if not ingest_result["success"]:
+            error_msg = ingest_result.get("error", "Unknown error")
+            if ingest_result.get("duplicate"):
+                logger.warn(
+                    "manual_context_unit_duplicate",
+                    client_id=client["client_id"],
+                    duplicate_id=ingest_result.get("duplicate_id"),
+                    similarity=ingest_result.get("similarity")
+                )
+                # Return existing unit
+                existing_result = supabase.client.table("press_context_units")\
+                    .select("*")\
+                    .eq("id", ingest_result["duplicate_id"])\
+                    .single()\
+                    .execute()
+                created_unit = existing_result.data if existing_result.data else {}
+            else:
+                raise HTTPException(status_code=500, detail=f"Failed to create context unit: {error_msg}")
+        else:
+            # Fetch created unit
+            created_result = supabase.client.table("press_context_units")\
+                .select("*")\
+                .eq("id", ingest_result["context_unit_id"])\
+                .single()\
+                .execute()
+            created_unit = created_result.data if created_result.data else {}
         
         logger.info(
             "manual_context_unit_created",
