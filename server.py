@@ -560,6 +560,14 @@ class AggregateRequest(BaseModel):
     threshold: float = 0.7
 
 
+class SemanticSearchRequest(BaseModel):
+    """Request model for semantic search."""
+    query: str = Field(..., description="Search query to vectorize and match")
+    limit: int = Field(default=10, ge=1, le=100, description="Maximum number of results")
+    threshold: float = Field(default=0.75, ge=0.0, le=1.0, description="Minimum similarity score (0.0-1.0)")
+    filters: Optional[Dict[str, Any]] = Field(default=None, description="Optional filters (category, source_type, etc.)")
+
+
 class IngestURLRequest(BaseModel):
     """Request model for URL ingestion."""
     url: str
@@ -2937,6 +2945,109 @@ Choose the MOST relevant category. Only use "general" if the content truly doesn
     except Exception as e:
         logger.error("reclassify_categories_error", error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to reclassify categories: {str(e)}")
+
+
+@app.post("/api/v1/search/semantic")
+async def semantic_search(
+    request: SemanticSearchRequest,
+    user: Dict = Depends(get_current_user_from_jwt)
+):
+    """
+    Semantic search across context units using vector similarity.
+
+    Vectorizes the query using FastEmbed multilingual model and searches
+    for similar context units using pgvector cosine similarity.
+
+    Args:
+        request: Search parameters (query, limit, threshold, filters)
+        user: Authenticated user data (JWT)
+
+    Returns:
+        List of matching context units with similarity scores
+    """
+    try:
+        company_id = user["company_id"]
+
+        logger.info("semantic_search_start",
+            company_id=company_id,
+            query=request.query[:100],
+            limit=request.limit,
+            threshold=request.threshold
+        )
+
+        # Generate embedding for query
+        from utils.embedding_generator import generate_embedding
+
+        query_embedding = await generate_embedding(
+            title=request.query,
+            summary=None,
+            company_id=company_id
+        )
+
+        logger.debug("query_embedding_generated",
+            company_id=company_id,
+            embedding_dim=len(query_embedding)
+        )
+
+        # Build SQL query with pgvector similarity search
+        # Using <=> operator for cosine distance (1 - cosine similarity)
+        sql_query = f"""
+        SELECT
+            id,
+            title,
+            summary,
+            category,
+            tags,
+            source_type,
+            created_at,
+            1 - (embedding <=> '[{','.join(map(str, query_embedding))}]'::vector) as similarity_score
+        FROM press_context_units
+        WHERE
+            company_id = '{company_id}'
+            AND embedding IS NOT NULL
+            AND 1 - (embedding <=> '[{','.join(map(str, query_embedding))}]'::vector) >= {request.threshold}
+        """
+
+        # Add optional filters
+        if request.filters:
+            if 'category' in request.filters:
+                sql_query += f"\n    AND category = '{request.filters['category']}'"
+            if 'source_type' in request.filters:
+                sql_query += f"\n    AND source_type = '{request.filters['source_type']}'"
+
+        # Order by similarity and limit
+        sql_query += f"""
+        ORDER BY embedding <=> '[{','.join(map(str, query_embedding))}]'::vector
+        LIMIT {request.limit};
+        """
+
+        # Execute search via Supabase RPC
+        result = supabase_client.client.rpc('exec_sql', {'sql': sql_query}).execute()
+
+        results = result.data or []
+
+        logger.info("semantic_search_completed",
+            company_id=company_id,
+            query=request.query[:50],
+            results_count=len(results),
+            threshold=request.threshold
+        )
+
+        return {
+            "query": request.query,
+            "results": results,
+            "count": len(results),
+            "threshold_used": request.threshold,
+            "max_results": request.limit
+        }
+
+    except Exception as e:
+        logger.error("semantic_search_error",
+            company_id=user.get("company_id"),
+            query=request.query[:50],
+            error=str(e)
+        )
+        raise HTTPException(status_code=500, detail=f"Semantic search failed: {str(e)}")
 
 
 if __name__ == "__main__":
