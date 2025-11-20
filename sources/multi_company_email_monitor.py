@@ -20,6 +20,8 @@ import re
 
 from utils.logger import get_logger
 from utils.supabase_client import get_supabase_client
+from utils.unified_context_verifier import verify_novelty
+from utils.unified_context_ingester import ingest_context_unit
 from .audio_transcriber import AudioTranscriber
 
 logger = get_logger("multi_company_email_monitor")
@@ -494,6 +496,8 @@ class MultiCompanyEmailMonitor:
         subject: str,
         company: Dict,
         organization: Dict,
+        message_id: str,
+        source: Dict,
         source_metadata: Dict
     ):
         """
@@ -536,46 +540,82 @@ class MultiCompanyEmailMonitor:
             # Process content through workflow
             result = await workflow.process_content(source_content)
             
-            # Save context unit to database
-            context_unit = result.get("context_unit", {})
-            if context_unit:
-                supabase = get_supabase_client()
-                
-                # Prepare context unit data for database
-                context_unit_data = {
-                    "id": context_unit.get("id"),
+            # Phase 1: Verify novelty using Message-ID
+            verification_result = await verify_novelty(
+                source_type="email",
+                content_data={
+                    "message_id": message_id,
+                    "subject": subject,
+                    "source_id": source["source_id"]
+                },
+                company_id=company["id"]
+            )
+
+            if not verification_result["is_novel"]:
+                logger.info("email_duplicate_skipped",
+                    subject=subject[:50],
+                    message_id=message_id,
+                    reason=verification_result["reason"],
+                    duplicate_id=verification_result.get("duplicate_id")
+                )
+                return
+
+            # Phase 2: Ingest context unit with unified ingester
+            ingest_result = await ingest_context_unit(
+                # Pre-generated field from email
+                title=subject or "(Sin asunto)",
+                raw_text=combined_text,
+
+                # LLM will generate: summary, tags, category, atomic_statements
+                # (Uses GPT-4o-mini via unified_context_ingester)
+
+                # Required metadata
+                company_id=company["id"],
+                source_type="email",
+                source_id=source["source_id"],
+
+                # Optional metadata
+                source_metadata={
+                    **source_metadata,
                     "organization_id": organization["id"],
-                    "company_id": company["id"],
-                    "source_type": "email",
-                    "source_id": source_content.source_id,
-                    "source_metadata": source_content.metadata,
-                    "title": context_unit.get("title"),
-                    "summary": context_unit.get("summary"),
-                    "tags": context_unit.get("tags", []),
-                    "atomic_statements": context_unit.get("atomic_statements", []),
-                    "raw_text": combined_text,  # This is the complete raw content
-                    "status": "completed",
-                    "processed_at": "now()"
-                }
-                
-                # Insert into press_context_units
-                db_result = supabase.client.table("press_context_units").insert(context_unit_data).execute()
-                
-                logger.info(
-                    "combined_context_unit_saved_to_db",
-                    context_unit_id=context_unit.get("id"),
-                    company_code=company["company_code"],
+                    "message_id": message_id,
+                    "from": source_metadata.get("from"),
+                    "combined_content": True
+                },
+
+                # Control flags
+                generate_embedding_flag=True,
+                check_duplicates=True
+            )
+
+            if ingest_result["success"]:
+                logger.info("email_combined_content_ingested",
+                    subject=subject[:50],
+                    context_unit_id=ingest_result["context_unit_id"],
+                    generated_fields=ingest_result.get("generated_fields", []),
                     raw_text_length=len(combined_text)
+                )
+            elif ingest_result.get("duplicate"):
+                logger.info("email_duplicate_semantic",
+                    subject=subject[:50],
+                    duplicate_id=ingest_result.get("duplicate_id"),
+                    similarity=ingest_result.get("similarity")
+                )
+            else:
+                logger.error("email_ingest_failed",
+                    subject=subject[:50],
+                    error=ingest_result.get("error")
                 )
             
             logger.info(
                 "combined_email_content_processed_with_workflow",
                 subject=subject,
                 company_code=company["company_code"],
-                context_unit_id=result.get("context_unit", {}).get("id")
+                context_unit_id=ingest_result.get("context_unit_id") if ingest_result["success"] else None
             )
-            
+
             # Log execution
+            supabase = get_supabase_client()
             await supabase.log_execution(
                 client_id=source_metadata.get("client_id", "00000000-0000-0000-0000-000000000000"),
                 company_id=company["id"],
@@ -588,7 +628,7 @@ class MultiCompanyEmailMonitor:
                 metadata={
                     "subject": subject,
                     "workflow_code": workflow_code,
-                    "context_unit_id": context_unit.get("id"),
+                    "context_unit_id": ingest_result.get("context_unit_id") if ingest_result["success"] else None,
                     "content_parts": len(content_parts),
                     "source_id": source_metadata.get("source_id")
                 },
@@ -644,6 +684,7 @@ class MultiCompanyEmailMonitor:
             subject = self._decode_subject(message.get("Subject", "No Subject"))
             to_header = message.get("To", "")
             from_header = message.get("From", "")
+            message_id = message.get("Message-ID", str(email_id.decode() if isinstance(email_id, bytes) else email_id))
 
             logger.info("processing_email_multi_company", 
                 subject=subject,
@@ -751,7 +792,9 @@ class MultiCompanyEmailMonitor:
             # Create single context unit with all content
             if all_content_parts:
                 await self._process_combined_content_with_workflow(
-                    all_content_parts, subject, company, organization, 
+                    all_content_parts, subject, company, organization,
+                    message_id=message_id,
+                    source=source,
                     source_metadata={
                         "subject": subject,
                         "company_code": company["company_code"],
@@ -759,7 +802,8 @@ class MultiCompanyEmailMonitor:
                         "source_id": source["source_id"],
                         "source_name": source["source_name"],
                         "workflow_code": source.get("workflow_code", "default"),
-                        "attachments_count": len(text_attachments) + len(audio_transcriptions)
+                        "attachments_count": len(text_attachments) + len(audio_transcriptions),
+                        "message_id": message_id
                     }
                 )
 
