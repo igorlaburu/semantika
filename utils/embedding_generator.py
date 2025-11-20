@@ -180,7 +180,7 @@ async def generate_embedding(
             logger.warn("openai_forced_but_failed", error=str(e))
             # Fall through to FastEmbed
     
-    # Default: Try FastEmbed first
+    # Use FastEmbed only (no fallback - embeddings must be consistent)
     try:
         embedding = await generate_embedding_fastembed(text)
         logger.info("embedding_generated",
@@ -190,30 +190,16 @@ async def generate_embedding(
             dimensions=len(embedding)
         )
         return embedding
-        
-    except Exception as fastembed_error:
-        logger.warn("fastembed_failed_trying_openai", error=str(fastembed_error))
-        
-        # Fallback to OpenAI if available
-        if settings.openrouter_api_key:
-            try:
-                embedding = await generate_embedding_openai(text)
-                logger.info("embedding_generated",
-                    company_id=company_id,
-                    context_unit_id=context_unit_id,
-                    method="openai_fallback",
-                    dimensions=len(embedding)
-                )
-                return embedding
-            except Exception as openai_error:
-                logger.error("all_embedding_methods_failed",
-                    fastembed_error=str(fastembed_error),
-                    openai_error=str(openai_error)
-                )
-                raise
-        else:
-            logger.error("fastembed_failed_no_openai_fallback", error=str(fastembed_error))
-            raise
+
+    except Exception as e:
+        logger.error("fastembed_embedding_failed",
+            company_id=company_id,
+            context_unit_id=context_unit_id,
+            error=str(e),
+            error_type=type(e).__name__,
+            text_preview=text[:100]
+        )
+        raise
 
 
 async def generate_embeddings_batch(
