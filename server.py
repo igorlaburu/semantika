@@ -565,6 +565,7 @@ class SemanticSearchRequest(BaseModel):
     query: str = Field(..., description="Search query to vectorize and match")
     limit: int = Field(default=10, ge=1, le=100, description="Maximum number of results")
     threshold: float = Field(default=0.75, ge=0.0, le=1.0, description="Minimum similarity score (0.0-1.0)")
+    max_days: Optional[int] = Field(default=None, ge=1, description="Maximum age of context units in days (e.g., 30 = last 30 days)")
     filters: Optional[Dict[str, Any]] = Field(default=None, description="Optional filters (category, source_type, etc.)")
 
 
@@ -2972,7 +2973,8 @@ async def semantic_search(
             company_id=company_id,
             query=request.query[:100],
             limit=request.limit,
-            threshold=request.threshold
+            threshold=request.threshold,
+            max_days=request.max_days
         )
 
         # Generate embedding for query
@@ -3008,6 +3010,10 @@ async def semantic_search(
             AND 1 - (embedding <=> '[{','.join(map(str, query_embedding))}]'::vector) >= {request.threshold}
         """
 
+        # Add max_days filter (age limit)
+        if request.max_days:
+            sql_query += f"\n    AND created_at >= NOW() - INTERVAL '{request.max_days} days'"
+
         # Add optional filters
         if request.filters:
             if 'category' in request.filters:
@@ -3030,16 +3036,23 @@ async def semantic_search(
             company_id=company_id,
             query=request.query[:50],
             results_count=len(results),
-            threshold=request.threshold
+            threshold=request.threshold,
+            max_days=request.max_days
         )
 
-        return {
+        response = {
             "query": request.query,
             "results": results,
             "count": len(results),
             "threshold_used": request.threshold,
             "max_results": request.limit
         }
+
+        # Add max_days to response if filter was used
+        if request.max_days:
+            response["max_days_filter"] = request.max_days
+
+        return response
 
     except Exception as e:
         logger.error("semantic_search_error",
