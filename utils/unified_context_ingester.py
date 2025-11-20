@@ -101,7 +101,6 @@ async def ingest_context_unit(
     # Optional metadata
     source_metadata: Optional[Dict[str, Any]] = None,
     url_content_unit_id: Optional[str] = None,
-    special_info: bool = False,
 
     # Control flags
     force_save: bool = False,
@@ -348,7 +347,6 @@ async def ingest_context_unit(
                 "category": category,
                 "source_type": source_type,
                 "source_metadata": source_metadata or {},
-                "special_info": special_info,
                 "status": "completed",
                 "created_at": now
             }
