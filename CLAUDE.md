@@ -11,9 +11,79 @@ Este documento contiene instrucciones específicas para Claude Code al trabajar 
 - **Backend**: Python 3.10+, FastAPI, APScheduler
 - **Base de Datos**: Supabase (config), Qdrant (vectores)
 - **LLM**: OpenRouter (Claude 3.5 Sonnet, GPT-4o-mini)
-- **Embeddings**: fastembed (integrado en Qdrant)
+- **Embeddings**: ⚠️ **OpenRouter/OpenAI** (temporal - ver migración pendiente)
 - **Orquestación**: Docker Compose
 - **Deployment**: GitHub Actions (CI/CD automático)
+
+## ⚠️ MIGRACIÓN PENDIENTE: Embeddings Locales
+
+### Estado Actual (Temporal)
+**Usando OpenRouter API para embeddings**:
+- Modelo: `openai/text-embedding-3-small` (1536d truncado a 384d)
+- Costo: ~$0.02 por 1M tokens (~$1-5/mes estimado)
+- Ubicación: `utils/embedding_generator.py` (fallback automático)
+- Razón: VPS modesto sin GPU, múltiples clientes concurrentes
+
+### Plan de Migración (Cuando escales)
+
+**OBJETIVO**: Migrar a modelo local multilingual optimizado para español
+
+**Modelo recomendado**: `sentence-transformers/paraphrase-multilingual-mpnet-base-v2`
+- Dimensiones: 768 (vs 384 actual)
+- Idiomas: 50+ incluyendo español y euskera
+- Rendimiento: Excelente para contenido en español
+
+**Pasos de migración**:
+
+1. **Preparar modelo local**:
+   ```python
+   # En utils/embedding_generator.py
+   from fastembed import TextEmbedding
+   model = TextEmbedding(
+       model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+   )
+   ```
+
+2. **Migrar base de datos**:
+   ```sql
+   -- Aumentar dimensiones de 384 a 768
+   ALTER TABLE press_context_units
+   ALTER COLUMN embedding TYPE vector(768);
+
+   ALTER TABLE url_content_units
+   ALTER COLUMN embedding TYPE vector(768);
+   ```
+
+3. **Actualizar función de búsqueda**:
+   ```sql
+   -- En search_context_units_by_vector()
+   -- Cambiar parámetro: p_query_embedding vector(768)
+   ```
+
+4. **Regenerar embeddings existentes**:
+   - Script para procesar todos los context units (~30+ unidades)
+   - Regenerar embedding con nuevo modelo
+   - Actualizar BD con nuevos vectores de 768d
+
+5. **Eliminar fallback de OpenRouter**:
+   - Remover código de fallback a OpenAI
+   - Usar solo modelo local
+
+**Requisitos de recursos**:
+- Disco: +90-120MB (modelo)
+- RAM: +300MB (modelo cargado)
+- CPU: 100-200ms por embedding (sin GPU)
+- ⚠️ **Consideración**: Con múltiples clientes buscando simultáneamente, evaluar si VPS puede manejar la carga
+
+**Cuándo migrar**:
+- ✅ Cuando tengas servidor con >4 cores o GPU
+- ✅ Cuando el costo de OpenRouter justifique infraestructura
+- ✅ Cuando necesites embeddings offline
+- ❌ NO migrar si el VPS actual se satura con búsquedas concurrentes
+
+**Ver también**:
+- `utils/embedding_generator.py` (TODO gigante línea ~183)
+- Issues de FastEmbed: https://github.com/qdrant/fastembed
 
 ## Arquitectura
 

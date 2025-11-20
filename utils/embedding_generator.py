@@ -180,7 +180,26 @@ async def generate_embedding(
             logger.warn("openai_forced_but_failed", error=str(e))
             # Fall through to FastEmbed
     
-    # Use FastEmbed only (no fallback - embeddings must be consistent)
+    # TODO: MIGRATION NEEDED - Embeddings via OpenRouter/OpenAI
+    # ============================================================
+    # CURRENT: Using OpenRouter API for embeddings (openai/text-embedding-3-small)
+    #          - Cost: ~$0.02 per 1M tokens (~$1-5/month estimated)
+    #          - Dimensions: 1536 truncated to 384
+    #          - Scalable but has API cost
+    #
+    # FUTURE MIGRATION PLAN:
+    # 1. Switch to local multilingual model: sentence-transformers/paraphrase-multilingual-mpnet-base-v2
+    # 2. Migrate database: ALTER COLUMN embedding TYPE vector(768)
+    # 3. Regenerate ALL existing embeddings (~30+ context units)
+    # 4. Update search function to use 768d vectors
+    # 5. Benefits: Better Spanish support, no API cost, faster
+    # 6. Considerations: Requires ~300MB RAM, 100-200ms CPU per embedding
+    # 7. VPS Impact: May need more resources for concurrent searches
+    #
+    # See CLAUDE.md for full migration guide
+    # ============================================================
+
+    # Try FastEmbed first
     try:
         embedding = await generate_embedding_fastembed(text)
         logger.info("embedding_generated",
@@ -191,15 +210,29 @@ async def generate_embedding(
         )
         return embedding
 
-    except Exception as e:
-        logger.error("fastembed_embedding_failed",
-            company_id=company_id,
-            context_unit_id=context_unit_id,
-            error=str(e),
-            error_type=type(e).__name__,
-            text_preview=text[:100]
-        )
-        raise
+    except Exception as fastembed_error:
+        logger.warn("fastembed_failed_trying_openai", error=str(fastembed_error))
+
+        # Fallback to OpenAI via OpenRouter
+        if settings.openrouter_api_key:
+            try:
+                embedding = await generate_embedding_openai(text)
+                logger.info("embedding_generated",
+                    company_id=company_id,
+                    context_unit_id=context_unit_id,
+                    method="openai_fallback",
+                    dimensions=len(embedding)
+                )
+                return embedding
+            except Exception as openai_error:
+                logger.error("all_embedding_methods_failed",
+                    fastembed_error=str(fastembed_error),
+                    openai_error=str(openai_error)
+                )
+                raise
+        else:
+            logger.error("fastembed_failed_no_openai_fallback", error=str(fastembed_error))
+            raise
 
 
 async def generate_embeddings_batch(
