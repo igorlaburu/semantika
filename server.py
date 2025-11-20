@@ -2948,7 +2948,7 @@ Choose the MOST relevant category. Only use "general" if the content truly doesn
         raise HTTPException(status_code=500, detail=f"Failed to reclassify categories: {str(e)}")
 
 
-@app.post("/api/v1/search/semantic")
+@app.post("/api/v1/context-units/search-vector")
 async def semantic_search(
     request: SemanticSearchRequest,
     user: Dict = Depends(get_current_user_from_jwt)
