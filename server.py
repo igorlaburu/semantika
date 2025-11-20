@@ -2991,44 +2991,22 @@ async def semantic_search(
             embedding_dim=len(query_embedding)
         )
 
-        # Build SQL query with pgvector similarity search
-        # Using <=> operator for cosine distance (1 - cosine similarity)
-        sql_query = f"""
-        SELECT
-            id,
-            title,
-            summary,
-            category,
-            tags,
-            source_type,
-            created_at,
-            1 - (embedding <=> '[{','.join(map(str, query_embedding))}]'::vector) as similarity_score
-        FROM press_context_units
-        WHERE
-            company_id = '{company_id}'
-            AND embedding IS NOT NULL
-            AND 1 - (embedding <=> '[{','.join(map(str, query_embedding))}]'::vector) >= {request.threshold}
-        """
+        # Convert embedding to string format for pgvector
+        embedding_str = f"[{','.join(map(str, query_embedding))}]"
 
-        # Add max_days filter (age limit)
-        if request.max_days:
-            sql_query += f"\n    AND created_at >= NOW() - INTERVAL '{request.max_days} days'"
+        # Build RPC parameters
+        rpc_params = {
+            'p_company_id': company_id,
+            'p_query_embedding': embedding_str,
+            'p_threshold': request.threshold,
+            'p_limit': request.limit,
+            'p_max_days': request.max_days,
+            'p_category': request.filters.get('category') if request.filters else None,
+            'p_source_type': request.filters.get('source_type') if request.filters else None
+        }
 
-        # Add optional filters
-        if request.filters:
-            if 'category' in request.filters:
-                sql_query += f"\n    AND category = '{request.filters['category']}'"
-            if 'source_type' in request.filters:
-                sql_query += f"\n    AND source_type = '{request.filters['source_type']}'"
-
-        # Order by similarity and limit
-        sql_query += f"""
-        ORDER BY embedding <=> '[{','.join(map(str, query_embedding))}]'::vector
-        LIMIT {request.limit};
-        """
-
-        # Execute search via Supabase RPC
-        result = supabase_client.client.rpc('exec_sql', {'sql': sql_query}).execute()
+        # Execute search via Supabase RPC function
+        result = supabase_client.client.rpc('search_context_units_by_vector', rpc_params).execute()
 
         results = result.data or []
 
