@@ -39,6 +39,22 @@ app = FastAPI(
 )
 
 
+@app.on_event("startup")
+async def startup_event():
+    """Initialize FastEmbed model on startup to avoid first-request timeout."""
+    try:
+        from utils.embedding_generator import get_fastembed_model
+        logger.info("preloading_fastembed_model")
+        model = get_fastembed_model()  # This will download and cache the model
+        logger.info("fastembed_model_preloaded",
+            model="paraphrase-multilingual-mpnet-base-v2",
+            dimensions=768
+        )
+    except Exception as e:
+        logger.error("fastembed_preload_failed", error=str(e))
+        # Don't fail startup, let it try lazy-loading later
+
+
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     """Log all incoming requests."""
