@@ -26,6 +26,7 @@ class OpenRouterProvider(LLMProvider):
         self._client = ChatOpenAI(
             model=model_name,
             temperature=temperature,
+            max_tokens=8192,  # Limit output tokens to avoid credit exhaustion
             openai_api_key=settings.openrouter_api_key,
             openai_api_base=settings.openrouter_base_url,
             default_headers={
