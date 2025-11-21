@@ -16,6 +16,31 @@ from .llm_registry import get_llm_registry
 logger = get_logger("llm_client")
 
 
+def _log_llm_error(operation: str, error: Exception):
+    """Log LLM errors with special handling for credit/quota issues.
+
+    Args:
+        operation: Name of the operation that failed
+        error: The exception that occurred
+    """
+    error_str = str(error)
+
+    # Detect credit/quota errors (402, "credit", "afford", "quota", "limit exceeded")
+    if any(keyword in error_str.lower() for keyword in ["402", "credit", "afford", "quota", "limit exceeded"]):
+        logger.error(f"{operation}_credit_error",
+            error=error_str,
+            error_type="INSUFFICIENT_CREDITS",
+            message=f"⚠️  CRITICAL: OpenRouter credits exhausted or max_tokens too high for {operation}"
+        )
+    else:
+        import traceback
+        logger.error(f"{operation}_error",
+            error=error_str,
+            error_type=type(error).__name__,
+            traceback=traceback.format_exc()
+        )
+
+
 class LLMClient:
     """Multi-provider LLM client using centralized registry."""
 
@@ -616,8 +641,7 @@ Response format:
             logger.debug("redact_news_completed", article_length=len(result.get("article", "")))
             return result
         except Exception as e:
-            import traceback
-            logger.error("redact_news_error", error=str(e), traceback=traceback.format_exc())
+            _log_llm_error("redact_news", e)
             return {"article": "", "title": "", "summary": "", "tags": [], "error": str(e)}
 
     async def redact_news_rich(
@@ -747,8 +771,7 @@ Response format:
                         statements_used_value=result.get("statements_used", "NOT_PRESENT"))
             return result
         except Exception as e:
-            import traceback
-            logger.error("redact_news_rich_error", error=str(e), traceback=traceback.format_exc())
+            _log_llm_error("redact_news_rich", e)
             return {"article": "", "title": "", "summary": "", "tags": [], "error": str(e)}
 
     async def generate_style_guide(
@@ -841,7 +864,7 @@ Use specific, concrete examples extracted from the actual articles. Be detailed 
             logger.info("style_guide_generated", style_name=style_name, guide_length=len(result))
             return result
         except Exception as e:
-            logger.error("style_guide_generation_error", error=str(e))
+            _log_llm_error("generate_style_guide", e)
             return f"# Error generating style guide\n\nError: {str(e)}"
 
     async def generate_context_unit(
@@ -928,7 +951,7 @@ Respond in JSON:
             logger.debug("context_unit_generated", statements_count=len(result.get("atomic_statements", [])))
             return result
         except Exception as e:
-            logger.error("context_unit_generation_error", error=str(e))
+            _log_llm_error("generate_context_unit", e)
             return {
                 "title": "",
                 "summary": "",
@@ -1035,7 +1058,7 @@ Formato exacto:
 
             return response
         except Exception as e:
-            logger.error("micro_edit_error", error=str(e))
+            _log_llm_error("micro_edit", e)
             return {
                 "original_text": text,
                 "edited_text": text,
