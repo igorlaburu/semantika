@@ -1543,6 +1543,9 @@ async def create_context_unit_from_url(
                 detail=f"No content extracted from URL (change_type: {change_type})"
             )
         
+        # Get first context unit ID (workflow can create multiple for multi-noticia)
+        context_unit_id = context_unit_ids[0]
+        
         # Fetch created context unit
         created_result = supabase.client.table("press_context_units")\
             .select("*")\
