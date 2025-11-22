@@ -287,10 +287,12 @@ async def parse_multi_noticia(state: ScraperState, news_blocks, soup: BeautifulS
                 organization_id=company_id
             )
             
-            if result.get("title"):
+            # Skip non-news content (LLM returns this when block has no actual news)
+            title = result.get("title", "")
+            if title and title.lower() not in ["sin contenido noticioso", "no news content", ""]:
                 content_items.append({
                     "position": len(content_items) + 1,
-                    "title": result.get("title", f"Noticia {i+1}"),
+                    "title": title,
                     "summary": result.get("summary", ""),
                     "content": block_text[:4000],
                     "tags": result.get("tags", []),
@@ -301,8 +303,14 @@ async def parse_multi_noticia(state: ScraperState, news_blocks, soup: BeautifulS
                 logger.debug("news_block_parsed",
                     url=url,
                     position=len(content_items),
-                    title=result.get("title", "")[:50],
+                    title=title[:50],
                     statements_count=len(result.get("atomic_facts", []))
+                )
+            else:
+                logger.debug("news_block_skipped_no_content",
+                    url=url,
+                    block_index=i,
+                    title=title
                 )
         except Exception as e:
             logger.error("news_block_parse_error", 
