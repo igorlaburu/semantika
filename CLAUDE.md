@@ -90,7 +90,14 @@ Este documento contiene instrucciones específicas para Claude Code al trabajar 
 ### Componentes Docker
 1. **semantika-api**: FastAPI server (puerto 8000)
 2. **semantika-scheduler**: APScheduler daemon
+   - **Auto-reload**: Recarga sources cada 5 minutos automáticamente
+   - **NO reiniciar** después de cambiar schedules en BD - esperar hasta 5min
 3. **qdrant**: Vector database (puerto 6333)
+
+### Zonas Horarias
+- **España**: UTC+1 (CET) en invierno, UTC+2 (CEST) en verano
+- **Scheduler**: Usa **UTC** siempre
+- **Conversión**: España 13:00 = UTC 12:00 (invierno)
 
 ### Flujo de Datos
 1. Ingesta → Guardrails (PII/Copyright) → Desduplicación → Qdrant
