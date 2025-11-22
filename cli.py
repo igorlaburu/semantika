@@ -445,6 +445,231 @@ async def get_usage(org: Optional[str] = None, days: int = 30):
         sys.exit(1)
 
 
+async def create_company(name: str, cif: str, tier: str = "starter"):
+    """Create a new company with default setup (ADMIN ONLY).
+    
+    Creates:
+    - Company record
+    - Client record with API key
+    - Default Manual source (source_id = company_id)
+    - Default organization
+    
+    This is the recommended way for admins to onboard new companies.
+    """
+    try:
+        import secrets
+        import uuid
+        from datetime import datetime
+        
+        supabase = get_supabase_client()
+        
+        # Validate tier
+        valid_tiers = ["starter", "pro", "unlimited"]
+        if tier not in valid_tiers:
+            print(f"\n❌ Invalid tier. Must be one of: {', '.join(valid_tiers)}\n")
+            sys.exit(1)
+        
+        # Normalize CIF
+        cif_normalized = cif.upper().replace(" ", "")
+        
+        # Check if company exists
+        existing = supabase.client.table("companies")\
+            .select("id, company_name")\
+            .eq("company_code", cif_normalized)\
+            .maybe_single()\
+            .execute()
+        
+        if existing.data:
+            print(f"\n❌ Company with CIF {cif_normalized} already exists: {existing.data['company_name']}\n")
+            sys.exit(1)
+        
+        print(f"\n🏢 Creating company: {name}")
+        print(f"   CIF: {cif_normalized}")
+        print(f"   Tier: {tier}\n")
+        
+        # 1. Create company
+        company_data = {
+            "company_code": cif_normalized,
+            "company_name": name,
+            "tier": tier,
+            "is_active": True
+        }
+        
+        company_result = supabase.client.table("companies").insert(company_data).execute()
+        
+        if not company_result.data:
+            print(f"\n❌ Failed to create company\n")
+            sys.exit(1)
+        
+        company = company_result.data[0]
+        company_id = company["id"]
+        
+        print(f"✅ Company created: {company_id}")
+        
+        # 2. Create client with API key
+        api_key = f"sk-{secrets.token_hex(32)}"
+        client_data = {
+            "company_id": company_id,
+            "client_name": f"{name} (Default)",
+            "api_key": api_key,
+            "is_active": True
+        }
+        
+        client_result = supabase.client.table("clients").insert(client_data).execute()
+        
+        if not client_result.data:
+            print(f"\n❌ Failed to create client\n")
+            sys.exit(1)
+        
+        client = client_result.data[0]
+        client_id = client["client_id"]
+        
+        print(f"✅ Client created: {client_id}")
+        print(f"✅ API Key: {api_key}")
+        
+        # 3. Create Manual source (source_id = company_id)
+        manual_source = {
+            "id": company_id,  # KEY: source.id = company.id
+            "company_id": company_id,
+            "source_type": "manual",
+            "source_name": "Manual",
+            "is_active": True,
+            "config": {"description": "Contenido manual (API/Frontend/Email)"},
+            "schedule_config": {}
+        }
+        
+        source_result = supabase.client.table("sources").insert(manual_source).execute()
+        
+        if not source_result.data:
+            print(f"\n⚠️  Warning: Failed to create Manual source\n")
+        else:
+            print(f"✅ Manual source created: {company_id}")
+        
+        # 4. Create default organization
+        org_slug = cif_normalized.lower()
+        org_data = {
+            "company_id": company_id,
+            "slug": org_slug,
+            "name": name,
+            "is_active": True,
+            "settings": {"language": "es"}
+        }
+        
+        org_result = supabase.client.table("organizations").insert(org_data).execute()
+        
+        if not org_result.data:
+            print(f"\n⚠️  Warning: Failed to create organization\n")
+        else:
+            org = org_result.data[0]
+            print(f"✅ Organization created: {org_slug} ({org['id']})")
+        
+        # Summary
+        print(f"\n{'='*60}")
+        print(f"🎉 Company Onboarding Complete!")
+        print(f"{'='*60}")
+        print(f"\n📋 Company Details:")
+        print(f"   ID: {company_id}")
+        print(f"   Name: {name}")
+        print(f"   CIF: {cif_normalized}")
+        print(f"   Tier: {tier}")
+        print(f"\n🔑 API Credentials:")
+        print(f"   Client ID: {client_id}")
+        print(f"   API Key: {api_key}")
+        print(f"   ⚠️  SAVE THIS KEY - won't be shown again!")
+        print(f"\n🏗️  Default Resources:")
+        print(f"   Manual Source ID: {company_id}")
+        print(f"   Organization Slug: {org_slug}")
+        print(f"\n📝 Next Steps:")
+        print(f"   1. Create auth users: python cli.py create-auth-user --email user@example.com --company-id {company_id}")
+        print(f"   2. Add sources: Use Supabase UI or API")
+        print(f"   3. Share API key with client\n")
+        
+        logger.info("cli_company_created",
+            company_id=company_id,
+            company_name=name,
+            client_id=client_id
+        )
+        
+    except Exception as e:
+        print(f"\n❌ Error creating company: {str(e)}\n")
+        logger.error("cli_create_company_error", error=str(e))
+        sys.exit(1)
+
+
+async def create_auth_user(email: str, password: str, company_id: str, name: Optional[str] = None):
+    """Create user in Supabase Auth and link to company (ADMIN ONLY).
+    
+    Creates a user account that can log in to the frontend.
+    Links user to company via user_metadata.
+    """
+    try:
+        from utils.supabase_auth import get_supabase_admin_client
+        
+        supabase = get_supabase_client()
+        
+        # Verify company exists
+        company_result = supabase.client.table("companies")\
+            .select("*")\
+            .eq("id", company_id)\
+            .maybe_single()\
+            .execute()
+        
+        if not company_result.data:
+            print(f"\n❌ Company not found: {company_id}\n")
+            sys.exit(1)
+        
+        company = company_result.data
+        
+        print(f"\n👤 Creating auth user for: {company['company_name']}")
+        print(f"   Email: {email}")
+        print(f"   Password: {'*' * len(password)}\n")
+        
+        # Create user in Supabase Auth
+        admin_client = get_supabase_admin_client()
+        
+        auth_response = admin_client.auth.admin.create_user({
+            "email": email,
+            "password": password,
+            "email_confirm": True,  # Auto-confirm email
+            "user_metadata": {
+                "company_id": company_id,
+                "name": name or email.split("@")[0],
+                "email": email
+            }
+        })
+        
+        if not auth_response.user:
+            print(f"\n❌ Failed to create auth user\n")
+            sys.exit(1)
+        
+        user_id = auth_response.user.id
+        
+        print(f"✅ Auth user created: {user_id}")
+        print(f"\n{'='*60}")
+        print(f"🎉 User Created Successfully!")
+        print(f"{'='*60}")
+        print(f"\n📋 User Details:")
+        print(f"   User ID: {user_id}")
+        print(f"   Email: {email}")
+        print(f"   Password: {password}")
+        print(f"   Company: {company['company_name']} ({company_id})")
+        print(f"\n📝 Login Credentials (share with user):")
+        print(f"   Email: {email}")
+        print(f"   Password: {password}")
+        print(f"   URL: https://press.ekimen.ai\n")
+        
+        logger.info("cli_auth_user_created",
+            user_id=user_id,
+            email=email,
+            company_id=company_id
+        )
+        
+    except Exception as e:
+        print(f"\n❌ Error creating auth user: {str(e)}\n")
+        logger.error("cli_create_auth_user_error", error=str(e))
+        sys.exit(1)
+
+
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -518,6 +743,19 @@ def main():
     usage_parser.add_argument("--org", help="Filter by organization slug (optional)")
     usage_parser.add_argument("--days", type=int, default=30, help="Number of days to look back (default: 30)")
 
+    # create-company (ADMIN ONBOARDING)
+    create_company_parser = subparsers.add_parser("create-company", help="Create new company with full setup (ADMIN)")
+    create_company_parser.add_argument("--name", required=True, help="Company name")
+    create_company_parser.add_argument("--cif", required=True, help="Company tax ID (CIF)")
+    create_company_parser.add_argument("--tier", default="starter", choices=["starter", "pro", "unlimited"], help="Company tier")
+
+    # create-auth-user (ADMIN ONBOARDING)
+    create_user_parser = subparsers.add_parser("create-auth-user", help="Create auth user for company (ADMIN)")
+    create_user_parser.add_argument("--email", required=True, help="User email")
+    create_user_parser.add_argument("--password", required=True, help="User password")
+    create_user_parser.add_argument("--company-id", required=True, help="Company UUID")
+    create_user_parser.add_argument("--name", help="User display name (optional)")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -551,6 +789,10 @@ def main():
         asyncio.run(list_context_units(args.org if hasattr(args, 'org') else None, args.limit))
     elif args.command == "usage":
         asyncio.run(get_usage(args.org if hasattr(args, 'org') else None, args.days))
+    elif args.command == "create-company":
+        asyncio.run(create_company(args.name, args.cif, args.tier))
+    elif args.command == "create-auth-user":
+        asyncio.run(create_auth_user(args.email, args.password, args.company_id, args.name if hasattr(args, 'name') else None))
 
 
 if __name__ == "__main__":

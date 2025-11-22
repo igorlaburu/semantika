@@ -296,6 +296,26 @@ async def auth_signup(request: SignupRequest) -> Dict:
             name=request.company_name
         )
 
+        # Create Manual source (source.id = company.id)
+        logger.debug("creating_manual_source", company_id=company_id)
+        manual_source = {
+            "id": company_id,  # KEY: source.id = company.id
+            "company_id": company_id,
+            "source_type": "manual",
+            "source_name": "Manual",
+            "is_active": True,
+            "config": {"description": "Contenido manual (API/Frontend/Email)"},
+            "schedule_config": {}
+        }
+        
+        source_result = supabase.client.table("sources").insert(manual_source).execute()
+        
+        if not source_result or not source_result.data:
+            logger.warn("manual_source_creation_failed", company_id=company_id)
+            # Don't fail signup - can be created later via CLI
+        else:
+            logger.info("manual_source_created", company_id=company_id, source_id=company_id)
+
         # Create user in Supabase Auth with company_id in metadata
         # Use supabase client's auth methods directly
         logger.debug("creating_auth_user", email=request.email, company_id=company_id)
@@ -1302,10 +1322,11 @@ async def create_context_unit(
         organization = org_result.data[0]
         
         # Create SourceContent
+        # Use company_id as source_id (Manual source always has source.id = company.id)
         context_unit_id = str(uuid.uuid4())
         source_content = SourceContent(
             source_type="manual",
-            source_id=f"manual_{context_unit_id[:8]}",
+            source_id=company["id"],  # KEY: Manual source.id = company.id
             organization_slug=organization["slug"],
             text_content=request.text,
             metadata={
@@ -1329,7 +1350,7 @@ async def create_context_unit(
             # Required metadata
             company_id=company["id"],
             source_type="manual",
-            source_id=source_content.source_id,
+            source_id=company["id"],  # KEY: Manual source.id = company.id
 
             # Optional metadata
             source_metadata={
@@ -1506,8 +1527,8 @@ async def create_context_unit_from_url(
         company = company_result.data
         
         # Use new LangGraph scraper workflow
-        # Generate a proper UUID for the source (ephemeral API scraping source)
-        source_id = str(uuid.uuid4())
+        # Use company_id as source_id (Manual source always has source.id = company.id)
+        source_id = company["id"]
         workflow_result = await scrape_url(
             company_id=company["id"],
             source_id=source_id,

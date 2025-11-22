@@ -69,6 +69,33 @@ El sistema **ekimen** es una plataforma multi-tenant para procesamiento semánti
 - **STT**: Whisper (OpenAI)
 - **Deployment**: Docker + GitHub Actions
 
+### Arquitectura de Sources: Manual Source
+
+**Concepto clave**: Cada company tiene una **source "Manual"** con un diseño especial:
+
+```
+source.id = company.id  // 🔑 KEY INSIGHT
+```
+
+**Propósito**:
+- Unifica todo contenido manual de la company:
+  - POST /context-units (texto manual)
+  - POST /context-units/from-url (scraping manual)  
+  - Emails procesados
+  - Archivos subidos
+  
+**Creación automática**:
+1. ✅ Signup endpoint (`POST /auth/signup`)
+2. ✅ CLI onboarding (`python cli.py create-company`)
+3. ✅ Migración SQL para companies existentes
+
+**Ventajas**:
+- No requiere búsquedas (solo usar `company_id`)
+- 1 source por company (predecible)
+- Simplifica lógica de endpoints
+
+**Ver**: `sql/migrations/002_create_manual_sources.sql`
+
 ---
 
 ## Autenticación
@@ -122,14 +149,84 @@ GET /me
 
 ### CLI de Administración
 
-El sistema incluye un CLI para administración de clientes y tareas.
+El sistema incluye un CLI completo para administración. Ubicación: `cli.py`
 
-#### Añadir Cliente
+#### 🏢 Onboarding de Company (Recomendado para admins)
+
+**Crear company completa** con un solo comando:
 
 ```bash
-docker exec -it semantika-api python cli.py add-client \
-  --name "Nombre del Cliente" \
-  --email "cliente@example.com"
+python cli.py create-company \
+  --name "Acme Corp" \
+  --cif "B12345678" \
+  --tier "pro"
+```
+
+**Qué crea automáticamente:**
+1. ✅ Company record en BD
+2. ✅ Client con API key (para integración API)
+3. ✅ Source "Manual" (source.id = company.id) 
+4. ✅ Organization por defecto
+
+**Output:**
+```
+🎉 Company Onboarding Complete!
+============================================================
+
+📋 Company Details:
+   ID: 00000000-0000-0000-0000-000000000001
+   Name: Acme Corp
+   CIF: B12345678
+   Tier: pro
+
+🔑 API Credentials:
+   Client ID: abc-123-def-456
+   API Key: sk-xxxxxxxxxxxxxxxxxxxxx
+   ⚠️  SAVE THIS KEY - won't be shown again!
+
+🏗️  Default Resources:
+   Manual Source ID: 00000000-0000-0000-0000-000000000001
+   Organization Slug: b12345678
+
+📝 Next Steps:
+   1. Create auth users: python cli.py create-auth-user ...
+   2. Add sources: Use Supabase UI or API
+   3. Share API key with client
+```
+
+#### 👤 Crear Usuarios Auth
+
+**Después de crear la company**, crea usuarios para el frontend:
+
+```bash
+python cli.py create-auth-user \
+  --email "usuario@acme.com" \
+  --password "SecurePass123!" \
+  --company-id "00000000-0000-0000-0000-000000000001" \
+  --name "Usuario Acme"
+```
+
+**Output:**
+```
+🎉 User Created Successfully!
+============================================================
+
+📋 User Details:
+   User ID: user-uuid-here
+   Email: usuario@acme.com
+   Password: SecurePass123!
+   Company: Acme Corp
+
+📝 Login Credentials (share with user):
+   Email: usuario@acme.com
+   Password: SecurePass123!
+   URL: https://press.ekimen.ai
+```
+
+#### 📊 Listar Clients (Legacy)
+
+```bash
+python cli.py list-clients
 ```
 
 **Output**:
