@@ -207,6 +207,55 @@ Implementar **antes** de la desduplicación:
 - [ ] README.md (instrucciones de uso)
 - [ ] Testing básico
 
+## Testing
+
+### Ejecutar Tests Unitarios
+
+**IMPORTANTE**: Todos los cambios nuevos DEBEN incluir unit tests.
+
+```bash
+# Ejecutar todos los tests
+./run_tests.sh
+
+# O manualmente con pytest
+python3 -m pytest tests/ -v
+
+# Ejecutar un test específico
+python3 -m pytest tests/test_unified_content_enricher.py -v
+
+# Ejecutar con coverage
+python3 -m pytest tests/ --cov=utils --cov=sources --cov-report=html
+```
+
+### Estructura de Tests
+
+```
+/tests/
+├── __init__.py
+├── test_unified_content_enricher.py  # Content enrichment tests
+├── test_llm_client.py                 # (TODO)
+└── test_scraper_workflow.py           # (TODO)
+```
+
+### Escribir Tests
+
+Usar `pytest` + `pytest-asyncio` para tests asíncronos:
+
+```python
+import pytest
+from unittest.mock import Mock, AsyncMock, patch
+
+@pytest.mark.asyncio
+async def test_enrich_content():
+    mock_llm = Mock()
+    mock_llm.analyze_atomic = AsyncMock(return_value={...})
+    
+    with patch('utils.unified_content_enricher.get_llm_client', return_value=mock_llm):
+        result = await enrich_content(...)
+    
+    assert result["category"] == "política"
+```
+
 ## Comandos Útiles
 
 ### Desarrollo Local (Mac M1)

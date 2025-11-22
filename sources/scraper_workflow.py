@@ -219,34 +219,34 @@ async def parse_single_article(state: ScraperState, page_title: str, semantic_co
     url = state["url"]
     company_id = state["company_id"]
     
-    # Use LLM to extract structured content
-    llm_client = get_llm_client()
-    
     try:
-        # Use analyze_atomic to get title, summary, and atomic facts
-        result = await llm_client.analyze_atomic(
-            text=semantic_content[:8000],
-            organization_id=company_id
+        from utils.unified_content_enricher import enrich_content
+        
+        result = await enrich_content(
+            raw_text=semantic_content[:8000],
+            source_type="scraping",
+            company_id=company_id,
+            pre_filled={}
         )
         
         state["title"] = result.get("title", page_title)
         state["summary"] = result.get("summary", "")
         
-        # Single content item for article
         state["content_items"] = [{
             "position": 1,
             "title": result.get("title", page_title),
             "summary": result.get("summary", ""),
             "content": semantic_content[:8000],
             "tags": result.get("tags", []),
-            "atomic_statements": result.get("atomic_facts", []),
-            "category": result.get("category")
+            "category": result.get("category", "general"),
+            "atomic_statements": result.get("atomic_statements", [])
         }]
         
         logger.debug("article_parsed_with_llm",
             url=url,
             title=state["title"][:50],
-            statements_count=len(result.get("atomic_facts", []))
+            category=result.get("category"),
+            statements_count=len(result.get("atomic_statements", []))
         )
         
     except Exception as e:
@@ -281,13 +281,15 @@ async def parse_multi_noticia(state: ScraperState, news_blocks, soup: BeautifulS
             if len(block_text) < 50:  # Skip very short blocks
                 continue
             
-            # Use LLM to analyze this block
-            result = await llm_client.analyze_atomic(
-                text=block_text[:4000],
-                organization_id=company_id
+            from utils.unified_content_enricher import enrich_content
+            
+            result = await enrich_content(
+                raw_text=block_text[:4000],
+                source_type="scraping",
+                company_id=company_id,
+                pre_filled={}
             )
             
-            # Skip non-news content (LLM returns this when block has no actual news)
             title = result.get("title", "")
             if title and title.lower() not in ["sin contenido noticioso", "no news content", ""]:
                 content_items.append({
@@ -296,15 +298,16 @@ async def parse_multi_noticia(state: ScraperState, news_blocks, soup: BeautifulS
                     "summary": result.get("summary", ""),
                     "content": block_text[:4000],
                     "tags": result.get("tags", []),
-                    "atomic_statements": result.get("atomic_facts", []),
-                    "category": result.get("category")
+                    "category": result.get("category", "general"),
+                    "atomic_statements": result.get("atomic_statements", [])
                 })
                 
                 logger.debug("news_block_parsed",
                     url=url,
                     position=len(content_items),
                     title=title[:50],
-                    statements_count=len(result.get("atomic_facts", []))
+                    category=result.get("category"),
+                    statements_count=len(result.get("atomic_statements", []))
                 )
             else:
                 logger.debug("news_block_skipped_no_content",
@@ -485,14 +488,17 @@ async def scrape_articles_from_index(
                         
                         article_html = await response.text()
                 
-                # Parse with LLM
+                # Parse with LLM via unified enricher
                 from utils.content_hasher import normalize_html
+                from utils.unified_content_enricher import enrich_content
+                
                 semantic_content = normalize_html(article_html)
                 
-                llm_client = get_llm_client()
-                result = await llm_client.analyze_atomic(
-                    text=semantic_content[:8000],
-                    organization_id=company_id
+                result = await enrich_content(
+                    raw_text=semantic_content,
+                    source_type="scraping",
+                    company_id=company_id,
+                    pre_filled={}
                 )
                 
                 if not result.get("title"):
@@ -502,7 +508,8 @@ async def scrape_articles_from_index(
                 logger.debug("article_scraped_from_index",
                     url=article_url,
                     title=result.get("title", "")[:50],
-                    atomic_facts=len(result.get("atomic_facts", []))
+                    category=result.get("category"),
+                    atomic_count=len(result.get("atomic_statements", []))
                 )
                 
                 return {
@@ -511,8 +518,8 @@ async def scrape_articles_from_index(
                     "summary": result.get("summary", ""),
                     "content": semantic_content[:8000],
                     "tags": result.get("tags", []),
-                    "atomic_statements": result.get("atomic_facts", []),
-                    "category": result.get("category"),
+                    "category": result.get("category", "general"),
+                    "atomic_statements": result.get("atomic_statements", []),
                     "source_url": article_url,
                     "index_date": article.get("date")
                 }

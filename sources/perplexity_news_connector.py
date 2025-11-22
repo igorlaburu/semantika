@@ -251,30 +251,41 @@ SIN markdown, {news_count} items exactos."""
                         )
                         continue
 
-                    # Phase 2: Ingest context unit with unified ingester
+                    # Phase 2: Enrich content with unified enricher
+                    from utils.unified_content_enricher import enrich_content
+                    
+                    enriched = await enrich_content(
+                        raw_text=news_item.get("texto", ""),
+                        source_type="perplexity",
+                        company_id=company["id"],
+                        pre_filled={
+                            "title": news_item.get("titulo")
+                        }
+                    )
+                    
+                    # Phase 3: Ingest context unit with unified ingester
                     try:
                         ingest_result = await ingest_context_unit(
-                            # Pre-generated fields from Perplexity
-                            title=news_item.get("titulo"),
+                            title=enriched["title"],
+                            summary=enriched["summary"],
                             raw_text=news_item.get("texto"),
+                            tags=enriched["tags"],
+                            category=enriched["category"],
+                            atomic_statements=enriched["atomic_statements"],
 
-                            # LLM will generate: summary, tags, category, atomic_statements
-                            # (Uses GPT-4o-mini via unified_context_ingester)
-
-                            # Required metadata
                             company_id=company["id"],
                             source_type="perplexity",
                             source_id=source["source_id"],
 
-                            # Optional metadata
                             source_metadata={
                                 "perplexity_query": location,
                                 "perplexity_source": news_item.get("fuente"),
                                 "perplexity_date": news_item.get("fecha"),
-                                "perplexity_index": i + 1
+                                "perplexity_index": i + 1,
+                                "enrichment_cost_usd": enriched["enrichment_cost_usd"],
+                                "enrichment_model": enriched["enrichment_model"]
                             },
 
-                            # Control flags
                             generate_embedding_flag=True,
                             check_duplicates=True
                         )
