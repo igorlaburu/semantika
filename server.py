@@ -121,6 +121,29 @@ async def get_current_client(api_key: str = Depends(get_api_key)) -> Dict:
     return client
 
 
+async def get_current_user_from_jwt_optional(authorization: Optional[str] = Header(None)) -> Optional[Dict]:
+    """Optional version of get_current_user_from_jwt - returns None if no token."""
+    if not authorization:
+        return None
+    try:
+        return await get_current_user_from_jwt(authorization)
+    except HTTPException:
+        return None
+
+
+async def get_current_client_optional(x_api_key: Optional[str] = Header(None)) -> Optional[Dict]:
+    """Optional version of get_current_client - returns None if no API key."""
+    if not x_api_key:
+        return None
+    try:
+        client = await supabase_client.get_client_by_api_key(x_api_key)
+        if client:
+            logger.debug("client_authenticated", client_id=client["client_id"])
+        return client
+    except Exception:
+        return None
+
+
 async def get_company_id_from_auth(
     user: Optional[Dict] = Depends(get_current_user_from_jwt_optional),
     client: Optional[Dict] = Depends(get_current_client_optional)
@@ -152,29 +175,6 @@ async def get_company_id_from_auth(
             status_code=401,
             detail="Authentication required. Provide either JWT token (Authorization: Bearer) or API Key (X-API-Key)"
         )
-
-
-async def get_current_user_from_jwt_optional(authorization: Optional[str] = Header(None)) -> Optional[Dict]:
-    """Optional version of get_current_user_from_jwt - returns None if no token."""
-    if not authorization:
-        return None
-    try:
-        return await get_current_user_from_jwt(authorization)
-    except HTTPException:
-        return None
-
-
-async def get_current_client_optional(x_api_key: Optional[str] = Header(None)) -> Optional[Dict]:
-    """Optional version of get_current_client - returns None if no API key."""
-    if not x_api_key:
-        return None
-    try:
-        client = await supabase_client.get_client_by_api_key(x_api_key)
-        if client:
-            logger.debug("client_authenticated", client_id=client["client_id"])
-        return client
-    except Exception:
-        return None
 
 
 # ============================================
