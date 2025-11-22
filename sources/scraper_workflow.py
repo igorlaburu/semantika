@@ -320,7 +320,8 @@ async def parse_multi_noticia(state: ScraperState, news_blocks, soup: BeautifulS
             )
             continue
     
-    if content_items:
+    if len(content_items) > 1:
+        # Multiple valid news items found
         state["title"] = f"{len(content_items)} noticias de {url}"
         state["summary"] = f"Página con {len(content_items)} noticias"
         state["content_items"] = content_items
@@ -330,10 +331,19 @@ async def parse_multi_noticia(state: ScraperState, news_blocks, soup: BeautifulS
             items_extracted=len(content_items)
         )
     else:
-        # Fallback to single article if no blocks found
-        logger.warn("multi_noticia_fallback_to_single", url=url)
+        # Fallback to single article if 0 or 1 items (likely false positive multi-noticia detection)
+        logger.warn("multi_noticia_fallback_to_single", 
+            url=url,
+            items_found=len(content_items),
+            reason="Too few valid items, treating as single article"
+        )
+        
+        # Get page title from soup
+        title_tag = soup.find('title')
+        page_title = title_tag.get_text(strip=True) if title_tag else "Untitled"
+        
         semantic_content = normalize_html(state["html"])
-        await parse_single_article(state, "Noticias", semantic_content)
+        await parse_single_article(state, page_title, semantic_content)
 
 
 async def parse_index(state: ScraperState, soup: BeautifulSoup):
