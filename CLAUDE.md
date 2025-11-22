@@ -223,15 +223,45 @@ docker-compose down
 ```
 
 ### Producción (VPS)
+
+**Acceso SSH para Claude Code**:
+```bash
+# Host: api.ekimen.ai
+# Usuario: ubuntu
+# Puerto: 22 (default)
+# Clave privada: En ~/.ssh/vps_debug_key
+
+# Conectar
+ssh -i ~/.ssh/vps_debug_key ubuntu@api.ekimen.ai
+
+# Contenedores Docker (nombres completos)
+# - ekimen_semantika-semantika-api-1 (FastAPI)
+# - ekimen_semantika-semantika-scheduler-1 (APScheduler)
+# - ekimen_semantika-qdrant-1 (Vector DB)
+```
+
+**Comandos útiles VPS**:
 ```bash
 # Deploy automático
 git push  # GitHub Actions hace el resto
 
 # Deploy manual
-ssh usuario@VPS
-cd /path/to/semantika
+ssh -i ~/.ssh/vps_debug_key ubuntu@api.ekimen.ai
+cd ~/semantika  # o donde esté el proyecto
 git pull
-docker-compose up -d --build
+sudo docker-compose up -d --build
+
+# Ver logs en tiempo real
+ssh -i ~/.ssh/vps_debug_key ubuntu@api.ekimen.ai \
+  "sudo docker logs -f ekimen_semantika-semantika-api-1"
+
+# Reiniciar contenedor API
+ssh -i ~/.ssh/vps_debug_key ubuntu@api.ekimen.ai \
+  "sudo docker restart ekimen_semantika-semantika-api-1"
+
+# Ejecutar CLI en VPS
+ssh -i ~/.ssh/vps_debug_key ubuntu@api.ekimen.ai \
+  "sudo docker exec ekimen_semantika-semantika-api-1 python cli.py list-clients"
 ```
 
 ### CLI Admin

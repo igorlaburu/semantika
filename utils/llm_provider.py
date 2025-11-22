@@ -94,27 +94,37 @@ class LLMProvider(ABC):
             .execute()
         
         if not response.data:
-            logger.error("model_pricing_not_found",
+            logger.error("model_pricing_not_found_using_defaults",
                 provider=self.get_provider_name(),
-                model=self.model_name
+                model=self.model_name,
+                message="Pricing not found in DB, using default values (cost tracking disabled)"
             )
-            raise ValueError(
-                f"Pricing not found for {self.get_provider_name()}/{self.model_name}. "
-                f"Please add pricing to llm_model_pricing table."
+            
+            # Use default pricing instead of failing
+            # Cost tracking will be disabled but LLM will work
+            self._model_info = ModelInfo(
+                provider=self.get_provider_name(),
+                model_name=self.model_name,
+                model_alias=self.model_alias or "Unknown",
+                price_input_per_mtok=0.0,  # Default: free (no tracking)
+                price_output_per_mtok=0.0,  # Default: free (no tracking)
+                context_window=0,
+                max_output_tokens=0,
+                pricing_id=None
             )
-        
-        pricing = response.data[0]
-        
-        self._model_info = ModelInfo(
-            provider=pricing['provider'],
-            model_name=pricing['model_name'],
-            model_alias=pricing['model_alias'] or self.model_alias,
-            price_input_per_mtok=float(pricing['price_input_per_mtok']),
-            price_output_per_mtok=float(pricing['price_output_per_mtok']),
-            context_window=pricing['context_window'] or 0,
-            max_output_tokens=pricing['max_output_tokens'] or 0,
-            pricing_id=pricing['id']
-        )
+        else:
+            pricing = response.data[0]
+            
+            self._model_info = ModelInfo(
+                provider=pricing['provider'],
+                model_name=pricing['model_name'],
+                model_alias=pricing['model_alias'] or self.model_alias,
+                price_input_per_mtok=float(pricing['price_input_per_mtok']),
+                price_output_per_mtok=float(pricing['price_output_per_mtok']),
+                context_window=pricing['context_window'] or 0,
+                max_output_tokens=pricing['max_output_tokens'] or 0,
+                pricing_id=pricing['id']
+            )
         
         logger.debug("model_info_loaded",
             model=self.model_name,
