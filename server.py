@@ -1506,7 +1506,8 @@ async def create_context_unit_from_url(
         company = company_result.data
         
         # Use new LangGraph scraper workflow
-        source_id = f"api_scraping_{client['client_id'][:8]}"
+        # Generate a proper UUID for the source (ephemeral API scraping source)
+        source_id = str(uuid.uuid4())
         workflow_result = await scrape_url(
             company_id=company["id"],
             source_id=source_id,
