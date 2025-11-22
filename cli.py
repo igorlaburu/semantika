@@ -497,8 +497,10 @@ async def create_company(name: str, cif: str, tier: str = "starter"):
         
         company_result = supabase.client.table("companies").insert(company_data).execute()
         
-        if not company_result.data:
-            print(f"\n❌ Failed to create company\n")
+        if not company_result or not company_result.data:
+            error_msg = str(company_result) if company_result else "No response from Supabase"
+            print(f"\n❌ Failed to create company")
+            print(f"Debug: {error_msg}\n")
             sys.exit(1)
         
         company = company_result.data[0]
