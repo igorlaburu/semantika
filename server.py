@@ -121,6 +121,62 @@ async def get_current_client(api_key: str = Depends(get_api_key)) -> Dict:
     return client
 
 
+async def get_company_id_from_auth(
+    user: Optional[Dict] = Depends(get_current_user_from_jwt_optional),
+    client: Optional[Dict] = Depends(get_current_client_optional)
+) -> str:
+    """
+    Get company_id from either JWT or API Key (whichever is provided).
+    
+    Allows endpoints to accept both authentication methods.
+    Useful for testing with API Key while frontend uses JWT.
+    
+    Args:
+        user: User from JWT (optional)
+        client: Client from API Key (optional)
+        
+    Returns:
+        company_id string
+        
+    Raises:
+        HTTPException: If neither auth method provided
+    """
+    if user:
+        logger.debug("auth_via_jwt", user_id=user.get("sub"), company_id=user["company_id"])
+        return user["company_id"]
+    elif client:
+        logger.debug("auth_via_api_key", client_id=client["client_id"], company_id=client["company_id"])
+        return client["company_id"]
+    else:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required. Provide either JWT token (Authorization: Bearer) or API Key (X-API-Key)"
+        )
+
+
+async def get_current_user_from_jwt_optional(authorization: Optional[str] = Header(None)) -> Optional[Dict]:
+    """Optional version of get_current_user_from_jwt - returns None if no token."""
+    if not authorization:
+        return None
+    try:
+        return await get_current_user_from_jwt(authorization)
+    except HTTPException:
+        return None
+
+
+async def get_current_client_optional(x_api_key: Optional[str] = Header(None)) -> Optional[Dict]:
+    """Optional version of get_current_client - returns None if no API key."""
+    if not x_api_key:
+        return None
+    try:
+        client = await supabase_client.get_client_by_api_key(x_api_key)
+        if client:
+            logger.debug("client_authenticated", client_id=client["client_id"])
+        return client
+    except Exception:
+        return None
+
+
 # ============================================
 # STARTUP/SHUTDOWN
 # ============================================
@@ -2568,7 +2624,7 @@ async def tts_synthesize(
 
 @app.get("/api/v1/context-units")
 async def list_context_units(
-    user: Dict = Depends(get_current_user_from_jwt),
+    company_id: str = Depends(get_company_id_from_auth),
     limit: int = 20,
     offset: int = 0,
     timePeriod: str = "24h",
@@ -2580,14 +2636,14 @@ async def list_context_units(
     """
     Get filtered and paginated list of context units.
 
-    RLS automatically filters by company_id from JWT.
+    **Authentication**: Accepts either JWT (Authorization: Bearer) or API Key (X-API-Key)
+    
+    Filters by company_id from authentication.
     """
     try:
         # Validate limit
         if limit < 1 or limit > 100:
             raise HTTPException(status_code=400, detail="Limit must be between 1 and 100")
-
-        company_id = user["company_id"]
         supabase = get_supabase_client()
 
         # Build query
@@ -3097,7 +3153,7 @@ Choose the MOST relevant category. Only use "general" if the content truly doesn
 @app.post("/api/v1/context-units/search-vector")
 async def semantic_search(
     request: SemanticSearchRequest,
-    user: Dict = Depends(get_current_user_from_jwt)
+    company_id: str = Depends(get_company_id_from_auth)
 ):
     """
     Semantic search across context units using vector similarity.
@@ -3105,15 +3161,16 @@ async def semantic_search(
     Vectorizes the query using FastEmbed multilingual model and searches
     for similar context units using pgvector cosine similarity.
 
+    **Authentication**: Accepts either JWT (Authorization: Bearer) or API Key (X-API-Key)
+
     Args:
         request: Search parameters (query, limit, threshold, filters)
-        user: Authenticated user data (JWT)
+        company_id: Company ID from authentication (JWT or API Key)
 
     Returns:
         List of matching context units with similarity scores
     """
     try:
-        company_id = user["company_id"]
 
         logger.info("semantic_search_start",
             company_id=company_id,
