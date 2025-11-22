@@ -1443,7 +1443,7 @@ async def create_context_unit_from_url(
     client: Dict = Depends(get_current_client)
 ) -> Dict[str, Any]:
     """
-    Create a context unit from a URL (web scraping).
+    Create a context unit from a URL (intelligent web scraping).
     
     Use this endpoint to automatically scrape and process web content:
     - News articles
@@ -1451,28 +1451,37 @@ async def create_context_unit_from_url(
     - Press releases
     - Any public web page
     
-    Workflow:
-    1. Receives URL (and optional title)
-    2. Scrapes web page content using BeautifulSoup/LLM
-    3. Processes through default workflow (generates context unit)
-    4. Saves to press_context_units table with source_type="scraping"
-    5. Returns created context unit
+    Workflow (LangGraph scraper_workflow):
+    1. Fetch URL with aiohttp
+    2. Parse content (title, summary, text)
+    3. Multi-tier change detection (hash → simhash → embeddings)
+    4. Multi-source date extraction (meta tags, JSON-LD, URL, LLM)
+    5. Filter content (decide if should ingest)
+    6. Save to monitored_urls (tracking)
+    7. Save to url_content_units (content)
+    8. Create press_context_unit (with embeddings + category)
+    
+    Features:
+    - Intelligent change detection
+    - Multi-noticia support (one URL, multiple news items)
+    - Automatic duplicate prevention
+    - Publication date extraction
+    - Category classification
     
     Requires: X-API-Key header
     
     Body:
         - url: URL to scrape (required)
-        - title: Optional title override (if not provided, extracted from page)
+        - title: Optional title override (currently ignored by workflow)
     
     Returns:
         Created context unit with id, title, summary, tags, atomic_statements
+        Plus workflow_metadata with change detection info
     """
     start_time = datetime.utcnow()
     
     try:
-        from sources.web_scraper import WebScraper
-        from workflows.workflow_factory import get_workflow
-        from core.source_content import SourceContent
+        from sources.scraper_workflow import scrape_url
         import uuid
         
         logger.info(
@@ -1482,7 +1491,7 @@ async def create_context_unit_from_url(
             has_title=bool(request.title)
         )
         
-        # Get company and organization
+        # Get company
         supabase = get_supabase_client()
         
         company_result = supabase.client.table("companies")\
@@ -1496,118 +1505,58 @@ async def create_context_unit_from_url(
         
         company = company_result.data
         
-        org_result = supabase.client.table("organizations")\
+        # Use new LangGraph scraper workflow
+        source_id = f"api_scraping_{client['client_id'][:8]}"
+        workflow_result = await scrape_url(
+            company_id=company["id"],
+            source_id=source_id,
+            url=request.url,
+            url_type="article"
+        )
+        
+        # Check for workflow errors
+        if workflow_result.get("error"):
+            logger.error("scraper_workflow_error",
+                url=request.url,
+                error=workflow_result["error"]
+            )
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Failed to scrape URL: {workflow_result['error']}"
+            )
+        
+        # Check if context units were created
+        context_unit_ids = workflow_result.get("context_unit_ids", [])
+        if not context_unit_ids:
+            change_type = workflow_result.get("change_info", {}).get("change_type", "unknown")
+            logger.warn("no_context_units_created",
+                url=request.url,
+                change_type=change_type
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=f"No content extracted from URL (change_type: {change_type})"
+            )
+        
+        # Fetch created context unit
+        created_result = supabase.client.table("press_context_units")\
             .select("*")\
-            .eq("company_id", company["id"])\
-            .eq("is_active", True)\
-            .limit(1)\
+            .eq("id", context_unit_id)\
+            .single()\
             .execute()
         
-        if not org_result.data:
-            raise HTTPException(status_code=404, detail="No active organization found")
+        if not created_result.data:
+            raise HTTPException(status_code=500, detail="Context unit was created but not found in database")
         
-        organization = org_result.data[0]
-        
-        # Scrape URL
-        scraper = WebScraper()
-        scrape_results = await scraper.scrape_url(request.url, extract_multiple=False)
-        
-        if not scrape_results or len(scrape_results) == 0:
-            raise HTTPException(status_code=400, detail="Failed to scrape URL or no content found")
-        
-        # Get first result (single article mode)
-        scraped_data = scrape_results[0]
-        scraped_text = scraped_data.get("text", "")
-        scraped_title = scraped_data.get("title", "")
-        
-        if not scraped_text:
-            raise HTTPException(status_code=400, detail="No content extracted from URL")
-        
-        # Use provided title or scraped title
-        final_title = request.title or scraped_title or None
-        
-        # Create SourceContent
-        context_unit_id = str(uuid.uuid4())
-        source_content = SourceContent(
-            source_type="scraping",
-            source_id=f"scraping_{context_unit_id[:8]}",
-            organization_slug=organization["slug"],
-            text_content=scraped_text,
-            metadata={
-                "url": request.url,
-                "scraped_title": scraped_title,
-                "client_id": client["client_id"],
-                "company_id": company["id"],
-                "manual_scraping": True
-            },
-            title=final_title
-        )
-        # Set ID manually after creation
-        source_content.id = context_unit_id
-        
-        # Use unified ingester (API endpoints skip novelty verification)
-        ingest_result = await ingest_context_unit(
-            # Input
-            raw_text=scraped_text,
-            title=final_title,  # Pre-generated or scraped title
-
-            # LLM will generate: summary, tags, category, atomic_statements (if needed)
-
-            # Required metadata
-            company_id=company["id"],
-            source_type="scraping",
-            source_id=source_content.source_id,
-
-            # Optional metadata
-            source_metadata={
-                "url": request.url,
-                "scraped_title": scraped_title,
-                "client_id": client["client_id"],
-                "created_via": "api",
-                "manual_scraping": True,
-                "has_custom_title": bool(request.title),
-                "organization_id": organization["id"]
-            },
-
-            # Control flags
-            generate_embedding_flag=True,
-            check_duplicates=True  # Semantic dedup
-        )
-
-        if not ingest_result["success"]:
-            error_msg = ingest_result.get("error", "Unknown error")
-            if ingest_result.get("duplicate"):
-                logger.warn(
-                    "url_context_unit_duplicate",
-                    client_id=client["client_id"],
-                    url=request.url,
-                    duplicate_id=ingest_result.get("duplicate_id"),
-                    similarity=ingest_result.get("similarity")
-                )
-                # Return existing unit
-                existing_result = supabase.client.table("press_context_units")\
-                    .select("*")\
-                    .eq("id", ingest_result["duplicate_id"])\
-                    .single()\
-                    .execute()
-                created_unit = existing_result.data if existing_result.data else {}
-            else:
-                raise HTTPException(status_code=500, detail=f"Failed to create context unit: {error_msg}")
-        else:
-            # Fetch created unit
-            created_result = supabase.client.table("press_context_units")\
-                .select("*")\
-                .eq("id", ingest_result["context_unit_id"])\
-                .single()\
-                .execute()
-            created_unit = created_result.data if created_result.data else {}
+        created_unit = created_result.data
         
         logger.info(
             "url_context_unit_created",
             client_id=client["client_id"],
             context_unit_id=created_unit["id"],
             url=request.url,
-            title=created_unit.get("title", "")
+            title=created_unit.get("title", ""),
+            workflow_used="scraper_workflow"
         )
         
         # Log execution
@@ -1617,26 +1566,33 @@ async def create_context_unit_from_url(
             company_id=company["id"],
             source_name="Manual URL Scraping",
             source_type="scraping",
-            items_count=1,
+            items_count=len(context_unit_ids),
             status_code=200,
             status="success",
-            details=f"URL scraped and context unit created: {created_unit.get('title', 'Untitled')}",
+            details=f"URL scraped via intelligent workflow: {created_unit.get('title', 'Untitled')}",
             metadata={
                 "context_unit_id": created_unit["id"],
                 "url": request.url,
-                "scraped_title": scraped_title,
-                "text_length": len(scraped_text),
+                "context_units_created": len(context_unit_ids),
+                "change_type": workflow_result.get("change_info", {}).get("change_type"),
+                "monitored_url_id": workflow_result.get("monitored_url_id"),
                 "has_custom_title": bool(request.title),
-                "created_via": "api"
+                "created_via": "api",
+                "workflow": "scraper_workflow"
             },
             duration_ms=duration_ms,
-            workflow_code="default"
+            workflow_code="scraper_workflow"
         )
         
         return {
             "success": True,
             "context_unit": created_unit,
-            "scraped_url": request.url
+            "scraped_url": request.url,
+            "workflow_metadata": {
+                "context_units_created": len(context_unit_ids),
+                "change_type": workflow_result.get("change_info", {}).get("change_type"),
+                "monitored_url_id": workflow_result.get("monitored_url_id")
+            }
         }
         
     except HTTPException:
