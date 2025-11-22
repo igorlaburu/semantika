@@ -296,25 +296,8 @@ async def auth_signup(request: SignupRequest) -> Dict:
             name=request.company_name
         )
 
-        # Create Manual source (source.id = company.id)
-        logger.debug("creating_manual_source", company_id=company_id)
-        manual_source = {
-            "id": company_id,  # KEY: source.id = company.id
-            "company_id": company_id,
-            "source_type": "manual",
-            "source_name": "Manual",
-            "is_active": True,
-            "config": {"description": "Contenido manual (API/Frontend/Email)"},
-            "schedule_config": {}
-        }
-        
-        source_result = supabase.client.table("sources").insert(manual_source).execute()
-        
-        if not source_result or not source_result.data:
-            logger.warn("manual_source_creation_failed", company_id=company_id)
-            # Don't fail signup - can be created later via CLI
-        else:
-            logger.info("manual_source_created", company_id=company_id, source_id=company_id)
+        # Note: Manual source is created via CLI (python cli.py create-company)
+        # NOT here, as signup is not used for production onboarding
 
         # Create user in Supabase Auth with company_id in metadata
         # Use supabase client's auth methods directly

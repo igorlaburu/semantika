@@ -84,10 +84,9 @@ source.id = company.id  // 🔑 KEY INSIGHT
   - Emails procesados
   - Archivos subidos
   
-**Creación automática**:
-1. ✅ Signup endpoint (`POST /auth/signup`)
-2. ✅ CLI onboarding (`python cli.py create-company`)
-3. ✅ Migración SQL para companies existentes
+**Creación**:
+1. ✅ CLI onboarding - Método principal (`python cli.py create-company`)
+2. ✅ Migración SQL - Backfill para companies existentes
 
 **Ventajas**:
 - No requiere búsquedas (solo usar `company_id`)
