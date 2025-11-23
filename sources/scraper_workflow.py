@@ -215,54 +215,42 @@ async def parse_article(state: ScraperState, soup: BeautifulSoup):
 
 
 async def parse_single_article(state: ScraperState, page_title: str, semantic_content: str):
-    """Parse single article with LLM analysis."""
+    """Parse single article with unified content enricher."""
     url = state["url"]
     company_id = state["company_id"]
     
-    try:
-        from utils.unified_content_enricher import enrich_content
-        
-        result = await enrich_content(
-            raw_text=semantic_content[:8000],
-            source_type="scraping",
-            company_id=company_id,
-            pre_filled={}
-        )
-        
-        state["title"] = result.get("title", page_title)
-        state["summary"] = result.get("summary", "")
-        
-        state["content_items"] = [{
-            "position": 1,
-            "title": result.get("title", page_title),
-            "summary": result.get("summary", ""),
-            "content": semantic_content[:8000],
-            "tags": result.get("tags", []),
-            "category": result.get("category", "general"),
-            "atomic_statements": result.get("atomic_statements", [])
-        }]
-        
-        logger.debug("article_parsed_with_llm",
-            url=url,
-            title=state["title"][:50],
-            category=result.get("category"),
-            statements_count=len(result.get("atomic_statements", []))
-        )
-        
-    except Exception as e:
-        logger.error("llm_parse_failed_using_fallback", url=url, error=str(e))
-        
-        # Fallback: basic extraction
-        state["title"] = page_title
-        state["summary"] = semantic_content[:500]
-        state["content_items"] = [{
-            "position": 1,
-            "title": page_title,
-            "summary": semantic_content[:500],
-            "content": semantic_content[:8000],
-            "tags": [],
-            "atomic_statements": []
-        }]
+    from utils.unified_content_enricher import enrich_content
+    
+    # Pre-fill page title if available (fallback for LLM)
+    pre_filled = {"title": page_title} if page_title and page_title.strip() else {}
+    
+    result = await enrich_content(
+        raw_text=semantic_content[:8000],
+        source_type="scraping",
+        company_id=company_id,
+        pre_filled=pre_filled
+    )
+    
+    state["title"] = result.get("title", "Sin título")
+    state["summary"] = result.get("summary", "")
+    
+    state["content_items"] = [{
+        "position": 1,
+        "title": result.get("title", "Sin título"),
+        "summary": result.get("summary", ""),
+        "content": semantic_content[:8000],
+        "tags": result.get("tags", []),
+        "category": result.get("category", "general"),
+        "atomic_statements": result.get("atomic_statements", [])
+    }]
+    
+    logger.info("article_parsed",
+        url=url,
+        title=state["title"][:50],
+        category=result.get("category"),
+        statements_count=len(result.get("atomic_statements", [])),
+        enrichment_model=result.get("enrichment_model", "unknown")
+    )
 
 
 async def parse_multi_noticia(state: ScraperState, news_blocks, soup: BeautifulSoup):

@@ -137,17 +137,36 @@ async def enrich_content(
             source_type=source_type,
             company_id=company_id,
             error=str(e),
+            error_type=type(e).__name__,
+            text_preview=raw_text[:200]
+        )
+        
+        # Fallback: basic extraction from raw text
+        title_fallback = pre_filled.get("title")
+        if not title_fallback or title_fallback == "":
+            # Try to extract first line or first 100 chars as title
+            first_line = raw_text.split('\n')[0].strip()[:100]
+            title_fallback = first_line if first_line else "Contenido sin título"
+        
+        summary_fallback = pre_filled.get("summary")
+        if not summary_fallback:
+            # Use first 500 chars as summary
+            summary_fallback = raw_text[:500].strip()
+        
+        logger.warn("using_fallback_enrichment",
+            title=title_fallback[:50],
+            has_summary=bool(summary_fallback),
             error_type=type(e).__name__
         )
         
         return {
-            "title": pre_filled.get("title", "Error al procesar"),
-            "summary": pre_filled.get("summary", ""),
+            "title": title_fallback,
+            "summary": summary_fallback,
             "tags": pre_filled.get("tags", []),
             "category": pre_filled.get("category", "general"),
             "atomic_statements": pre_filled.get("atomic_statements", []),
             "enrichment_cost_usd": 0.0,
-            "enrichment_model": "error"
+            "enrichment_model": "fallback"
         }
 
 
