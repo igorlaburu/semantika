@@ -2927,11 +2927,14 @@ async def create_or_update_article(
     company_id: str = Depends(get_company_id_from_auth)
 ) -> Dict:
     """
-    Create or update article (upsert).
+    Create or update article (upsert inteligente).
+    
+    Si el artículo existe → UPDATE solo campos enviados
+    Si no existe → INSERT con campos enviados
     
     **Authentication**: Accepts either JWT (Authorization: Bearer) or API Key (X-API-Key)
     
-    **Body**: JSON with article fields (id, titulo, slug, excerpt, contenido, autor, tags, estado, working_json)
+    **Body**: JSON with article fields
     """
     try:
         supabase = get_supabase_client()
@@ -2939,10 +2942,30 @@ async def create_or_update_article(
         clean_data = {k: v for k, v in article_data.items() if v is not None}
         clean_data["company_id"] = company_id
         clean_data["updated_at"] = datetime.utcnow().isoformat()
+        
+        article_id = clean_data.get("id")
+        if not article_id:
+            raise HTTPException(status_code=400, detail="Missing article id")
 
-        result = supabase.client.table("press_articles")\
-            .upsert(clean_data)\
+        # Check if exists
+        existing = supabase.client.table("press_articles")\
+            .select("id")\
+            .eq("id", article_id)\
+            .eq("company_id", company_id)\
             .execute()
+
+        if existing.data and len(existing.data) > 0:
+            # EXISTS → UPDATE (acepta campos parciales)
+            result = supabase.client.table("press_articles")\
+                .update(clean_data)\
+                .eq("id", article_id)\
+                .eq("company_id", company_id)\
+                .execute()
+        else:
+            # NO EXISTE → INSERT (requiere campos obligatorios)
+            result = supabase.client.table("press_articles")\
+                .insert(clean_data)\
+                .execute()
 
         if not result.data:
             raise HTTPException(status_code=500, detail="Failed to save article")
