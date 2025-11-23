@@ -2835,7 +2835,7 @@ async def get_context_unit(
 
 @app.get("/api/v1/articles")
 async def list_articles(
-    user: Dict = Depends(get_current_user_from_jwt),
+    company_id: str = Depends(get_company_id_from_auth),
     status: str = "all",
     category: str = "all",
     limit: int = 20,
@@ -2844,13 +2844,13 @@ async def list_articles(
     """
     Get paginated list of articles (borradores or publicados).
 
-    RLS automatically filters by company_id from JWT.
+    **Authentication**: Accepts either JWT (Authorization: Bearer) or API Key (X-API-Key)
+    
+    Filters by company_id from authentication.
     """
     try:
         if limit < 1 or limit > 100:
             raise HTTPException(status_code=400, detail="Limit must be between 1 and 100")
-
-        company_id = user["company_id"]
         supabase = get_supabase_client()
 
         # Build query
@@ -2892,11 +2892,14 @@ async def list_articles(
 @app.get("/api/v1/articles/{article_id}")
 async def get_article(
     article_id: str,
-    user: Dict = Depends(get_current_user_from_jwt)
+    company_id: str = Depends(get_company_id_from_auth)
 ) -> Dict:
-    """Get a single article by ID."""
+    """
+    Get a single article by ID.
+    
+    **Authentication**: Accepts either JWT (Authorization: Bearer) or API Key (X-API-Key)
+    """
     try:
-        company_id = user["company_id"]
         supabase = get_supabase_client()
 
         result = supabase.client.table("press_articles")\
