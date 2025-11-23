@@ -3002,15 +3002,14 @@ async def update_article(
     company_id: str = Depends(get_company_id_from_auth)
 ) -> Dict:
     """
-    Create or update article (upsert).
+    Update article fields (partial update).
     
     **Authentication**: Accepts either JWT (Authorization: Bearer) or API Key (X-API-Key)
     
-    **Body**: JSON object with fields, e.g.:
+    **Body**: JSON object with fields to update, e.g.:
         {
             "estado": "publicado",
-            "titulo": "New title",
-            "contenido": "<p>Updated content</p>"
+            "fecha_publicacion": "2025-11-23T10:00:00Z"
         }
     """
     try:
@@ -3022,20 +3021,20 @@ async def update_article(
         if not clean_data:
             raise HTTPException(status_code=400, detail="No valid fields")
 
-        clean_data["id"] = article_id
-        clean_data["company_id"] = company_id
         clean_data["updated_at"] = datetime.utcnow().isoformat()
 
-        # Upsert (insert or update)
+        # Update only the provided fields
         result = supabase.client.table("press_articles")\
-            .upsert(clean_data)\
+            .update(clean_data)\
+            .eq("id", article_id)\
+            .eq("company_id", company_id)\
             .execute()
 
-        if not result.data:
-            raise HTTPException(status_code=500, detail="Failed to save article")
+        if not result.data or len(result.data) == 0:
+            raise HTTPException(status_code=404, detail="Article not found")
 
         logger.info(
-            "article_saved",
+            "article_updated",
             article_id=article_id,
             company_id=company_id,
             fields=list(clean_data.keys())
@@ -3047,7 +3046,7 @@ async def update_article(
         raise
     except Exception as e:
         logger.error("update_article_error", error=str(e), article_id=article_id)
-        raise HTTPException(status_code=500, detail="Failed to save article")
+        raise HTTPException(status_code=500, detail="Failed to update article")
 
 
 @app.get("/api/v1/executions")
