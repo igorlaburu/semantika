@@ -2921,6 +2921,52 @@ async def get_article_by_slug(
         raise HTTPException(status_code=500, detail="Failed to fetch article")
 
 
+@app.post("/api/v1/articles")
+async def create_article(
+    article_data: Dict[str, Any],
+    company_id: str = Depends(get_company_id_from_auth)
+) -> Dict:
+    """
+    Create a new article.
+    
+    **Authentication**: Accepts either JWT (Authorization: Bearer) or API Key (X-API-Key)
+    
+    **Body**: JSON with article fields (id, titulo, slug, excerpt, contenido, autor, tags, estado, working_json)
+    """
+    try:
+        supabase = get_supabase_client()
+
+        clean_data = {k: v for k, v in article_data.items() if v is not None}
+        clean_data["company_id"] = company_id
+        
+        if "created_at" not in clean_data:
+            clean_data["created_at"] = datetime.utcnow().isoformat()
+        if "updated_at" not in clean_data:
+            clean_data["updated_at"] = datetime.utcnow().isoformat()
+
+        result = supabase.client.table("press_articles")\
+            .insert(clean_data)\
+            .execute()
+
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to create article")
+
+        logger.info(
+            "article_created",
+            article_id=result.data[0].get("id"),
+            company_id=company_id,
+            titulo=clean_data.get("titulo", "")[:50]
+        )
+
+        return result.data[0]
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("create_article_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to create article")
+
+
 @app.get("/api/v1/articles/{article_id}")
 async def get_article(
     article_id: str,
@@ -2960,11 +3006,11 @@ async def update_article(
     company_id: str = Depends(get_company_id_from_auth)
 ) -> Dict:
     """
-    Update article fields (estado, titulo, contenido, etc.)
+    Create or update article (upsert).
     
     **Authentication**: Accepts either JWT (Authorization: Bearer) or API Key (X-API-Key)
     
-    **Body**: JSON object with fields to update, e.g.:
+    **Body**: JSON object with fields, e.g.:
         {
             "estado": "publicado",
             "titulo": "New title",
@@ -2974,21 +3020,29 @@ async def update_article(
     try:
         supabase = get_supabase_client()
 
-        # Update article (RLS ensures it belongs to company)
+        # Clean None/undefined values
+        clean_data = {k: v for k, v in updates.items() if v is not None}
+        
+        if not clean_data:
+            raise HTTPException(status_code=400, detail="No valid fields")
+
+        clean_data["id"] = article_id
+        clean_data["company_id"] = company_id
+        clean_data["updated_at"] = datetime.utcnow().isoformat()
+
+        # Upsert (insert or update)
         result = supabase.client.table("press_articles")\
-            .update(updates)\
-            .eq("id", article_id)\
-            .eq("company_id", company_id)\
+            .upsert(clean_data)\
             .execute()
 
-        if not result.data or len(result.data) == 0:
-            raise HTTPException(status_code=404, detail="Article not found or no permission")
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to save article")
 
         logger.info(
-            "article_updated",
+            "article_saved",
             article_id=article_id,
             company_id=company_id,
-            fields_updated=list(updates.keys())
+            fields=list(clean_data.keys())
         )
 
         return result.data[0]
@@ -2997,7 +3051,7 @@ async def update_article(
         raise
     except Exception as e:
         logger.error("update_article_error", error=str(e), article_id=article_id)
-        raise HTTPException(status_code=500, detail="Failed to update article")
+        raise HTTPException(status_code=500, detail="Failed to save article")
 
 
 @app.get("/api/v1/executions")
