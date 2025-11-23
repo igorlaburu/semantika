@@ -90,6 +90,29 @@ class MultiCompanyEmailMonitor:
             logger.error("imap_connection_failed", error=str(e))
             raise
 
+    def _decode_filename(self, filename: str) -> str:
+        """
+        Decode MIME-encoded filename.
+        
+        Args:
+            filename: Raw filename (may be MIME-encoded)
+            
+        Returns:
+            Decoded filename
+        """
+        try:
+            decoded_parts = decode_header(filename)
+            decoded_filename = ""
+            for part, encoding in decoded_parts:
+                if isinstance(part, bytes):
+                    decoded_filename += part.decode(encoding or 'utf-8', errors='ignore')
+                else:
+                    decoded_filename += part
+            return decoded_filename
+        except Exception as e:
+            logger.debug("filename_decode_error", filename=filename, error=str(e))
+            return filename  # Return original if decode fails
+
     def _extract_company_from_to_header(self, to_header: str) -> Optional[str]:
         """
         Extract company code from To header.
@@ -752,13 +775,16 @@ class MultiCompanyEmailMonitor:
                     if not filename:
                         continue
 
+                    # Decode MIME-encoded filename
+                    decoded_filename = self._decode_filename(filename)
+                    
                     # Get file extension
-                    extension = os.path.splitext(filename)[1].lower()
+                    extension = os.path.splitext(decoded_filename)[1].lower()
                     content = part.get_payload(decode=True)
 
                     if extension in self.TEXT_EXTENSIONS:
                         text_content = content.decode("utf-8", errors="ignore")
-                        text_attachments.append(f"Archivo adjunto '{filename}':\n{text_content}")
+                        text_attachments.append(f"Archivo adjunto '{decoded_filename}':\n{text_content}")
                         
                     elif extension in self.AUDIO_EXTENSIONS:
                         # Transcribe audio
@@ -769,15 +795,15 @@ class MultiCompanyEmailMonitor:
                         try:
                             transcription_result = self.transcriber.transcribe_file(tmp_path)
                             if transcription_result.get("text"):
-                                audio_transcriptions.append(f"Transcripción del audio '{filename}':\n{transcription_result['text']}")
+                                audio_transcriptions.append(f"Transcripción del audio '{decoded_filename}':\n{transcription_result['text']}")
                         except Exception as e:
-                            logger.error("audio_transcription_error", filename=filename, error=str(e))
+                            logger.error("audio_transcription_error", filename=decoded_filename, error=str(e))
                         finally:
                             if os.path.exists(tmp_path):
                                 os.unlink(tmp_path)
                     else:
                         logger.debug("unsupported_attachment", 
-                            filename=filename,
+                            filename=decoded_filename,
                             company_code=company["company_code"]
                         )
             
