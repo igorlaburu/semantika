@@ -231,12 +231,36 @@ async def parse_single_article(state: ScraperState, page_title: str, semantic_co
         pre_filled=pre_filled
     )
     
-    state["title"] = result.get("title", "Sin título")
+    title = result.get("title", "Sin título")
+    
+    # Check if LLM detected no newsworthy content
+    NO_CONTENT_MARKERS = [
+        "sin contenido noticioso",
+        "no news content", 
+        "not newsworthy",
+        "no relevant content",
+        "contenido no relevante"
+    ]
+    
+    if title.lower() in NO_CONTENT_MARKERS or len(semantic_content.strip()) < 100:
+        logger.info("article_skipped_no_content",
+            url=url,
+            title=title,
+            content_length=len(semantic_content),
+            enrichment_model=result.get("enrichment_model")
+        )
+        state["should_process"] = False
+        state["title"] = title
+        state["summary"] = "Contenido sin interés noticioso"
+        state["content_items"] = []
+        return
+    
+    state["title"] = title
     state["summary"] = result.get("summary", "")
     
     state["content_items"] = [{
         "position": 1,
-        "title": result.get("title", "Sin título"),
+        "title": title,
         "summary": result.get("summary", ""),
         "content": semantic_content[:8000],
         "tags": result.get("tags", []),
@@ -246,7 +270,7 @@ async def parse_single_article(state: ScraperState, page_title: str, semantic_co
     
     logger.info("article_parsed",
         url=url,
-        title=state["title"][:50],
+        title=title[:50],
         category=result.get("category"),
         statements_count=len(result.get("atomic_statements", [])),
         enrichment_model=result.get("enrichment_model", "unknown")
