@@ -769,15 +769,45 @@ GET /api/v1/articles/by-slug/alcaldesa-de-vitoria-advierte-sobre-el-peligro-del-
 
 ---
 
+#### `POST /api/v1/articles`
+
+Crear un artículo nuevo.
+
+**Headers**: `X-API-Key` o `Authorization: Bearer {JWT}`, `Content-Type: application/json`
+
+**Body**: JSON con todos los campos del artículo
+```json
+{
+  "id": "uuid-generado-por-frontend",
+  "titulo": "Título del artículo",
+  "slug": "titulo-del-articulo-123456",
+  "excerpt": "Resumen breve...",
+  "contenido": "<p>Contenido HTML...</p>",
+  "autor": "Sistema",
+  "tags": ["política", "gobierno"],
+  "estado": "borrador",
+  "working_json": { /* ... */ }
+}
+```
+
+**Respuesta**: El artículo creado con todos sus campos (incluye `created_at`, `updated_at`, `company_id`)
+
+**Notas**:
+- `company_id` se añade automáticamente desde la autenticación
+- `created_at` y `updated_at` se generan si no se proporcionan
+- Valores `null` o `undefined` se ignoran
+
+---
+
 #### `PATCH /api/v1/articles/{article_id}`
 
-Actualizar campos de un artículo (publicar, editar, etc.)
+Crear o actualizar artículo (upsert). Funciona tanto para primera vez como para actualizaciones.
 
 **Headers**: `X-API-Key` o `Authorization: Bearer {JWT}`, `Content-Type: application/json`
 
 **URL Params**: `article_id` (UUID)
 
-**Body**: JSON con campos a actualizar
+**Body**: JSON con campos a crear/actualizar
 ```json
 {
   "estado": "publicado",
@@ -789,21 +819,33 @@ Actualizar campos de un artículo (publicar, editar, etc.)
 
 **Casos de uso comunes**:
 
-1. **Publicar artículo**:
+1. **Crear artículo (primera vez)**:
+```json
+{
+  "titulo": "Título nuevo",
+  "slug": "titulo-nuevo-123",
+  "excerpt": "Resumen...",
+  "contenido": "<p>...</p>",
+  "estado": "borrador",
+  "working_json": { /* ... */ }
+}
+```
+
+2. **Publicar artículo**:
 ```json
 {
   "estado": "publicado"
 }
 ```
 
-2. **Despublicar (volver a borrador)**:
+3. **Despublicar (volver a borrador)**:
 ```json
 {
   "estado": "borrador"
 }
 ```
 
-3. **Actualizar título y contenido**:
+4. **Actualizar título y contenido**:
 ```json
 {
   "titulo": "Título corregido",
@@ -821,6 +863,13 @@ Actualizar campos de un artículo (publicar, editar, etc.)
   ...
 }
 ```
+
+**Notas**:
+- Si el artículo no existe, lo crea (INSERT)
+- Si el artículo existe, lo actualiza (UPDATE)
+- `company_id` se añade automáticamente
+- `updated_at` se actualiza automáticamente
+- Valores `null` o `undefined` se ignoran
 
 **Ejemplo curl**:
 ```bash
