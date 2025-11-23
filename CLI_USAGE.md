@@ -60,7 +60,74 @@ Elimina un cliente y revoca su API Key.
 
 **Advertencia:** Esta acción NO elimina los documentos del cliente en Qdrant. Solo revoca el acceso.
 
-#### 4. Verificar Conectividad
+#### 4. Crear Company (Empresa/Organización)
+```bash
+python cli.py create-company --name "Nombre Empresa" --code "empresa-code" --tier "starter"
+```
+Crea una nueva company con su configuración inicial.
+
+**Parámetros:**
+- `--name`: Nombre de la company (requerido)
+- `--code`: Código único identificador (requerido, alfanumérico con guiones)
+- `--tier`: Nivel de plan (opcional, default: "starter", opciones: "starter", "pro", "unlimited")
+
+**Salida:**
+```
+🏢 Company Created Successfully!
+============================================================
+
+📋 Company Details:
+   Company ID: 00000000-0000-0000-0000-000000000001
+   Name: Nombre Empresa
+   Code: empresa-code
+   Tier: starter
+   Created: 2025-11-23
+
+📝 Next Steps:
+   1. Create auth users: python cli.py create-auth-user --email user@example.com --company-id 00000000-0000-0000-0000-000000000001
+   2. Configure sources in Supabase
+```
+
+---
+
+#### 5. Crear Usuario Autenticado
+```bash
+python cli.py create-auth-user \
+  --email "usuario@empresa.com" \
+  --password "SecurePass123!" \
+  --company-id "00000000-0000-0000-0000-000000000001" \
+  --name "Nombre Usuario"
+```
+Crea un usuario con autenticación JWT para acceso al frontend.
+
+**Parámetros:**
+- `--email`: Email del usuario (requerido)
+- `--password`: Contraseña (requerido)
+- `--company-id`: UUID de la company (requerido)
+- `--name`: Nombre completo del usuario (opcional)
+
+**Salida:**
+```
+🎉 User Created Successfully!
+============================================================
+
+📋 User Details:
+   User ID: user-uuid-here
+   Email: usuario@empresa.com
+   Password: SecurePass123!
+   Company: Nombre Empresa
+
+📝 Login Credentials (share with user):
+   Email: usuario@empresa.com
+   Password: SecurePass123!
+   URL: https://press.ekimen.ai
+```
+
+**Importante:** Este comando crea usuarios en Supabase Auth para login con JWT (frontend web). Para acceso API usar `add-client`.
+
+---
+
+#### 6. Verificar Conectividad
 ```bash
 python cli.py test-connection
 ```

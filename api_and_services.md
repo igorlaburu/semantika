@@ -1,7 +1,7 @@
 # Documentación API y Servicios - Sistema Ekimen
 
-**Versión**: 0.2.0
-**Última actualización**: 2025-11-13
+**Versión**: 0.2.1
+**Última actualización**: 2025-11-23
 **Base URL**: `https://api.ekimen.ai`
 
 ---
@@ -652,6 +652,184 @@ Los `order` se calculan automáticamente después del último `atomic_statement`
 - Los statements enriquecidos se **acumulan** (no reemplazan los anteriores)
 - Se factura como operación "simple" (microedición)
 - Compatible con formato legacy (migración automática)
+
+---
+
+### 📰 Articles (Artículos Publicables)
+
+Los **articles** son contenido redactado listo para publicación, generados desde context units.
+
+#### `GET /api/v1/articles`
+
+Listar artículos del cliente.
+
+**Headers**: `X-API-Key` o `Authorization: Bearer {JWT}`
+
+**Query Params**:
+- `status` (string, default="all"): Filtrar por estado (`"publicado"`, `"borrador"`, `"all"`)
+- `category` (string, default="all"): Filtrar por categoría
+- `limit` (int, default=20): Resultados por página
+- `offset` (int, default=0): Paginación
+
+**Respuesta**:
+```json
+{
+  "articles": [
+    {
+      "id": "uuid-123",
+      "titulo": "Título del artículo",
+      "slug": "titulo-del-articulo-123456",
+      "excerpt": "Resumen breve del artículo...",
+      "contenido": "<p>HTML del artículo...</p>",
+      "autor": "Sistema",
+      "tags": ["política", "gobierno"],
+      "estado": "publicado",
+      "category": "política",
+      "fecha_publicacion": "2025-11-23T10:00:00Z",
+      "created_at": "2025-11-23T09:00:00Z"
+    }
+  ],
+  "total": 45,
+  "limit": 20,
+  "offset": 0
+}
+```
+
+---
+
+#### `GET /api/v1/articles/{article_id}`
+
+Obtener artículo por ID.
+
+**Headers**: `X-API-Key` o `Authorization: Bearer {JWT}`
+
+**URL Params**: `article_id` (UUID)
+
+**Respuesta**:
+```json
+{
+  "id": "uuid-123",
+  "titulo": "Título del artículo",
+  "slug": "titulo-del-articulo-123456",
+  "excerpt": "Resumen breve...",
+  "contenido": "<p>Contenido HTML completo...</p>",
+  "imagen_url": "https://...",
+  "autor": "Sistema",
+  "tags": ["política", "economía"],
+  "estado": "publicado",
+  "working_json": {
+    "article": {
+      "titulo": "...",
+      "excerpt": "...",
+      "contenido_markdown": "<p>...</p>"
+    },
+    "fuentes": {
+      "news_ids": ["uuid-1", "uuid-2"],
+      "context_unit_ids": ["uuid-3"],
+      "statements": {
+        "stmt_0_0": {
+          "text": "Statement usado",
+          "type": "fact",
+          "order": 1,
+          "speaker": null,
+          "context_unit_id": "uuid-3"
+        }
+      }
+    },
+    "metadata": {
+      "estado": "publicado",
+      "version": 2,
+      "style_id": "uuid-style"
+    }
+  },
+  "fecha_publicacion": "2025-11-23T10:00:00Z",
+  "created_at": "2025-11-23T09:00:00Z",
+  "updated_at": "2025-11-23T10:30:00Z",
+  "company_id": "uuid-company",
+  "category": "política"
+}
+```
+
+---
+
+#### `GET /api/v1/articles/by-slug/{slug}`
+
+Obtener artículo por slug (URL-friendly).
+
+**Headers**: `X-API-Key` o `Authorization: Bearer {JWT}`
+
+**URL Params**: `slug` (string)
+
+**Ejemplo**:
+```bash
+GET /api/v1/articles/by-slug/alcaldesa-de-vitoria-advierte-sobre-el-peligro-del-hielo-en-las-calles-1763857107193
+```
+
+**Respuesta**: Igual que `GET /api/v1/articles/{article_id}`
+
+---
+
+#### `PATCH /api/v1/articles/{article_id}`
+
+Actualizar campos de un artículo (publicar, editar, etc.)
+
+**Headers**: `X-API-Key` o `Authorization: Bearer {JWT}`, `Content-Type: application/json`
+
+**URL Params**: `article_id` (UUID)
+
+**Body**: JSON con campos a actualizar
+```json
+{
+  "estado": "publicado",
+  "titulo": "Nuevo título",
+  "contenido": "<p>Contenido actualizado...</p>",
+  "tags": ["nuevo-tag", "actualizado"]
+}
+```
+
+**Casos de uso comunes**:
+
+1. **Publicar artículo**:
+```json
+{
+  "estado": "publicado"
+}
+```
+
+2. **Despublicar (volver a borrador)**:
+```json
+{
+  "estado": "borrador"
+}
+```
+
+3. **Actualizar título y contenido**:
+```json
+{
+  "titulo": "Título corregido",
+  "contenido": "<p>Contenido corregido...</p>"
+}
+```
+
+**Respuesta**:
+```json
+{
+  "id": "uuid-123",
+  "titulo": "Título actualizado",
+  "estado": "publicado",
+  "updated_at": "2025-11-23T11:00:00Z",
+  ...
+}
+```
+
+**Ejemplo curl**:
+```bash
+# Publicar artículo
+curl -X PATCH "https://api.ekimen.ai/api/v1/articles/uuid-123" \
+  -H "X-API-Key: sk-your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"estado": "publicado"}'
+```
 
 ---
 

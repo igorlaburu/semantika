@@ -2889,6 +2889,38 @@ async def list_articles(
         raise HTTPException(status_code=500, detail=f"Failed to fetch articles: {str(e)}")
 
 
+@app.get("/api/v1/articles/by-slug/{slug}")
+async def get_article_by_slug(
+    slug: str,
+    company_id: str = Depends(get_company_id_from_auth)
+) -> Dict:
+    """
+    Get a single article by slug.
+    
+    **Authentication**: Accepts either JWT (Authorization: Bearer) or API Key (X-API-Key)
+    """
+    try:
+        supabase = get_supabase_client()
+
+        result = supabase.client.table("press_articles")\
+            .select("*")\
+            .eq("slug", slug)\
+            .eq("company_id", company_id)\
+            .single()\
+            .execute()
+
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Article not found")
+
+        return result.data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("get_article_by_slug_error", error=str(e), slug=slug)
+        raise HTTPException(status_code=500, detail="Failed to fetch article")
+
+
 @app.get("/api/v1/articles/{article_id}")
 async def get_article(
     article_id: str,
@@ -2919,6 +2951,64 @@ async def get_article(
     except Exception as e:
         logger.error("get_article_error", error=str(e), article_id=article_id)
         raise HTTPException(status_code=500, detail="Failed to fetch article")
+
+
+@app.patch("/api/v1/articles/{article_id}")
+async def update_article(
+    article_id: str,
+    updates: Dict[str, Any],
+    company_id: str = Depends(get_company_id_from_auth)
+) -> Dict:
+    """
+    Update article fields (estado, titulo, contenido, etc.)
+    
+    **Authentication**: Accepts either JWT (Authorization: Bearer) or API Key (X-API-Key)
+    
+    **Body**: JSON object with fields to update, e.g.:
+        {
+            "estado": "publicado",
+            "titulo": "New title",
+            "contenido": "<p>Updated content</p>"
+        }
+    """
+    try:
+        supabase = get_supabase_client()
+
+        # Verify article exists and belongs to company
+        existing = supabase.client.table("press_articles")\
+            .select("id")\
+            .eq("id", article_id)\
+            .eq("company_id", company_id)\
+            .single()\
+            .execute()
+
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Article not found")
+
+        # Update article
+        result = supabase.client.table("press_articles")\
+            .update(updates)\
+            .eq("id", article_id)\
+            .eq("company_id", company_id)\
+            .execute()
+
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to update article")
+
+        logger.info(
+            "article_updated",
+            article_id=article_id,
+            company_id=company_id,
+            fields_updated=list(updates.keys())
+        )
+
+        return result.data[0]
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("update_article_error", error=str(e), article_id=article_id)
+        raise HTTPException(status_code=500, detail="Failed to update article")
 
 
 @app.get("/api/v1/executions")
