@@ -2922,12 +2922,12 @@ async def get_article_by_slug(
 
 
 @app.post("/api/v1/articles")
-async def create_article(
+async def create_or_update_article(
     article_data: Dict[str, Any],
     company_id: str = Depends(get_company_id_from_auth)
 ) -> Dict:
     """
-    Create a new article.
+    Create or update article (upsert).
     
     **Authentication**: Accepts either JWT (Authorization: Bearer) or API Key (X-API-Key)
     
@@ -2938,21 +2938,17 @@ async def create_article(
 
         clean_data = {k: v for k, v in article_data.items() if v is not None}
         clean_data["company_id"] = company_id
-        
-        if "created_at" not in clean_data:
-            clean_data["created_at"] = datetime.utcnow().isoformat()
-        if "updated_at" not in clean_data:
-            clean_data["updated_at"] = datetime.utcnow().isoformat()
+        clean_data["updated_at"] = datetime.utcnow().isoformat()
 
         result = supabase.client.table("press_articles")\
-            .insert(clean_data)\
+            .upsert(clean_data)\
             .execute()
 
         if not result.data:
-            raise HTTPException(status_code=500, detail="Failed to create article")
+            raise HTTPException(status_code=500, detail="Failed to save article")
 
         logger.info(
-            "article_created",
+            "article_saved",
             article_id=result.data[0].get("id"),
             company_id=company_id,
             titulo=clean_data.get("titulo", "")[:50]
@@ -2963,8 +2959,8 @@ async def create_article(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("create_article_error", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to create article")
+        logger.error("save_article_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to save article")
 
 
 @app.get("/api/v1/articles/{article_id}")

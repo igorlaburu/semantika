@@ -771,11 +771,11 @@ GET /api/v1/articles/by-slug/alcaldesa-de-vitoria-advierte-sobre-el-peligro-del-
 
 #### `POST /api/v1/articles`
 
-Crear un artículo nuevo.
+Crear o actualizar artículo (upsert). **Endpoint principal para guardar artículos**.
 
 **Headers**: `X-API-Key` o `Authorization: Bearer {JWT}`, `Content-Type: application/json`
 
-**Body**: JSON con todos los campos del artículo
+**Body**: JSON con los campos del artículo
 ```json
 {
   "id": "uuid-generado-por-frontend",
@@ -790,95 +790,58 @@ Crear un artículo nuevo.
 }
 ```
 
-**Respuesta**: El artículo creado con todos sus campos (incluye `created_at`, `updated_at`, `company_id`)
+**Respuesta**: El artículo guardado con todos sus campos
 
-**Notas**:
-- `company_id` se añade automáticamente desde la autenticación
-- `created_at` y `updated_at` se generan si no se proporcionan
-- Valores `null` o `undefined` se ignoran
+**Casos de uso**:
 
----
-
-#### `PATCH /api/v1/articles/{article_id}`
-
-Crear o actualizar artículo (upsert). Funciona tanto para primera vez como para actualizaciones.
-
-**Headers**: `X-API-Key` o `Authorization: Bearer {JWT}`, `Content-Type: application/json`
-
-**URL Params**: `article_id` (UUID)
-
-**Body**: JSON con campos a crear/actualizar
+1. **Primera vez (crear)**:
 ```json
 {
-  "estado": "publicado",
-  "titulo": "Nuevo título",
-  "contenido": "<p>Contenido actualizado...</p>",
-  "tags": ["nuevo-tag", "actualizado"]
-}
-```
-
-**Casos de uso comunes**:
-
-1. **Crear artículo (primera vez)**:
-```json
-{
+  "id": "uuid-nuevo",
   "titulo": "Título nuevo",
   "slug": "titulo-nuevo-123",
-  "excerpt": "Resumen...",
-  "contenido": "<p>...</p>",
   "estado": "borrador",
-  "working_json": { /* ... */ }
+  ...
 }
 ```
 
-2. **Publicar artículo**:
+2. **Actualización posterior**:
 ```json
 {
-  "estado": "publicado"
-}
-```
-
-3. **Despublicar (volver a borrador)**:
-```json
-{
-  "estado": "borrador"
-}
-```
-
-4. **Actualizar título y contenido**:
-```json
-{
-  "titulo": "Título corregido",
-  "contenido": "<p>Contenido corregido...</p>"
-}
-```
-
-**Respuesta**:
-```json
-{
-  "id": "uuid-123",
+  "id": "uuid-existente",
   "titulo": "Título actualizado",
   "estado": "publicado",
-  "updated_at": "2025-11-23T11:00:00Z",
   ...
 }
 ```
 
 **Notas**:
 - Si el artículo no existe, lo crea (INSERT)
-- Si el artículo existe, lo actualiza (UPDATE)
+- Si el artículo existe (mismo `id`), lo actualiza (UPDATE)
 - `company_id` se añade automáticamente
 - `updated_at` se actualiza automáticamente
 - Valores `null` o `undefined` se ignoran
 
 **Ejemplo curl**:
 ```bash
-# Publicar artículo
-curl -X PATCH "https://api.ekimen.ai/api/v1/articles/uuid-123" \
+# Guardar artículo (crea o actualiza)
+curl -X POST "https://api.ekimen.ai/api/v1/articles" \
   -H "X-API-Key: sk-your-api-key" \
   -H "Content-Type: application/json" \
-  -d '{"estado": "publicado"}'
+  -d '{
+    "id": "uuid-123",
+    "titulo": "Mi artículo",
+    "estado": "publicado"
+  }'
 ```
+
+---
+
+#### `PATCH /api/v1/articles/{article_id}`
+
+**Alias de POST** - Hace exactamente lo mismo (upsert). Mantenido por compatibilidad.
+
+Usa `POST /api/v1/articles` en su lugar
 
 ---
 
