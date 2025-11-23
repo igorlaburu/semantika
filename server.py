@@ -2974,26 +2974,15 @@ async def update_article(
     try:
         supabase = get_supabase_client()
 
-        # Verify article exists and belongs to company
-        existing = supabase.client.table("press_articles")\
-            .select("id")\
-            .eq("id", article_id)\
-            .eq("company_id", company_id)\
-            .single()\
-            .execute()
-
-        if not existing.data:
-            raise HTTPException(status_code=404, detail="Article not found")
-
-        # Update article
+        # Update article (RLS ensures it belongs to company)
         result = supabase.client.table("press_articles")\
             .update(updates)\
             .eq("id", article_id)\
             .eq("company_id", company_id)\
             .execute()
 
-        if not result.data:
-            raise HTTPException(status_code=500, detail="Failed to update article")
+        if not result.data or len(result.data) == 0:
+            raise HTTPException(status_code=404, detail="Article not found or no permission")
 
         logger.info(
             "article_updated",
