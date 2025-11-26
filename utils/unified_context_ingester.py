@@ -571,7 +571,7 @@ async def ingest_web_context_unit(
                 .maybe_single()\
                 .execute()
             
-            if existing.data:
+            if existing and existing.data:
                 # UPDATE existing record
                 context_unit_data["id"] = existing.data["id"]
                 context_unit_data["version"] = existing.data["version"] + 1
