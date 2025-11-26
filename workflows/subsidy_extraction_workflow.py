@@ -221,7 +221,7 @@ JSON:"""
             # Use provider interface for tracking and cost calculation
             from langchain_core.messages import HumanMessage, SystemMessage
             
-            provider = self.llm_client.registry.get('groq_fast')
+            provider = self.llm_client.registry.get('fast')  # GPT-4o-mini via OpenRouter
             messages = [
                 SystemMessage(content="Eres un experto en extraer información estructurada de páginas web de administraciones públicas. Respondes siempre en formato JSON válido."),
                 HumanMessage(content=prompt)
