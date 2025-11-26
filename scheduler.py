@@ -267,37 +267,6 @@ async def execute_source_task(source: Dict[str, Any]):
                     source_id=source_id,
                     connector_type=connector_type
                 )
-                return
-                
-                # Log execution
-                duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
-                await supabase.log_execution(
-                    client_id=client_id,
-                    company_id=company_id,
-                    source_name=source_name,
-                    source_type="api",
-                    items_count=result.get("items_processed", 0),
-                    status_code=200 if result.get("success") else 500,
-                    status="success" if result.get("success") else "error",
-                    details=f"Perplexity API: {result.get('items_processed', 0)} noticias procesadas" if result.get("success") else f"Error: {result.get('error')}",
-                    metadata={
-                        "connector_type": "perplexity_news",
-                        "items_fetched": result.get("items_fetched", 0),
-                        "items_processed": result.get("items_processed", 0),
-                        "location": config.get("location", "Bilbao/Vizcaya")
-                    },
-                    duration_ms=duration_ms,
-                    workflow_code=source.get("workflow_code")
-                )
-                
-                # Update source execution stats
-                await supabase.update_source_execution_stats(
-                    source_id, 
-                    success=result.get("success", False),
-                    items_processed=result.get("items_processed", 0)
-                )
-            else:
-                logger.warn("api_source_not_implemented", source_id=source_id, source_type=source_type)
 
         elif source_type == "manual":
             logger.debug("manual_source_skip", source_id=source_id)
