@@ -120,7 +120,30 @@ class SubsidyExtractionWorkflow(BaseWorkflow):
         """
         # Clean HTML with BeautifulSoup
         from bs4 import BeautifulSoup
+        from urllib.parse import urljoin
+        
         soup = BeautifulSoup(html_content, 'html.parser')
+        
+        # Extract all links BEFORE cleaning (critical for PDF URLs)
+        links_map = {}
+        base_url = "https://egoitza.araba.eus"
+        
+        for link in soup.find_all('a', href=True):
+            href = link['href']
+            text = link.get_text(strip=True)
+            
+            # Make absolute URL
+            if href.startswith('http'):
+                absolute_url = href
+            elif href.startswith('//'):
+                absolute_url = 'https:' + href
+            elif href.startswith('/'):
+                absolute_url = base_url + href
+            else:
+                absolute_url = base_url + '/' + href
+            
+            if text:
+                links_map[text] = absolute_url
         
         # Remove script and style elements
         for script in soup(["script", "style"]):
@@ -133,6 +156,14 @@ class SubsidyExtractionWorkflow(BaseWorkflow):
         lines = (line.strip() for line in text.splitlines())
         chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
         clean_text = '\n'.join(chunk for chunk in chunks if chunk)
+        
+        # Format links for LLM
+        links_section = "\n\n=== ENLACES ENCONTRADOS ===\n"
+        for link_text, link_url in links_map.items():
+            if link_url.endswith('.pdf') or 'documento' in link_text.lower() or 'solicitud' in link_text.lower():
+                links_section += f"- {link_text}: {link_url}\n"
+        
+        clean_text += links_section
         
         self.logger.debug("llm_extraction_input",
             html_length=len(html_content),
@@ -175,10 +206,12 @@ Extrae la siguiente información en formato JSON:
 }}
 
 IMPORTANTE:
+- Al final del texto hay una sección "=== ENLACES ENCONTRADOS ===" con todas las URLs extraídas del HTML
+- Usa esas URLs para completar los campos "url" en documentacion_presentar y solicitudes_pago
 - Extrae TODAS las URLs de PDFs o documentos que encuentres
 - Si no encuentras algún campo, usa null o array vacío
 - Las URLs deben ser completas (con https://)
-- Si las URLs son relativas, completa con el dominio base
+- Relaciona el texto del enlace con el título del documento para asignar la URL correcta
 
 Responde SOLO con el JSON, sin explicaciones adicionales.
 
