@@ -286,18 +286,28 @@ Instrucciones:
 
 Puntos clave:"""
             
-            # Call LLM
+            # Call LLM using proper interface
+            from langchain_core.messages import HumanMessage, SystemMessage
+            
             llm_client = LLMClient()
-            response = await llm_client.generate(
-                prompt=prompt,
-                system_prompt="Eres un asistente especializado en resumir documentos legales y administrativos de forma clara y concisa.",
-                model="openrouter/meta-llama/llama-3.3-70b-instruct",
-                temperature=0.3,
-                max_tokens=500
-            )
+            provider = llm_client.registry.get('groq_fast')
+            
+            messages = [
+                SystemMessage(content="Eres un asistente especializado en resumir documentos legales y administrativos de forma clara y concisa."),
+                HumanMessage(content=prompt)
+            ]
+            
+            config = {
+                'tracking': {
+                    'organization_id': None,
+                    'operation': 'pdf_summary'
+                }
+            }
+            
+            response = await provider.ainvoke(messages, config=config)
             
             # Parse bullet points
-            lines = response.strip().split('\n')
+            lines = response.content.strip().split('\n')
             bullets = []
             for line in lines:
                 line = line.strip()
