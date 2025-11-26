@@ -320,16 +320,18 @@ JSON:"""
             summarize=summarize
         )
         
-        # Process PDFs in parallel (limit concurrency to avoid overwhelming)
-        semaphore = asyncio.Semaphore(3)  # Max 3 concurrent downloads
+        # Process PDFs with concurrency control
+        # - Downloads: 3 in parallel (fast, no LLM)
+        # - Summarization: 1 at a time (avoid Groq rate limit)
         
-        async def process_single_pdf(doc: Dict):
-            async with semaphore:
+        if summarize:
+            # Sequential processing to avoid rate limits
+            for doc in valid_docs:
                 try:
                     result = await self.pdf_extractor.process_pdf(
                         url=doc["url"],
                         filename=doc.get("titulo", "documento"),
-                        summarize=summarize
+                        summarize=True
                     )
                     
                     if result["success"]:
@@ -345,9 +347,34 @@ JSON:"""
                         url=doc["url"],
                         error=str(e)
                     )
-        
-        # Process all documents
-        await asyncio.gather(*[process_single_pdf(doc) for doc in valid_docs])
+        else:
+            # Parallel processing for downloads only (no summarization)
+            semaphore = asyncio.Semaphore(3)
+            
+            async def process_single_pdf(doc: Dict):
+                async with semaphore:
+                    try:
+                        result = await self.pdf_extractor.process_pdf(
+                            url=doc["url"],
+                            filename=doc.get("titulo", "documento"),
+                            summarize=False
+                        )
+                        
+                        if result["success"]:
+                            doc["summary_bullets"] = result.get("summary_bullets", [])
+                            doc["text"] = result.get("text", "")
+                            doc["size_kb"] = result.get("size_kb", 0)
+                        else:
+                            doc["error"] = result.get("error", "Unknown error")
+                    
+                    except Exception as e:
+                        doc["error"] = str(e)
+                        self.logger.error("pdf_processing_error",
+                            url=doc["url"],
+                            error=str(e)
+                        )
+            
+            await asyncio.gather(*[process_single_pdf(doc) for doc in valid_docs])
         
         success_count = sum(1 for doc in valid_docs if "summary_bullets" in doc or not summarize)
         self.logger.info("pdf_processing_batch_complete",
