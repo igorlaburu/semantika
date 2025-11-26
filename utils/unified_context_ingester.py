@@ -594,6 +594,13 @@ async def ingest_web_context_unit(
                     .insert(context_unit_data)\
                     .execute()
                 
+                if not result or not result.data:
+                    logger.error("web_context_unit_insert_failed",
+                        context_unit_id=context_unit_id,
+                        error="No data returned from insert"
+                    )
+                    raise Exception("Failed to insert web_context_unit")
+                
                 logger.info("web_context_unit_inserted",
                     context_unit_id=context_unit_id
                 )
@@ -602,6 +609,13 @@ async def ingest_web_context_unit(
             result = supabase.client.table("web_context_units")\
                 .insert(context_unit_data)\
                 .execute()
+            
+            if not result or not result.data:
+                logger.error("web_context_unit_insert_failed",
+                    context_unit_id=context_unit_id,
+                    error="No data returned from insert"
+                )
+                raise Exception("Failed to insert web_context_unit")
             
             logger.info("web_context_unit_inserted_new_version",
                 context_unit_id=context_unit_id

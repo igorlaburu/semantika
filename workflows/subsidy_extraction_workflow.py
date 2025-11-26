@@ -269,8 +269,21 @@ JSON:"""
         if not documents:
             return
         
+        # Filter out documents without URLs
+        valid_docs = [doc for doc in documents if doc.get("url")]
+        skipped = len(documents) - len(valid_docs)
+        
+        if skipped > 0:
+            self.logger.warn("pdf_documents_without_urls",
+                skipped=skipped,
+                total=len(documents)
+            )
+        
+        if not valid_docs:
+            return
+        
         self.logger.info("pdf_processing_batch_start",
-            count=len(documents),
+            count=len(valid_docs),
             summarize=summarize
         )
         
@@ -301,13 +314,13 @@ JSON:"""
                     )
         
         # Process all documents
-        await asyncio.gather(*[process_single_pdf(doc) for doc in documents])
+        await asyncio.gather(*[process_single_pdf(doc) for doc in valid_docs])
         
-        success_count = sum(1 for doc in documents if "summary_bullets" in doc or not summarize)
+        success_count = sum(1 for doc in valid_docs if "summary_bullets" in doc or not summarize)
         self.logger.info("pdf_processing_batch_complete",
-            total=len(documents),
+            total=len(valid_docs),
             success=success_count,
-            failed=len(documents) - success_count
+            failed=len(valid_docs) - success_count
         )
     
     def _generate_markdown_report(
