@@ -174,7 +174,7 @@ JSON:"""
             
             config = {
                 'tracking': {
-                    'organization_id': self.company_id,
+                    'organization_id': None,  # Will be set by source
                     'operation': 'subsidy_extraction'
                 }
             }
