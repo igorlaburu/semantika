@@ -118,15 +118,32 @@ class SubsidyExtractionWorkflow(BaseWorkflow):
         Returns:
             Dict with structured data
         """
+        # Clean HTML with BeautifulSoup
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html_content, 'html.parser')
+        
+        # Remove script and style elements
+        for script in soup(["script", "style"]):
+            script.decompose()
+        
+        # Get text
+        text = soup.get_text()
+        
+        # Clean up whitespace
+        lines = (line.strip() for line in text.splitlines())
+        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+        clean_text = '\n'.join(chunk for chunk in chunks if chunk)
+        
         self.logger.debug("llm_extraction_input",
             html_length=len(html_content),
-            html_preview=html_content[:500] if html_content else "EMPTY"
+            clean_text_length=len(clean_text),
+            text_preview=clean_text[:500]
         )
         
         prompt = f"""Extrae información estructurada de la siguiente página de subvenciones.
 
-Contenido HTML:
-{html_content[:30000]}  
+Contenido de la página:
+{clean_text[:15000]}  
 
 Extrae la siguiente información en formato JSON:
 
