@@ -290,7 +290,7 @@ Puntos clave:"""
             from langchain_core.messages import HumanMessage, SystemMessage
             
             llm_client = LLMClient()
-            provider = llm_client.registry.get('groq_fast')
+            provider = llm_client.registry.get('fast')  # GPT-4o-mini via OpenRouter
             
             messages = [
                 SystemMessage(content="Eres un asistente especializado en resumir documentos legales y administrativos de forma clara y concisa."),
