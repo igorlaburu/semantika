@@ -421,3 +421,306 @@ async def ingest_context_unit(
             "error": str(e),
             "generated_fields": []
         }
+
+
+async def ingest_web_context_unit(
+    # Flexible content inputs
+    raw_text: str,
+    
+    # Pre-generated fields (optional - LLM will generate if missing)
+    title: Optional[str] = None,
+    summary: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    category: Optional[str] = None,
+    atomic_statements: Optional[List[Any]] = None,
+    
+    # Required metadata
+    company_id: str = None,
+    source_type: str = None,
+    source_id: str = None,
+    
+    # Optional metadata
+    source_metadata: Optional[Dict[str, Any]] = None,
+    
+    # Control flags
+    force_save: bool = False,
+    check_duplicates: bool = True,
+    generate_embedding_flag: bool = True,
+    replace_previous: bool = True  # Replace previous version
+) -> Dict[str, Any]:
+    """
+    Ingest context unit into web_context_units table.
+    
+    Similar to ingest_context_unit() but for web monitoring (subsidies, forms, etc.)
+    
+    Key differences:
+    - Saves to web_context_units (not press_context_units)
+    - Supports versioning (replace_previous flag)
+    - Uses content_hash and simhash for change tracking
+    
+    Args:
+        raw_text: Full content text (Markdown report)
+        title, summary, tags, category, atomic_statements: Pre-generated or LLM-generated
+        company_id, source_type, source_id: Required metadata
+        source_metadata: Additional metadata
+        generate_embedding_flag: Whether to generate embedding
+        check_duplicates: Whether to check for duplicates
+        replace_previous: If True, UPDATE existing; if False, INSERT new version
+        
+    Returns:
+        Dict with success, context_unit_id, duplicate info, etc.
+    """
+    try:
+        logger.info("ingesting_web_context_unit",
+            company_id=company_id,
+            source_id=source_id,
+            source_type=source_type,
+            replace_previous=replace_previous
+        )
+        
+        # Use same logic as ingest_context_unit for LLM generation
+        generated_fields = []
+        
+        # Generate missing fields with LLM
+        if not all([title, summary, tags, category, atomic_statements]):
+            llm_result = await _generate_missing_fields_with_llm(
+                raw_text=raw_text,
+                existing_title=title,
+                existing_summary=summary,
+                existing_tags=tags,
+                existing_category=category,
+                existing_atomic_statements=atomic_statements
+            )
+            
+            if not title:
+                title = llm_result.get("title", "Sin título")
+                generated_fields.append("title")
+            if not summary:
+                summary = llm_result.get("summary", "")
+                generated_fields.append("summary")
+            if not tags:
+                tags = llm_result.get("tags", [])
+                generated_fields.append("tags")
+            if not category:
+                category = llm_result.get("category", "general")
+                generated_fields.append("category")
+            if not atomic_statements:
+                atomic_statements = llm_result.get("atomic_statements", [])
+                generated_fields.append("atomic_statements")
+        
+        # Normalize atomic_statements
+        atomic_statements = normalize_atomic_statements(atomic_statements)
+        
+        # Generate embedding
+        embedding = None
+        if generate_embedding_flag:
+            try:
+                embedding = await generate_embedding(
+                    title=title,
+                    summary=summary,
+                    company_id=company_id
+                )
+            except Exception as e:
+                logger.error("web_embedding_generation_failed",
+                    error=str(e)
+                )
+        
+        # Generate content_hash and simhash
+        from utils.content_hasher import compute_content_hashes
+        content_hash, simhash = compute_content_hashes(text=raw_text)
+        
+        # Check duplicates (optional)
+        if check_duplicates and embedding and not replace_previous:
+            # TODO: Implement semantic duplicate detection for web_context_units
+            # For now, skip (replacement logic handles this)
+            pass
+        
+        # Save to database
+        supabase = get_supabase_client()
+        
+        context_unit_id = str(uuid.uuid4())
+        
+        context_unit_data = {
+            "id": context_unit_id,
+            "company_id": company_id,
+            "source_type": source_type,
+            "source_id": source_id,
+            "title": title,
+            "summary": summary,
+            "raw_text": raw_text,
+            "tags": tags,
+            "category": category,
+            "atomic_statements": atomic_statements,
+            "source_metadata": source_metadata or {},
+            "embedding": embedding,
+            "content_hash": content_hash,
+            "simhash": simhash,
+            "is_latest": True,
+            "version": 1,
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat()
+        }
+        
+        if replace_previous:
+            # Check if exists
+            existing = supabase.client.table("web_context_units")\
+                .select("id, version")\
+                .eq("source_id", source_id)\
+                .eq("company_id", company_id)\
+                .eq("is_latest", True)\
+                .maybe_single()\
+                .execute()
+            
+            if existing.data:
+                # UPDATE existing record
+                context_unit_data["id"] = existing.data["id"]
+                context_unit_data["version"] = existing.data["version"] + 1
+                context_unit_data.pop("created_at")  # Don't update created_at
+                
+                result = supabase.client.table("web_context_units")\
+                    .update(context_unit_data)\
+                    .eq("id", existing.data["id"])\
+                    .execute()
+                
+                context_unit_id = existing.data["id"]
+                
+                logger.info("web_context_unit_updated",
+                    context_unit_id=context_unit_id,
+                    version=context_unit_data["version"]
+                )
+            else:
+                # INSERT new record
+                result = supabase.client.table("web_context_units")\
+                    .insert(context_unit_data)\
+                    .execute()
+                
+                logger.info("web_context_unit_inserted",
+                    context_unit_id=context_unit_id
+                )
+        else:
+            # Always INSERT (create new version)
+            result = supabase.client.table("web_context_units")\
+                .insert(context_unit_data)\
+                .execute()
+            
+            logger.info("web_context_unit_inserted_new_version",
+                context_unit_id=context_unit_id
+            )
+        
+        return {
+            "success": True,
+            "context_unit_id": context_unit_id,
+            "duplicate": False,
+            "generated_fields": generated_fields
+        }
+    
+    except Exception as e:
+        logger.error("ingest_web_context_unit_error",
+            company_id=company_id,
+            source_id=source_id,
+            error=str(e)
+        )
+        return {
+            "success": False,
+            "context_unit_id": None,
+            "duplicate": False,
+            "error": str(e),
+            "generated_fields": []
+        }
+
+
+async def _generate_missing_fields_with_llm(
+    raw_text: str,
+    existing_title: Optional[str] = None,
+    existing_summary: Optional[str] = None,
+    existing_tags: Optional[List[str]] = None,
+    existing_category: Optional[str] = None,
+    existing_atomic_statements: Optional[List[Any]] = None
+) -> Dict[str, Any]:
+    """
+    Generate missing fields using LLM.
+    
+    Helper function used by both ingest_context_unit and ingest_web_context_unit.
+    """
+    llm_client = LLMClient()
+    
+    # Build prompt for missing fields
+    fields_to_generate = []
+    if not existing_title:
+        fields_to_generate.append("title")
+    if not existing_summary:
+        fields_to_generate.append("summary")
+    if not existing_tags:
+        fields_to_generate.append("tags")
+    if not existing_category:
+        fields_to_generate.append("category")
+    if not existing_atomic_statements:
+        fields_to_generate.append("atomic_statements")
+    
+    prompt = f"""Analiza el siguiente contenido y genera los campos faltantes en formato JSON.
+
+Contenido:
+{raw_text[:10000]}
+
+Campos a generar: {", ".join(fields_to_generate)}
+
+Responde SOLO con JSON válido con esta estructura:
+{{
+  "title": "Título claro y descriptivo (máx 100 caracteres)",
+  "summary": "Resumen ejecutivo del contenido (2-3 líneas)",
+  "tags": ["tag1", "tag2", "tag3"],
+  "category": "categoría general",
+  "atomic_statements": [
+    {{"type": "fact", "text": "Hecho verificable 1", "order": 1}},
+    {{"type": "fact", "text": "Hecho verificable 2", "order": 2}}
+  ]
+}}
+
+JSON:"""
+    
+    try:
+        response = await llm_client.generate(
+            prompt=prompt,
+            system_prompt="Eres un asistente especializado en analizar y estructurar contenido. Respondes siempre en formato JSON válido.",
+            model="openrouter/openai/gpt-4o-mini",
+            temperature=0.3,
+            max_tokens=1000
+        )
+        
+        # Parse JSON
+        import json
+        cleaned_response = response.strip()
+        if cleaned_response.startswith("```json"):
+            cleaned_response = cleaned_response[7:]
+        if cleaned_response.startswith("```"):
+            cleaned_response = cleaned_response[3:]
+        if cleaned_response.endswith("```"):
+            cleaned_response = cleaned_response[:-3]
+        cleaned_response = cleaned_response.strip()
+        
+        llm_result = json.loads(cleaned_response)
+        
+        # Use existing values if provided
+        if existing_title:
+            llm_result["title"] = existing_title
+        if existing_summary:
+            llm_result["summary"] = existing_summary
+        if existing_tags:
+            llm_result["tags"] = existing_tags
+        if existing_category:
+            llm_result["category"] = existing_category
+        if existing_atomic_statements:
+            llm_result["atomic_statements"] = existing_atomic_statements
+        
+        return llm_result
+    
+    except Exception as e:
+        logger.error("llm_field_generation_error", error=str(e))
+        # Return minimal defaults
+        return {
+            "title": existing_title or "Sin título",
+            "summary": existing_summary or "",
+            "tags": existing_tags or [],
+            "category": existing_category or "general",
+            "atomic_statements": existing_atomic_statements or []
+        }
