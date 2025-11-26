@@ -281,7 +281,7 @@ class DFASubsidiesMonitor:
                     },
                     "updated_at": datetime.utcnow().isoformat()
                 })\
-                .eq("id", source_id)\
+                .eq("source_id", source_id)\
                 .execute()
             
             logger.info("snapshot_saved",

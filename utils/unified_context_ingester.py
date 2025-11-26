@@ -679,13 +679,18 @@ Responde SOLO con JSON válido con esta estructura:
 JSON:"""
     
     try:
-        response = await llm_client.generate(
-            prompt=prompt,
-            system_prompt="Eres un asistente especializado en analizar y estructurar contenido. Respondes siempre en formato JSON válido.",
-            model="openrouter/openai/gpt-4o-mini",
-            temperature=0.3,
-            max_tokens=1000
-        )
+        # TODO: Fix this to use proper LLM interface
+        # For now, skip auto-generation if not provided
+        logger.warn("llm_field_generation_skipped", reason="generate() method not available")
+        return title or "Sin título", summary or ""
+        
+        # response = await llm_client.generate(
+        #     prompt=prompt,
+        #     system_prompt="...",
+        #     model="openrouter/openai/gpt-4o-mini",
+        #     temperature=0.3,
+        #     max_tokens=1000
+        # )
         
         # Parse JSON
         import json
