@@ -185,7 +185,7 @@ class DFASubsidiesMonitor:
             source_content = SourceContent(
                 source_type="dfa_subsidies",
                 source_id=source["source_id"],
-                organization_slug=company["company_code"],
+                organization_slug=company["slug"],
                 text_content=html,
                 title="Subvenciones Forestales DFA",
                 metadata={
@@ -201,7 +201,7 @@ class DFASubsidiesMonitor:
             
             # Process with workflow
             workflow = SubsidyExtractionWorkflow(
-                company_code=company["company_code"],
+                company_code=company["slug"],
                 company_settings=company.get("settings", {})
             )
             
