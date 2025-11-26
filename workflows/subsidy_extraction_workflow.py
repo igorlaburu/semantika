@@ -325,8 +325,10 @@ JSON:"""
         # - Summarization: 1 at a time (avoid Groq rate limit)
         
         if summarize:
-            # Sequential processing to avoid rate limits
-            for doc in valid_docs:
+            # Sequential processing with delay to avoid rate limits
+            # Groq limit: 12k TPM, ~1300 tokens/PDF = 9 PDFs ~= 11.7k
+            # Add 7s delay between PDFs to spread across minutes
+            for i, doc in enumerate(valid_docs):
                 try:
                     result = await self.pdf_extractor.process_pdf(
                         url=doc["url"],
@@ -340,6 +342,10 @@ JSON:"""
                         doc["size_kb"] = result.get("size_kb", 0)
                     else:
                         doc["error"] = result.get("error", "Unknown error")
+                    
+                    # Delay between PDFs to avoid rate limit
+                    if i < len(valid_docs) - 1:  # Skip delay after last PDF
+                        await asyncio.sleep(7)
                 
                 except Exception as e:
                     doc["error"] = str(e)
