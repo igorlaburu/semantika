@@ -163,16 +163,27 @@ Responde SOLO con el JSON, sin explicaciones adicionales.
 JSON:"""
         
         try:
-            response = await self.llm_client.analyze(
-                text=prompt,
-                instructions="Eres un experto en extraer información estructurada de páginas web de administraciones públicas. Respondes siempre en formato JSON válido.",
-                model_alias="groq_fast",
-                max_tokens=2000
-            )
+            # Use provider interface for tracking and cost calculation
+            from langchain_core.messages import HumanMessage, SystemMessage
+            
+            provider = self.llm_client.registry.get('groq_fast')
+            messages = [
+                SystemMessage(content="Eres un experto en extraer información estructurada de páginas web de administraciones públicas. Respondes siempre en formato JSON válido."),
+                HumanMessage(content=prompt)
+            ]
+            
+            config = {
+                'tracking': {
+                    'organization_id': self.company_id,
+                    'operation': 'subsidy_extraction'
+                }
+            }
+            
+            response = await provider.ainvoke(messages, config=config)
             
             # Parse JSON
             # Remove markdown code blocks if present
-            cleaned_response = response.strip()
+            cleaned_response = response.content.strip()
             if cleaned_response.startswith("```json"):
                 cleaned_response = cleaned_response[7:]
             if cleaned_response.startswith("```"):
