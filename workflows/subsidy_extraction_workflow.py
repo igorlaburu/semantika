@@ -157,11 +157,10 @@ class SubsidyExtractionWorkflow(BaseWorkflow):
         chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
         clean_text = '\n'.join(chunk for chunk in chunks if chunk)
         
-        # Format links for LLM
-        links_section = "\n\n=== ENLACES ENCONTRADOS ===\n"
+        # Format links for LLM (include ALL links, especially PDFs)
+        links_section = "\n\n=== ENLACES ENCONTRADOS (CRÍTICO: Usar estas URLs exactas) ===\n"
         for link_text, link_url in links_map.items():
-            if link_url.endswith('.pdf') or 'documento' in link_text.lower() or 'solicitud' in link_text.lower():
-                links_section += f"- {link_text}: {link_url}\n"
+            links_section += f"- '{link_text}' → {link_url}\n"
         
         clean_text += links_section
         
@@ -205,13 +204,14 @@ Extrae la siguiente información en formato JSON:
   "informacion_adicional": "Cualquier otra información relevante no cubierta arriba"
 }}
 
-IMPORTANTE:
-- Al final del texto hay una sección "=== ENLACES ENCONTRADOS ===" con todas las URLs extraídas del HTML
-- Usa esas URLs para completar los campos "url" en documentacion_presentar y solicitudes_pago
-- Extrae TODAS las URLs de PDFs o documentos que encuentres
-- Si no encuentras algún campo, usa null o array vacío
-- Las URLs deben ser completas (con https://)
-- Relaciona el texto del enlace con el título del documento para asignar la URL correcta
+IMPORTANTE - EXTRACCIÓN DE URLs:
+- Al final del texto hay "=== ENLACES ENCONTRADOS ===" con TODAS las URLs de la página
+- DEBES buscar en esa lista las URLs que correspondan a cada documento
+- Para cada documento en "documentacion_presentar", busca en la lista de enlaces el que mejor coincida con el título
+- Por ejemplo: si el documento se llama "M 4.3. Inversiones...", busca un enlace que contenga "M4.3" o "Ayudas+forestales+M4"
+- Las URLs ya están completas y absolutas - cópialas EXACTAMENTE
+- Si no encuentras URL para un documento, usa null
+- Para "solicitudes_pago", busca enlaces que contengan "solicitud-pago" o "pago"
 
 Responde SOLO con el JSON, sin explicaciones adicionales.
 
