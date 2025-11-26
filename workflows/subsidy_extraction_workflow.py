@@ -163,11 +163,10 @@ Responde SOLO con el JSON, sin explicaciones adicionales.
 JSON:"""
         
         try:
-            response = await self.llm_client.generate(
-                prompt=prompt,
-                system_prompt="Eres un experto en extraer información estructurada de páginas web de administraciones públicas. Respondes siempre en formato JSON válido.",
-                model="openrouter/meta-llama/llama-3.3-70b-instruct",
-                temperature=0.1,
+            response = await self.llm_client.analyze(
+                text=prompt,
+                instructions="Eres un experto en extraer información estructurada de páginas web de administraciones públicas. Respondes siempre en formato JSON válido.",
+                model_alias="groq_fast",
                 max_tokens=2000
             )
             
