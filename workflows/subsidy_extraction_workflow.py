@@ -118,6 +118,11 @@ class SubsidyExtractionWorkflow(BaseWorkflow):
         Returns:
             Dict with structured data
         """
+        self.logger.debug("llm_extraction_input",
+            html_length=len(html_content),
+            html_preview=html_content[:500] if html_content else "EMPTY"
+        )
+        
         prompt = f"""Extrae información estructurada de la siguiente página de subvenciones.
 
 Contenido HTML:
