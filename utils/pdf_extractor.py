@@ -270,7 +270,7 @@ class PDFExtractor:
                 text = text[:MAX_TEXT_LENGTH_FOR_SUMMARY] + "\n\n[...texto truncado...]"
             
             # Prepare prompt
-            prompt = f"""Resume el siguiente documento PDF en {max_bullets} puntos clave (bullet points).
+            prompt = f"""Analiza el siguiente documento PDF y extrae información detallada y precisa en {max_bullets} puntos clave.
 
 Documento: {filename}
 
@@ -278,13 +278,16 @@ Contenido:
 {text}
 
 Instrucciones:
-- Extrae los {max_bullets} puntos más importantes
-- Cada punto debe ser claro y conciso
-- Enfócate en información práctica (requisitos, plazos, documentación, etc.)
+- Extrae los {max_bullets} puntos más importantes del documento
+- Cada punto debe ser DETALLADO y contener información ESPECÍFICA del PDF (cifras, porcentajes, fechas, cantidades, conceptos técnicos, etc.)
+- Incluye TODOS los datos precisos mencionados: importes máximos, plazos exactos, porcentajes de ayuda, superficies requeridas, documentación específica
+- NO uses frases genéricas - cada bullet debe aportar información concreta y útil del documento original
+- Prioriza: requisitos numéricos, condiciones específicas, obligaciones concretas, plazos exactos, documentación requerida con nombres completos
 - Responde SOLO con los bullet points, sin introducción ni conclusión
 - Formato: Un bullet point por línea, comenzando con "-"
+- Cada bullet puede ocupar 2-3 líneas si contiene información detallada importante
 
-Puntos clave:"""
+Puntos clave detallados:"""
             
             # Call LLM using proper interface
             from langchain_core.messages import HumanMessage, SystemMessage
