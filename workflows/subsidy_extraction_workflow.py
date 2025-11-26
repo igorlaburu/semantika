@@ -196,7 +196,14 @@ JSON:"""
             
             self.logger.info("llm_extraction_success",
                 docs_count=len(extracted_data.get("documentacion_presentar", [])),
-                payment_count=len(extracted_data.get("solicitudes_pago", []))
+                payment_count=len(extracted_data.get("solicitudes_pago", [])),
+                titulo=extracted_data.get("titulo"),
+                plazos_keys=list(extracted_data.get("plazos", {}).keys()) if extracted_data.get("plazos") else []
+            )
+            
+            self.logger.debug("llm_raw_response",
+                response_length=len(cleaned_response),
+                response_preview=cleaned_response[:500]
             )
             
             return extracted_data

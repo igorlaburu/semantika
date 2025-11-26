@@ -682,7 +682,13 @@ JSON:"""
         # TODO: Fix this to use proper LLM interface
         # For now, skip auto-generation if not provided
         logger.warn("llm_field_generation_skipped", reason="generate() method not available")
-        return title or "Sin título", summary or ""
+        return {
+            "title": existing_title or "Sin título",
+            "summary": existing_summary or "",
+            "tags": existing_tags or [],
+            "category": existing_category or None,
+            "atomic_statements": existing_atomic_statements or []
+        }
         
         # response = await llm_client.generate(
         #     prompt=prompt,

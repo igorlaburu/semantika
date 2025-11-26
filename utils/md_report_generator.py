@@ -159,7 +159,7 @@ class MarkdownReportGenerator:
                 url_text = url_text[:57] + "..."
             
             # Calculate dias_restantes if not provided
-            if plazos.get("fecha_fin") and not plazos.get("dias_restantes"):
+            if plazos and plazos.get("fecha_fin") and not plazos.get("dias_restantes"):
                 try:
                     from datetime import date
                     fecha_fin = datetime.strptime(plazos["fecha_fin"], "%Y-%m-%d").date()
