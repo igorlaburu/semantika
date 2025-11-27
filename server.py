@@ -11,6 +11,7 @@ import subprocess
 import io
 
 from fastapi import FastAPI, Request, Header, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -36,6 +37,15 @@ app = FastAPI(
     version="0.1.3",
     docs_url="/docs",
     redoc_url="/redoc"
+)
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
