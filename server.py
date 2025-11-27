@@ -1024,7 +1024,8 @@ async def aggregate(
 @app.get("/get_context_rag")
 async def get_context_rag(
     query: Optional[str] = None,
-    client: Dict = Depends(get_current_client)
+    api_key: Optional[str] = None,
+    client: Optional[Dict] = Depends(get_current_client_optional)
 ) -> Dict[str, Any]:
     """
     RAG endpoint for chatbot queries.
@@ -1032,10 +1033,11 @@ async def get_context_rag(
     Phase 1: Returns all DFA subsidies raw_text (ignores query)
     Phase 2 (future): Will add embedding-based semantic search
     
-    Requires: X-API-Key header
+    Auth: X-API-Key header OR api_key query parameter
     
     Query params:
         - query: User question (currently ignored)
+        - api_key: API key (alternative to header)
     
     Returns:
         {
@@ -1046,6 +1048,16 @@ async def get_context_rag(
         }
     """
     try:
+        # Try header auth first, then query param
+        if not client and api_key:
+            client = await supabase_client.get_client_by_api_key(api_key)
+            if not client:
+                logger.warn("invalid_api_key_query_param", api_key_prefix=api_key[:10])
+                raise HTTPException(status_code=403, detail="Invalid API Key")
+        
+        if not client:
+            raise HTTPException(status_code=401, detail="Missing API Key")
+        
         company_id = client["company_id"]
         
         logger.info("get_context_rag_request",
