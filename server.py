@@ -90,12 +90,21 @@ async def log_requests(request: Request, call_next):
 # AUTHENTICATION
 # ============================================
 
-async def get_api_key(x_api_key: Optional[str] = Header(None)) -> str:
-    """Extract API key from header."""
-    if not x_api_key:
-        logger.warn("missing_api_key")
-        raise HTTPException(status_code=401, detail="Missing API Key")
-    return x_api_key
+async def get_api_key(
+    x_api_key: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None)
+) -> str:
+    """Extract API key from X-API-Key or Authorization Bearer header."""
+    if x_api_key:
+        return x_api_key
+    
+    if authorization:
+        if authorization.startswith("Bearer "):
+            return authorization[7:]
+        return authorization
+    
+    logger.warn("missing_api_key")
+    raise HTTPException(status_code=401, detail="Missing API Key")
 
 
 async def get_current_client(api_key: str = Depends(get_api_key)) -> Dict:
@@ -999,6 +1008,89 @@ async def aggregate(
 
     except Exception as e:
         logger.error("aggregate_endpoint_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/get_context_rag")
+async def get_context_rag(
+    query: Optional[str] = None,
+    client: Dict = Depends(get_current_client)
+) -> Dict[str, Any]:
+    """
+    RAG endpoint for chatbot queries.
+    
+    Phase 1: Returns all DFA subsidies raw_text (ignores query)
+    Phase 2 (future): Will add embedding-based semantic search
+    
+    Requires: X-API-Key header
+    
+    Query params:
+        - query: User question (currently ignored)
+    
+    Returns:
+        {
+            "query": str,
+            "context": str,
+            "source": str,
+            "metadata": dict
+        }
+    """
+    try:
+        company_id = client["company_id"]
+        
+        logger.info("get_context_rag_request",
+            company_id=company_id,
+            query=query
+        )
+        
+        # Query web_context_units for latest DFA subsidies
+        result = supabase_client.client.table("web_context_units")\
+            .select("raw_text, title, updated_at, source_id, source_type, category")\
+            .eq("company_id", company_id)\
+            .eq("source_type", "dfa_subsidies")\
+            .eq("is_latest", True)\
+            .order("updated_at", desc=True)\
+            .limit(1)\
+            .execute()
+        
+        if not result.data or len(result.data) == 0:
+            logger.warn("no_context_found",
+                company_id=company_id,
+                source_type="dfa_subsidies"
+            )
+            return {
+                "query": query,
+                "context": "",
+                "source": "dfa_subsidies",
+                "metadata": {
+                    "found": False,
+                    "message": "No se encontraron datos de subvenciones DFA"
+                }
+            }
+        
+        context_unit = result.data[0]
+        
+        logger.info("context_retrieved",
+            company_id=company_id,
+            title=context_unit.get("title"),
+            text_length=len(context_unit.get("raw_text", ""))
+        )
+        
+        return {
+            "query": query,
+            "context": context_unit.get("raw_text", ""),
+            "source": context_unit.get("source_type", "dfa_subsidies"),
+            "metadata": {
+                "found": True,
+                "title": context_unit.get("title"),
+                "updated_at": context_unit.get("updated_at"),
+                "source_id": str(context_unit.get("source_id")),
+                "category": context_unit.get("category")
+            }
+        }
+    
+    except Exception as e:
+        logger.error("get_context_rag_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
