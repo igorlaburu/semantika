@@ -1021,10 +1021,15 @@ async def aggregate(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/get_context_rag")
+class ContextRagRequest(BaseModel):
+    """Request model for RAG context retrieval."""
+    query: Optional[str] = None
+    api_key: Optional[str] = None
+
+
+@app.post("/get_context_rag")
 async def get_context_rag(
-    query: Optional[str] = None,
-    api_key: Optional[str] = None,
+    request: ContextRagRequest,
     client: Optional[Dict] = Depends(get_current_client_optional)
 ) -> Dict[str, Any]:
     """
@@ -1047,11 +1052,11 @@ async def get_context_rag(
             "metadata": dict
         }
     """
-    # Try header auth first, then query param
-    if not client and api_key:
-        client = await supabase_client.get_client_by_api_key(api_key)
+    # Try header auth first, then body param
+    if not client and request.api_key:
+        client = await supabase_client.get_client_by_api_key(request.api_key)
         if not client:
-            logger.warn("invalid_api_key_query_param", api_key_prefix=api_key[:10])
+            logger.warn("invalid_api_key_body_param", api_key_prefix=request.api_key[:10])
             raise HTTPException(status_code=403, detail="Invalid API Key")
     
     if not client:
@@ -1062,7 +1067,7 @@ async def get_context_rag(
         
         logger.info("get_context_rag_request",
             company_id=company_id,
-            query=query
+            query=request.query
         )
         
         # Query web_context_units for latest DFA subsidies
@@ -1081,7 +1086,7 @@ async def get_context_rag(
                 source_type="dfa_subsidies"
             )
             return {
-                "query": query,
+                "query": request.query,
                 "context": "",
                 "source": "dfa_subsidies",
                 "metadata": {
@@ -1099,7 +1104,7 @@ async def get_context_rag(
         )
         
         return {
-            "query": query,
+            "query": request.query,
             "context": context_unit.get("raw_text", ""),
             "source": context_unit.get("source_type", "dfa_subsidies"),
             "metadata": {
