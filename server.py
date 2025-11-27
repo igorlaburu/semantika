@@ -1047,17 +1047,17 @@ async def get_context_rag(
             "metadata": dict
         }
     """
-    try:
-        # Try header auth first, then query param
-        if not client and api_key:
-            client = await supabase_client.get_client_by_api_key(api_key)
-            if not client:
-                logger.warn("invalid_api_key_query_param", api_key_prefix=api_key[:10])
-                raise HTTPException(status_code=403, detail="Invalid API Key")
-        
+    # Try header auth first, then query param
+    if not client and api_key:
+        client = await supabase_client.get_client_by_api_key(api_key)
         if not client:
-            raise HTTPException(status_code=401, detail="Missing API Key")
-        
+            logger.warn("invalid_api_key_query_param", api_key_prefix=api_key[:10])
+            raise HTTPException(status_code=403, detail="Invalid API Key")
+    
+    if not client:
+        raise HTTPException(status_code=401, detail="Missing API Key")
+    
+    try:
         company_id = client["company_id"]
         
         logger.info("get_context_rag_request",
