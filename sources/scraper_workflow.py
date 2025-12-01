@@ -344,6 +344,39 @@ async def parse_multi_noticia(state: ScraperState, news_blocks, soup: BeautifulS
             if len(block_text) < 50:  # Skip very short blocks
                 continue
             
+            # Extract date from this block
+            from utils.date_extractor import extract_from_css_selectors, extract_date_from_text
+            block_html = str(block)
+            block_soup = BeautifulSoup(block_html, 'html.parser')
+            
+            # Try CSS selectors first (time tags, .date classes)
+            dates_found = extract_from_css_selectors(block_soup)
+            published_at = None
+            date_source = None
+            date_confidence = None
+            
+            if dates_found:
+                # Take first (most reliable) date found
+                published_at, date_source, date_confidence = dates_found[0]
+                logger.debug("multi_noticia_date_from_css",
+                    url=url,
+                    block_index=i,
+                    date=published_at.isoformat(),
+                    source=date_source
+                )
+            else:
+                # Fallback: try to extract from text
+                extracted_date = extract_date_from_text(block_text)
+                if extracted_date:
+                    published_at = extracted_date
+                    date_source = "text_pattern"
+                    date_confidence = 0.70
+                    logger.debug("multi_noticia_date_from_text",
+                        url=url,
+                        block_index=i,
+                        date=published_at.isoformat()
+                    )
+            
             from utils.unified_content_enricher import enrich_content
             
             result = await enrich_content(
@@ -362,7 +395,10 @@ async def parse_multi_noticia(state: ScraperState, news_blocks, soup: BeautifulS
                     "content": block_text[:4000],
                     "tags": result.get("tags", []),
                     "category": result.get("category", "general"),
-                    "atomic_statements": result.get("atomic_statements", [])
+                    "atomic_statements": result.get("atomic_statements", []),
+                    "published_at": published_at.isoformat() if published_at else None,
+                    "date_source": date_source,
+                    "date_confidence": date_confidence
                 })
                 
                 logger.debug("news_block_parsed",
@@ -370,7 +406,8 @@ async def parse_multi_noticia(state: ScraperState, news_blocks, soup: BeautifulS
                     position=len(content_items),
                     title=title[:50],
                     category=result.get("category"),
-                    statements_count=len(result.get("atomic_statements", []))
+                    statements_count=len(result.get("atomic_statements", [])),
+                    published_at=published_at.isoformat() if published_at else "unknown"
                 )
             else:
                 logger.debug("news_block_skipped_no_content",
@@ -922,9 +959,9 @@ async def save_url_content(state: ScraperState) -> ScraperState:
                 "content_hash": content_hash,
                 "simhash": simhash,
                 "embedding": embedding,
-                "published_at": state.get("published_at"),
-                "date_source": state.get("date_source"),
-                "date_confidence": state.get("date_confidence"),
+                "published_at": item.get("published_at") or state.get("published_at"),
+                "date_source": item.get("date_source") or state.get("date_source"),
+                "date_confidence": item.get("date_confidence") or state.get("date_confidence"),
                 "status": "active",
                 "created_at": datetime.utcnow().isoformat(),
                 "updated_at": datetime.utcnow().isoformat()
@@ -997,7 +1034,7 @@ async def ingest_to_context(state: ScraperState) -> ScraperState:
                     "category": item.get("category"),
                     "url": url,
                     "scraped_at": datetime.utcnow().isoformat(),
-                    "published_at": state.get("published_at")
+                    "published_at": item.get("published_at") or state.get("published_at")
                 }
             )
             

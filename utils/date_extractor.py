@@ -317,7 +317,12 @@ async def extract_from_llm(html: str, title: str) -> List[Tuple[datetime, str, f
         # Build prompt with HTML preview
         html_preview = html[:2000]
         
-        prompt = f"""Extract the publication date from this HTML content.
+        from langchain_core.prompts import ChatPromptTemplate
+        from langchain_core.output_parsers import JsonOutputParser
+        
+        llm_prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are a date extraction system. Extract publication dates from HTML."),
+            ("user", """Extract the publication date from this HTML content.
 
 Title: {title}
 
@@ -326,21 +331,14 @@ HTML preview:
 
 Look for publication date indicators like "Publicado", "Published", date strings, etc.
 
-Respond with JSON:
-{{"date": "YYYY-MM-DD", "confidence": "high|medium|low", "source": "where you found it"}}
+Respond with JSON format (use quotes for keys and values):
+{{{{date: "YYYY-MM-DD", confidence: "high|medium|low", source: "where you found it"}}}}
 
-If no date found, respond: {{"date": null}}"""
-
-        from langchain_core.prompts import ChatPromptTemplate
-        from langchain_core.output_parsers import JsonOutputParser
-        
-        llm_prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are a date extraction system. Extract publication dates from HTML."),
-            ("user", prompt)
+If no date found, respond: {{{{date: null}}}}""")
         ])
         
         chain = llm_prompt | llm_client.llm_fast | JsonOutputParser()
-        result = await chain.ainvoke({})
+        result = await chain.ainvoke({"title": title, "html_preview": html_preview})
         
         if result.get('date'):
             dt = parse_date_string(result['date'])
