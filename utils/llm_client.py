@@ -160,32 +160,35 @@ Respond in JSON:
 
         # 6. Analyze Atomic Chain (title + summary + tags + atomic facts + category)
         analyze_atomic_prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are a news content analyst specializing in extracting newsworthy facts from web pages."),
-            ("user", """Analyze this web page content and extract ONLY newsworthy, time-sensitive information.
+            ("system", "You are a news content analyst specializing in extracting rich, structured facts from content."),
+            ("user", """Analyze this content and extract ALL relevant information as structured atomic facts.
 
-FOCUS ON:
-- Recent events, news, announcements
-- Current alerts, warnings, or updates
-- Specific dates, deadlines, or scheduled events
-- Changes in status or new developments
+EXTRACTION GUIDELINES:
+- Extract EVERY piece of factual information (who, what, when, where, why, how)
+- Include: events, announcements, data, quotes, partnerships, products, locations, dates, numbers, names
+- Be comprehensive: aim for 10-20+ facts for substantial content
+- Each fact should be atomic (one fact per statement)
+- Include context facts that help understand the main story
 
 IGNORE:
 - Generic institutional descriptions (e.g., "X is an organization that...")
 - Static navigation menus, headers, footers
-- General background information
-- Permanent features or services descriptions
 
 IF the page contains NO newsworthy content (only generic/static information), respond with:
 {{"title": "Sin contenido noticioso", "summary": "La página no contiene información novedosa o de actualidad", "tags": [], "atomic_facts": [], "category": "general"}}
 
-IF there IS newsworthy content, extract:
-1. A clear, specific title focused on the NEWS/EVENT
-2. A summary (2-3 sentences) of what happened, when, and where
-3. 3-5 relevant tags
-4. Atomic facts: ONLY facts about specific events/news, not generic descriptions
-5. Classify into ONE category from this list:
+IF there IS content to extract, provide:
+1. A clear, specific title
+2. A rich summary (3-4 sentences) covering key points
+3. 5-10 relevant tags (including entities, topics, locations)
+4. Atomic facts: Extract ALL factual statements, each structured as:
+   - order: sequential number (1, 2, 3...)
+   - type: "fact" (objective information), "quote" (direct quote), or "context" (background info)
+   - speaker: person/entity speaking (for quotes) or null for facts
+   - text: the atomic fact in Spanish
+5. Category (choose ONE most relevant):
    - política: Government, legislation, councils, elections, institutions
-   - economía: Business, employment, finance, commerce, industry
+   - economía: Business, employment, finance, commerce, industry, companies
    - sociedad: Social services, education, housing, citizenship
    - cultura: Cultural events, art, heritage, festivals, museums
    - deportes: Sports competitions, teams, facilities
@@ -199,16 +202,16 @@ IF there IS newsworthy content, extract:
    - general: Miscellaneous, not clearly classifiable
 
 CRITICAL:
-- Respond in Spanish (español). ALL fields MUST be in Spanish.
-- Be strict: only extract facts about actual news/events/alerts
-- If uncertain whether content is newsworthy, err on the side of marking it as "Sin contenido noticioso"
-- Choose the MOST relevant category. If unclear, use "general".
+- Respond in Spanish. ALL text fields MUST be in Spanish.
+- Extract 10-20+ facts for substantial content (don't be sparse!)
+- Each fact should be complete and self-contained
+- Maintain chronological/logical order in numbering
 
 Text:
 {text}
 
 Respond in JSON:
-{{"title": "...", "summary": "...", "tags": [...], "atomic_facts": ["fact 1", "fact 2", ...], "category": "política|economía|sociedad|cultura|deportes|tecnología|medio_ambiente|infraestructuras|seguridad|salud|turismo|internacional|general"}}""")
+{{"title": "...", "summary": "...", "tags": [...], "atomic_facts": [{{"order": 1, "type": "fact", "speaker": null, "text": "..."}}, {{"order": 2, "type": "quote", "speaker": "Name", "text": "..."}}], "category": "economía"}}""")
         ])
 
         self.analyze_atomic_chain = RunnableSequence(

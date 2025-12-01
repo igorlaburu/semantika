@@ -200,17 +200,43 @@ async def parse_article(state: ScraperState, soup: BeautifulSoup):
     semantic_content = normalize_html(html)
     
     # Detect if this is a multi-noticia page (multiple news on same URL)
-    # Look for common news containers
+    # Look for common news containers with stricter heuristics
     news_blocks = soup.find_all(['article', 'div'], class_=lambda c: c and any(
         keyword in str(c).lower() for keyword in ['noticia', 'news', 'post', 'item', 'entry']
     ))
     
-    # If we find multiple news blocks, parse each separately
-    if len(news_blocks) > 1:
-        logger.info("multi_noticia_detected", url=url, blocks_found=len(news_blocks))
-        await parse_multi_noticia(state, news_blocks, soup)
+    # Filter blocks: Must have minimum content and heading
+    valid_blocks = []
+    for block in news_blocks:
+        block_text = block.get_text(separator=' ', strip=True)
+        has_heading = block.find(['h1', 'h2', 'h3', 'h4']) is not None
+        has_link = block.find('a', href=True) is not None
+        
+        # Valid multi-noticia block must:
+        # - Have 50-2000 chars (not too short, not full article)
+        # - Have a heading tag
+        # - Have a link (typical for index pages)
+        if 50 <= len(block_text) <= 2000 and has_heading and has_link:
+            valid_blocks.append(block)
+    
+    # Only treat as multi-noticia if we have 3+ valid blocks
+    # (2 blocks could be article + sidebar, need 3+ to be confident it's an index)
+    if len(valid_blocks) >= 3:
+        logger.info("multi_noticia_detected", 
+            url=url, 
+            blocks_found=len(news_blocks),
+            valid_blocks=len(valid_blocks)
+        )
+        await parse_multi_noticia(state, valid_blocks, soup)
     else:
-        # Single article
+        # Single article (or false positive multi-noticia)
+        if len(news_blocks) > 1:
+            logger.debug("multi_noticia_rejected_false_positive",
+                url=url,
+                blocks_found=len(news_blocks),
+                valid_blocks=len(valid_blocks),
+                reason="Not enough valid blocks or blocks too large (likely single article)"
+            )
         await parse_single_article(state, page_title, semantic_content)
 
 
