@@ -196,8 +196,16 @@ async def parse_article(state: ScraperState, soup: BeautifulSoup):
     title_tag = soup.find('title')
     page_title = title_tag.get_text(strip=True) if title_tag else "Untitled"
     
-    # Extract main content
-    semantic_content = normalize_html(html)
+    # Extract main content (for hashing/change detection)
+    semantic_content_normalized = normalize_html(html)
+    
+    # Extract full text for LLM (less aggressive cleanup)
+    # Remove only scripts, styles, nav, header, footer
+    soup_copy = BeautifulSoup(html, 'html.parser')
+    for tag in soup_copy(['script', 'style', 'nav', 'header', 'footer', 'aside']):
+        tag.decompose()
+    full_text_for_llm = soup_copy.get_text(separator=' ', strip=True)
+    full_text_for_llm = ' '.join(full_text_for_llm.split())  # Normalize whitespace
     
     # Detect if this is a multi-noticia page (multiple news on same URL)
     # Look for common news containers with stricter heuristics
@@ -237,27 +245,38 @@ async def parse_article(state: ScraperState, soup: BeautifulSoup):
                 valid_blocks=len(valid_blocks),
                 reason="Not enough valid blocks or blocks too large (likely single article)"
             )
-        await parse_single_article(state, page_title, semantic_content)
+        await parse_single_article(state, page_title, semantic_content_normalized, full_text_for_llm)
 
 
-async def parse_single_article(state: ScraperState, page_title: str, semantic_content: str):
-    """Parse single article with unified content enricher."""
+async def parse_single_article(state: ScraperState, page_title: str, semantic_content_normalized: str, full_text_for_llm: str = None):
+    """Parse single article with unified content enricher.
+    
+    Args:
+        state: Workflow state
+        page_title: Page title from HTML
+        semantic_content_normalized: Normalized content for hashing (may be short)
+        full_text_for_llm: Full text for LLM extraction (less aggressive cleanup)
+    """
     url = state["url"]
     company_id = state["company_id"]
     
     from utils.unified_content_enricher import enrich_content
     
+    # Use full text for LLM if available, otherwise fall back to normalized
+    text_for_llm = full_text_for_llm if full_text_for_llm else semantic_content_normalized
+    
     # Pre-fill page title if available (fallback for LLM)
     pre_filled = {"title": page_title} if page_title and page_title.strip() else {}
     
     result = await enrich_content(
-        raw_text=semantic_content[:8000],
+        raw_text=text_for_llm[:8000],
         source_type="scraping",
         company_id=company_id,
         pre_filled=pre_filled
     )
     
     title = result.get("title", "Sin título")
+    atomic_statements = result.get("atomic_statements", [])
     
     # Check if LLM detected no newsworthy content
     NO_CONTENT_MARKERS = [
@@ -268,11 +287,17 @@ async def parse_single_article(state: ScraperState, page_title: str, semantic_co
         "contenido no relevante"
     ]
     
-    if title.lower() in NO_CONTENT_MARKERS or len(semantic_content.strip()) < 100:
+    # Skip only if:
+    # 1. Title is a "no content" marker, OR
+    # 2. Content is very short (<100 chars) AND LLM extracted no statements
+    # This allows pages with short normalized content but valid LLM extraction
+    if title.lower() in NO_CONTENT_MARKERS or (len(semantic_content_normalized.strip()) < 100 and len(atomic_statements) == 0):
         logger.info("article_skipped_no_content",
             url=url,
             title=title,
-            content_length=len(semantic_content),
+            normalized_content_length=len(semantic_content_normalized),
+            full_text_length=len(text_for_llm),
+            statements_extracted=len(atomic_statements),
             enrichment_model=result.get("enrichment_model")
         )
         state["should_process"] = False
@@ -288,7 +313,7 @@ async def parse_single_article(state: ScraperState, page_title: str, semantic_co
         "position": 1,
         "title": title,
         "summary": result.get("summary", ""),
-        "content": semantic_content[:8000],
+        "content": text_for_llm[:8000],  # Use full text, not normalized
         "tags": result.get("tags", []),
         "category": result.get("category", "general"),
         "atomic_statements": result.get("atomic_statements", [])
