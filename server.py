@@ -2765,12 +2765,12 @@ async def list_context_units(
             raise HTTPException(status_code=400, detail="Limit must be between 1 and 100")
         supabase = get_supabase_client()
 
-        # Build query - select all fields plus published_at from source_metadata
+        # Build query
         query = supabase.client.table("press_context_units")\
-            .select("*, published_at:source_metadata->>published_at", count="exact")\
+            .select("*", count="exact")\
             .eq("company_id", company_id)
 
-        # Time period filter (use published_at if available, else created_at)
+        # Time period filter
         if timePeriod != "all":
             now = datetime.utcnow()
             if timePeriod == "24h":
@@ -2782,7 +2782,6 @@ async def list_context_units(
             else:
                 raise HTTPException(status_code=400, detail="Invalid timePeriod. Use: 24h, week, month, all")
 
-            # Filter by created_at since published_at may be null
             query = query.gte("created_at", cutoff.isoformat())
 
         # Source filter
@@ -2802,23 +2801,15 @@ async def list_context_units(
             query = query.eq("is_starred", True)
 
         # Order and paginate
-        # Order by created_at (published_at ordering not reliable in Supabase select)
         result = query.order("created_at", desc=True)\
             .range(offset, offset + limit - 1)\
             .execute()
 
         total = result.count if hasattr(result, 'count') else 0
         items = result.data or []
-        
-        # Sort in Python by published_at (with fallback to created_at)
-        items_sorted = sorted(
-            items,
-            key=lambda x: x.get('published_at') or x.get('created_at') or '2999-12-31',
-            reverse=True
-        )
 
         return {
-            "items": items_sorted,
+            "items": items,
             "total": total,
             "limit": limit,
             "offset": offset,
