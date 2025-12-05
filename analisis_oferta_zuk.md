@@ -1,4 +1,4 @@
-# Análisis de Oferta - Txus Díez (ZUK.EUS)
+# Propuesta Comercial - Txus Díez (ZUK.EUS)
 
 **Cliente**: Txus Díez - Periodista independiente  
 **Web**: [zuk.eus](https://www.zuk.eus)  
@@ -7,407 +7,367 @@
 
 ---
 
-## 1. PERFIL DEL CLIENTE
+## RESUMEN EJECUTIVO
 
-### Situación actual
-- Publica ~10 artículos/día en WordPress
-- Ya usa scripts propios + ChatGPT para automatización parcial
-- Tiempo invertido: ~2.5h/día (10min agenda + 2h redacción/SEO/fotos)
-- Pain points principales:
-  - Metadatos SEO (Yoast) manual
-  - Enlaces internos/externos manual (crítico para SEO)
-  - Agenda limitada a Vitoria (no pueblos)
-  - Procesamiento de fuentes institucionales lento
+**Pain point**: Txus dedica 2.5h/día a tareas manuales (SEO, enlaces, agenda) limitando su capacidad de producción.
 
-### Nivel técnico
-- Alto: Ya tiene scripts, usa APIs, conoce ChatGPT
-- Busca solución que supere sus limitaciones técnicas
-- Valora inmediatez y automatización completa
+**Solución**: Automatización completa de redacción, publicación WordPress, enlaces y agenda de eventos.
+
+**ROI**: Ahorra 45h/mes (valoradas en 1,800€) invirtiendo 250-300€/mes → **Beneficio neto: +1,500€/mes**
 
 ---
 
-## 2. REQUISITOS SOLICITADOS
+## 1. NECESIDADES DEL CLIENTE
 
-### A) Fuentes de información
+### Prioritarias (imprescindibles)
+✅ WordPress automático con Yoast SEO (metadatos, slug, etiquetas)  
+✅ Upload automático de imágenes con metadatos  
+✅ Enlaces internos/externos automáticos (crítico para SEO)  
+✅ Scraping de fuentes institucionales (Juntas, Parlamento)  
 
-#### Preguntas parlamentarias
-- **Origen**: Webs de Juntas Generales y Parlamento Vasco
-- **Filtro**: Palabras clave específicas + "Álava"
-- **Frecuencia**: Diaria
-- **Complejidad**: ⭐⭐ Media
+### Importantes (alto valor)
+✅ Agenda de eventos municipales (60 eventos/día)  
+✅ Clasificación por cuadrillas  
+✅ Formato para WhatsApp/Telegram  
 
-#### Plenos de control
-- **Origen**: Parlamento Vasco
-- **Frecuencia**: Cada 2 viernes
-- **Formato**: Transcripciones inmediatas
-- **Filtro**: Palabras clave + mención a Álava
-- **Complejidad**: ⭐⭐ Media
-
-#### Streams en directo (opcional futuro)
-- **Origen**: Juntas Generales, Parlamento
-- **Objetivo**: Mayor inmediatez que mediateca
-- **Complejidad**: ⭐⭐⭐⭐⭐ Muy alta
-- **Nota**: Requiere detección automática + transcripción real-time
+### Opcionales (no prioritarias ahora)
+⏸️ Transcripción de streams en directo  
+⏸️ Monitorización de mediateca  
+⏸️ Audio transcription Whisper  
 
 ---
 
-### B) Redacción y publicación
+## 2. COSTES REALES
 
-#### WordPress automático con Yoast SEO
-- Palabras clave
-- Meta descripción
-- Slug amigable ✅ (ya lo generamos)
-- Etiquetas
-- Título alternativo
-- Metadatos de imagen
-- **Complejidad**: ⭐⭐ Media
+### Costes operativos mensuales (300 artículos + agenda)
 
-#### Enlaces automáticos
-- **Externos**: A instituciones/asociaciones mencionadas
-- **Internos**: A noticias anteriores propias (contexto)
-- **Importancia**: CRÍTICA para SEO
-- **Complejidad**: ⭐⭐⭐⭐ Alta
+| Concepto | Cálculo | Coste |
+|----------|---------|-------|
+| **LLM artículos** | 300 × 2.8K tokens × $0.003/$0.015 | 9€ |
+| **LLM agenda** | 2,100 eventos × 0.5K tokens | 3€ |
+| **LLM enlaces** | 300 × 1K tokens | 1€ |
+| **Embeddings** | 2,400 × 200 tokens | 0.10€ |
+| **VPS/Infra** | Prorrateado | 10€ |
+| **TOTAL COSTES APIs** | - | **~23€/mes** |
 
-#### Procesamiento de imágenes
-- Upload automático a WordPress
-- Metadatos completos
-- **Complejidad**: ⭐ Baja
+### Costes de tu tiempo (soporte mensual)
 
----
+| Actividad | Horas/mes | Coste (50€/h) |
+|-----------|-----------|---------------|
+| Emails/dudas cliente | 1h | 50€ |
+| Ajustes/bugs menores | 2h | 100€ |
+| Reunión mensual | 0.5h | 25€ |
+| **TOTAL TIEMPO** | **3.5h** | **175€/mes** |
 
-### C) Agenda de eventos
-
-#### Situación actual (script propio)
-- Fuente: Kulturklik (solo Vitoria)
-- Tiempo: procesamiento + generación = 10 min/día
-- Output: Web + WhatsApp + Telegram
-- **Problema**: No cubre pueblos
-
-#### Solicitud nueva
-- **Volumen**: ~60 eventos/día
-- **Fuentes**: 
-  - Canales WhatsApp de ayuntamientos
-  - Webs municipales (formatos heterogéneos)
-- **Formato deseado**: Ordenado por cuadrillas
-- **Output**: Texto para WhatsApp/Telegram (~10 titulares con URL)
-- **Complejidad**: ⭐⭐⭐⭐ Alta
-
----
-
-## 3. ANÁLISIS DE COSTES
-
-### Costes de desarrollo (una vez)
-
-#### Fase 1: Quick Wins (13 horas)
-| Tarea | Horas | Coste |
-|-------|-------|-------|
-| WordPress + Yoast SEO metadata | 3h | 300€ |
-| Upload automático de imágenes | 2h | 200€ |
-| Scraping preguntas Juntas | 2h | 200€ |
-| Scraping preguntas Parlamento | 2h | 200€ |
-| Scraping plenos de control | 2h | 200€ |
-| Testing + ajustes | 2h | 200€ |
-| **TOTAL FASE 1** | **13h** | **1,300€** |
-
-#### Fase 2: Funcionalidades Complejas (22 horas)
-| Tarea | Horas | Coste |
-|-------|-------|-------|
-| Sistema enlaces automáticos (entidades) | 4h | 400€ |
-| Búsqueda histórico WordPress | 2h | 200€ |
-| Inserción enlaces HTML | 3h | 300€ |
-| Scraping webs municipales (5 pilotos) | 6h | 600€ |
-| Clasificador por cuadrillas (LLM) | 2h | 200€ |
-| Generador WhatsApp/Telegram | 2h | 200€ |
-| Testing + ajustes | 3h | 300€ |
-| **TOTAL FASE 2** | **22h** | **2,200€** |
-
-#### Fase 3: Streams (opcional - 16 horas)
-| Tarea | Horas | Coste |
-|-------|-------|-------|
-| Detección automática streams | 4h | 400€ |
-| Transcripción Whisper real-time | 6h | 600€ |
-| Extractor puntos tratados (LLM) | 3h | 300€ |
-| Testing + infraestructura | 3h | 300€ |
-| **TOTAL FASE 3** | **16h** | **1,600€** |
-
----
-
-### Costes operativos mensuales
-
-#### Volumen estimado
-- **70 eventos/día** → 2,100/mes (captura + procesamiento)
-- **10 artículos publicados/día** → 300/mes
-- **Context units creados/mes**: ~2,400
-- **Análisis LLM**: ~5,000 llamadas/mes
-
-#### Desglose infraestructura
-| Concepto | Uso mensual | Coste unitario | Coste mensual |
-|----------|-------------|----------------|---------------|
-| **LLM (Sonnet 3.5)** | 5,000 calls × 2K tokens | $0.015/1K in + $0.075/1K out | ~550€ |
-| **LLM (GPT-4o-mini)** | 3,000 calls × 1K tokens | $0.00015/1K in + $0.0006/1K out | ~3€ |
-| **Embeddings** | 2,400 units × 200 tokens | $0.02/1M tokens | ~0.10€ |
-| **VPS Docker** | Prorrateado | - | ~15€ |
-| **Contingencia** | 10% buffer | - | ~57€ |
-| **TOTAL OPERATIVO** | - | - | **~625€/mes** |
-
-**Margen objetivo**: 90%  
-**Precio mínimo teórico**: ~1,187€/mes
-
----
-
-## 4. PROPUESTA COMERCIAL
-
-### Implantación (one-time)
-
-| Nivel | Incluye | Precio |
-|-------|---------|--------|
-| **Starter** | Fase 1 (WordPress + Scraping básico) | 1,500€ |
-| **Pro** ⭐ | Fase 1 + 2 (Enlaces + Agenda completa) | 3,800€ |
-| **Enterprise** | Fase 1 + 2 + 3 (+ Streams) | 5,800€ |
-
-**Recomendación**: **Pro (3,800€)** - Cubre todo lo solicitado excepto streams
-
----
-
-### Suscripción mensual
-
-#### Modelo de créditos
-- **Automatización compleja**: Artículo completo (scraping + LLM + publicación) → **1 crédito**
-- **Automatización simple**: Edición/clasificación/comando → **0.2 créditos**
-
-#### Volumen Txus
-- 300 artículos/mes → **300 créditos complejos**
-- 2,100 eventos agenda/mes → **420 créditos simples**
-- **Total equivalente**: ~320 créditos complejos
-
-#### Planes estándar
-
-| Plan | Créditos complejos | Créditos simples | Precio | Margen |
-|------|-------------------|------------------|--------|--------|
-| **Essential** | 150/mes | 750/mes | 600€/mes | ~80% |
-| **Professional** | 350/mes | 2,500/mes | 1,200€/mes | ~92% |
-
----
-
-## 5. PROPUESTA ESPECIAL PILOTO
-
-### Contexto
-- Cliente ideal para caso de éxito (periodista independiente, nicho local)
-- Necesidades alineadas 100% con roadmap de producto
-- Feedback valioso para refinar features
-- Potencial upsell a otros periodistas (Gipuzkoa, Bizkaia)
-
-### Opción A: Estándar
-
+### Coste total mensual real
 ```
-💰 Implantación: 3,800€ (Fase 1 + 2)
-📅 Suscripción: 650€/mes (6 meses) → 1,200€/mes
+APIs:      23€
+Tu tiempo: 175€
+─────────────────
+TOTAL:     198€/mes
+```
 
-Incluye:
-✅ WordPress automático con Yoast SEO
-✅ Scraping preguntas parlamentarias + plenos
+---
+
+## 3. COSTES DE IMPLEMENTACIÓN
+
+### Funcionalidades fáciles (incluidas en mensualidad)
+| Tarea | Horas | Coste |
+|-------|-------|-------|
+| WordPress + Yoast SEO | 3h | 150€ |
+| Upload imágenes + metadatos | 2h | 100€ |
+| Scraping Juntas (preguntas) | 2h | 100€ |
+| Scraping Parlamento (preguntas) | 2h | 100€ |
+| Scraping plenos de control | 2h | 100€ |
+| Testing + ajustes | 2h | 100€ |
+| **TOTAL FÁCIL** | **13h** | **650€** |
+
+### Funcionalidades complejas (implementación aparte)
+| Tarea | Horas | Coste |
+|-------|-------|-------|
+| Sistema enlaces automáticos | 4h | 200€ |
+| Búsqueda histórico WordPress | 2h | 100€ |
+| Inserción enlaces HTML | 3h | 150€ |
+| **TOTAL ENLACES** | **9h** | **450€** |
+| | | |
+| Scraping webs municipales (5 pilotos) | 6h | 300€ |
+| Clasificador cuadrillas (LLM) | 2h | 100€ |
+| Generador WhatsApp/Telegram | 2h | 100€ |
+| Testing agenda | 2h | 100€ |
+| **TOTAL AGENDA** | **12h** | **600€** |
+
+---
+
+## 4. PROPUESTAS COMERCIALES
+
+### **PLAN 1: ESENCIAL** (mínimo solicitado)
+```
+✅ WordPress automático + Yoast SEO
+✅ Upload imágenes con metadatos  
+✅ Scraping institucional (Juntas + Parlamento)
+✅ 300 artículos/mes procesados
+
+❌ No incluye: Enlaces automáticos
+❌ No incluye: Agenda municipal
+❌ No incluye: WhatsApp/Telegram
+
+💰 Precio: 250€/mes
+📅 Compromiso: 6 meses mínimo
+🎁 Setup incluido (valor 650€)
+
+Inversión primer año: 250€ × 12 = 3,000€
+```
+
+**Margen**:
+- Coste operativo: 198€/mes
+- Beneficio: 52€/mes (26%)
+- Primer año: 52€ × 6 = 312€ (amortiza setup en 2 años)
+
+---
+
+### **PLAN 2: PROFESIONAL** ⭐ (recomendado)
+```
+✅ Todo lo de Plan Esencial
 ✅ Enlaces internos/externos automáticos
-✅ Agenda consolidada por cuadrillas (60 eventos/día)
+✅ Agenda 60 eventos/día (5 ayuntamientos)
+✅ Clasificación por cuadrillas
 ✅ Formato WhatsApp/Telegram
-✅ 350 artículos/mes + 2,500 eventos/mes
-✅ Soporte prioritario
 
-🎯 Inversión primer año: 14,900€
+💰 Precio: 300€/mes
+📅 Compromiso: 6 meses mínimo
+🎁 Setup básico incluido (valor 650€)
+💵 Implementación enlaces: 450€ (pago único)
+💵 Implementación agenda: 600€ (pago único)
+
+Inversión primer año:
+- Setup: 450€ + 600€ = 1,050€
+- Mensualidad: 300€ × 12 = 3,600€
+- TOTAL: 4,650€
 ```
 
-### Opción B: Piloto (RECOMENDADA) ⭐
+**Margen año 1**:
+- Implementación: 1,050€ - 1,050€ = 0€ (break-even)
+- Operación: (300€ - 198€) × 12 = 1,224€
+- Total año 1: 1,224€
 
+**Margen año 2+**: (300€ - 198€) × 12 = **1,224€/año** (51%)
+
+---
+
+### **PLAN 3: TODO INCLUIDO** (sin setup aparte)
 ```
-💰 Implantación: 3,000€ (descuento 21%)
-📅 Suscripción: 500€/mes (precio fijo 12 meses)
+✅ Todo lo de Plan Profesional
+✅ Agenda completa (20 ayuntamientos)
+✅ Implementación de todo sin coste adicional
 
-Incluye:
-✅ Todo lo de Opción A
-✅ Precio bloqueado 12 meses
-✅ Caso de éxito (testimonial + logo en web)
-✅ Feedback prioritario para roadmap
+💰 Precio: 380€/mes
+📅 Compromiso: 12 meses obligatorio
+🎁 Todo el setup incluido en mensualidad
 
-🎯 Inversión primer año: 9,000€
-
-Condiciones:
-- Testimonial después de 3 meses
-- Reunión mensual feedback (30 min)
-- Logo ZUK.EUS en ekimen.ai
-- Renovación año 2: 800€/mes (descuento 33% vs estándar)
-
-Margen real: ~20% primer año
-Break-even: Inmediato (cubre costes operativos)
+Inversión primer año: 380€ × 12 = 4,560€
 ```
 
----
+**Margen**:
+- Mes 1-6: (380€ - 198€) × 6 = 1,092€ - 1,700€ setup = **-608€** (pérdida)
+- Mes 7-12: (380€ - 198€) × 6 = 1,092€
+- **Total año 1**: 484€ (13%)
+- **Año 2+**: 2,184€/año (48%)
 
-## 6. ANÁLISIS ROI PARA TXUS
-
-### Tiempo ahorrado
-
-**Actual**:
-- 10 min/día → Agenda (ya automatizado parcialmente)
-- 2h/día → Redacción, SEO, metadatos, fotos, enlaces
-
-**Total**: ~2.5h/día = **50h/mes**
-
-**Con Ekimen**:
-- 15 min/día → Revisión final y ajustes
-
-**Ahorro**: ~2h 15min/día = **45h/mes**
-
-### Valoración económica
-
-**Tarifa freelance periodista**: ~40€/h  
-**Ahorro mensual**: 45h × 40€ = **1,800€/mes**
-
-**ROI Opción B**:
-- Inversión mensual: 500€
-- Ahorro tiempo: 1,800€
-- **Beneficio neto: +1,300€/mes**
-
-**Payback implantación**: 3,000€ / 1,300€ = **2.3 meses**
-
-### Beneficios adicionales (no cuantificados)
-
-- **Mejor SEO**: Enlaces automáticos → más tráfico orgánico
-- **Mayor cobertura**: 60 eventos/día vs ~10 actuales (Kulturklik)
-- **Inmediatez**: Plenos/preguntas parlamentarias antes que competencia
-- **Escalabilidad**: Capacidad de cubrir más territorio sin más tiempo
+**Por qué funciona**: Amortizas setup en 10 meses, luego es altamente rentable.
 
 ---
 
-## 7. COMPARATIVA ALTERNATIVAS
+## 5. COMPARATIVA DE PLANES
 
-| Solución | Setup | Mensual | Pros | Contras |
-|----------|-------|---------|------|---------|
-| **Ekimen Opción A** | 3,800€ | 650→1,200€ | Solución completa | Precio alto |
-| **Ekimen Opción B** ⭐ | 3,000€ | 500€ | ROI inmediato | Margen ajustado |
-| **Freelance + ChatGPT** | ~5,000€ | 120€ | Económico | No automatizado, 2h/día manual |
-| **Agencia tradicional** | 8-15k€ | 800-1,500€ | Custom | Lento, caro |
-| **DIY (él mismo)** | 0€ | 20€ | Control total | 2-3h/día trabajo, límite técnico |
-
----
-
-## 8. RIESGOS Y MITIGACIONES
-
-### Riesgos técnicos
-
-| Riesgo | Probabilidad | Impacto | Mitigación |
-|--------|--------------|---------|------------|
-| Scraping webs municipales falla (HTML cambia) | Media | Alto | Alertas automáticas + fix en 24h |
-| LLM genera enlaces incorrectos | Baja | Medio | Revisión manual pre-publicación (opcional) |
-| Detección de entidades imprecisa | Media | Bajo | Mejora continua con feedback |
-| WhatsApp API limitaciones | Baja | Medio | Usar Telegram como backup |
-
-### Riesgos comerciales
-
-| Riesgo | Probabilidad | Impacto | Mitigación |
-|--------|--------------|---------|------------|
-| Cliente cancela tras 6 meses | Media | Alto | Contrato 12 meses con descuento |
-| Costes LLM suben 50% | Baja | Alto | Cláusula revisión precio anual |
-| Cliente pide features fuera scope | Alta | Medio | Roadmap trimestral acordado |
+| | Plan 1: Esencial | Plan 2: Profesional ⭐ | Plan 3: Todo Incluido |
+|---|---|---|---|
+| **Mensualidad** | 250€ | 300€ | 380€ |
+| **Setup aparte** | Incluido (650€) | 1,050€ | Incluido |
+| **Compromiso** | 6 meses | 6 meses | 12 meses |
+| **WordPress + SEO** | ✅ | ✅ | ✅ |
+| **Scraping institucional** | ✅ | ✅ | ✅ |
+| **Enlaces automáticos** | ❌ | ✅ | ✅ |
+| **Agenda municipal** | ❌ | ✅ (5 aytos) | ✅ (20 aytos) |
+| **WhatsApp/Telegram** | ❌ | ✅ | ✅ |
+| **Inversión año 1** | 3,000€ | 4,650€ | 4,560€ |
+| **Tu margen año 1** | 312€ | 1,224€ | 484€ |
+| **Tu margen año 2+** | 624€/año | 1,224€/año | 2,184€/año |
 
 ---
 
-## 9. ROADMAP DE IMPLEMENTACIÓN
+## 6. RECOMENDACIÓN
 
-### Mes 1: Setup + Fase 1
-- **Semana 1**: Configuración WordPress + Yoast SEO
-- **Semana 2**: Scraping preguntas parlamentarias
-- **Semana 3**: Scraping plenos de control
-- **Semana 4**: Testing + ajustes + formación
+### **Para ti**: Plan 2 (Profesional)
 
-### Mes 2: Fase 2 - Agenda
-- **Semana 1**: Identificar webs municipales (5 aytos piloto)
-- **Semana 2**: Scraping + clasificador cuadrillas
-- **Semana 3**: Generador WhatsApp/Telegram
-- **Semana 4**: Testing + ajustes
+**Ventajas**:
+- ✅ Setup se paga aparte (cashflow inmediato: 1,050€)
+- ✅ Margen año 1 positivo (1,224€)
+- ✅ Compromiso solo 6 meses (reduce riesgo)
+- ✅ Si Txus cancela, no pierdes dinero
 
-### Mes 3: Fase 2 - Enlaces
-- **Semana 1**: Sistema detección entidades
-- **Semana 2**: Búsqueda histórico WordPress
-- **Semana 3**: Inserción automática enlaces
-- **Semana 4**: Testing + optimización
-
-### Mes 4-6: Refinamiento
-- Añadir resto de ayuntamientos (escalar de 5 a 20)
-- Optimización LLM prompts
-- Mejoras según feedback Txus
+**Desventajas**:
+- Txus paga más upfront (puede rechazar)
 
 ---
 
-## 10. CRITERIOS DE ÉXITO
+### **Para Txus**: Plan 3 (Todo Incluido)
 
-### KPIs técnicos (3 meses)
+**Ventajas para él**:
+- ✅ Sin sorpresas (todo en mensualidad)
+- ✅ Cashflow mejor (no paga 1,050€ de golpe)
+- ✅ Más barato año 1 (4,560€ vs 4,650€)
 
-- **Uptime sources**: >95%
-- **Artículos publicados/día**: 8-12 (vs 10 actual)
-- **Eventos agenda/día**: 50+ (vs 10 actual)
-- **Tiempo revisión/día**: <20 min (vs 2.5h actual)
-- **Precisión enlaces**: >85% correctos
-
-### KPIs negocio (6 meses)
-
-- **Tráfico web**: +30% (mejor SEO)
-- **Engagement WhatsApp/Telegram**: +50% (mejor agenda)
-- **Tiempo ahorrado**: 40h/mes
-- **Satisfacción cliente**: 8/10
-
-### Hitos entregables
-
-- **Mes 1**: WordPress + scraping institucional operativo
-- **Mes 2**: Agenda 5 ayuntamientos funcionando
-- **Mes 3**: Enlaces automáticos + agenda completa (20 aytos)
-- **Mes 6**: Sistema refinado + caso de éxito documentado
+**Desventajas para ti**:
+- Amortizas setup lentamente (10 meses)
+- Si cancela mes 7, pierdes 608€
 
 ---
 
-## 11. PRÓXIMOS PASOS
+## 7. ESTRATEGIA DE PRESENTACIÓN
 
-1. **Miércoles 10 diciembre**: Enviar propuesta formal PDF
-2. **Semana 16 diciembre**: Reunión + aclaración dudas
-3. **Antes Navidad**: Firma contrato (si acepta)
-4. **Enero 2025**: Inicio desarrollo Fase 1
+### **Ofrecer Plan 2 como principal + Plan 3 como alternativa**
+
+```
+Email propuesta:
+
+"Hola Txus,
+
+He preparado dos opciones según lo que comentamos:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OPCIÓN 1: PROFESIONAL (recomendada)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ WordPress + Yoast SEO automático
+✅ Scraping institucional (Juntas + Parlamento)
+✅ Enlaces internos/externos automáticos
+✅ Agenda 60 eventos/día (clasificada por cuadrillas)
+✅ Formato WhatsApp/Telegram
+✅ 300 artículos/mes procesados
+
+💰 300€/mes (compromiso 6 meses)
+💵 Setup: 1,050€ pago único
+   - Enlaces automáticos: 450€
+   - Agenda municipal: 600€
+
+Inversión año 1: 4,650€
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OPCIÓN 2: TODO INCLUIDO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Todo lo anterior
+✅ Sin coste de setup (incluido en mensualidad)
+✅ Agenda completa (20 ayuntamientos vs 5)
+
+💰 380€/mes (compromiso 12 meses obligatorio)
+
+Inversión año 1: 4,560€ (90€ menos que Opción 1)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ROI para ti:
+- Tiempo ahorrado: 45h/mes = 1,800€/mes
+- Inversión: 300-380€/mes
+- Beneficio neto: +1,450€/mes
+
+Payback: 2-3 meses
+
+¿Cuál te encaja mejor? Puedo empezar en enero.
+
+Saludos,
+Igor"
+```
 
 ---
 
-## 12. NOTAS ADICIONALES
+## 8. ANÁLISIS DE SENSIBILIDAD
 
-### Upsell futuro
+### Si Txus pide descuento o rechaza
 
-- **Streams en directo** (+300€/mes): Cuando esté maduro
-- **Análisis competencia** (+100€/mes): Monitorizar otros medios locales
-- **Newsletter automático** (+50€/mes): Resumen semanal
-- **Redes sociales** (+150€/mes): Auto-publicación Twitter/LinkedIn
+**Opción A: Bajar Plan 2 a 280€/mes**
+```
+Margen: (280€ - 198€) × 12 = 984€/año
+Setup: 1,050€ (cubre implementación)
 
-### Potencial expansión
+Total año 1: 2,034€
+```
 
-Si caso de éxito con Txus:
-- **Periodistas Gipuzkoa**: 5-10 potenciales (Goiena, Noticias de Gipuzkoa...)
-- **Periodistas Bizkaia**: 5-10 potenciales (medios comarcales)
-- **Medios institucionales**: Diputaciones, ayuntamientos grandes
+**Opción B: Ofrecer Plan 1 (Esencial) como entrada**
+```
+250€/mes sin enlaces ni agenda
+Luego upsell enlaces (50€/mes) + agenda (30€/mes)
+= 330€/mes gradual
+```
 
-**Objetivo**: 10 clientes similares = ~60,000€ ARR (10 × 500€ × 12)
+**Opción C: Pricing escalonado**
+```
+Meses 1-3: 250€/mes (solo WordPress + scraping)
+Meses 4-6: 300€/mes (añadir enlaces)
+Meses 7+: 350€/mes (añadir agenda)
+
+Ventaja: Txus prueba sin compromiso total
+Desventaja: Delays en implementación completa
+```
 
 ---
 
-## RECOMENDACIÓN FINAL
+## 9. TÉRMINOS Y CONDICIONES
 
-**Proponer Opción B (Piloto)** por:
+### Incluido en todos los planes
+- ✅ Soporte email (respuesta <24h)
+- ✅ Ajustes menores sin coste
+- ✅ 1 reunión mensual seguimiento (30 min)
+- ✅ Actualizaciones de sistema incluidas
 
-1. ✅ **ROI inmediato** para cliente (1,300€/mes beneficio neto)
-2. ✅ **Caso de éxito** ideal (periodista independiente, nicho local)
-3. ✅ **Feedback valioso** para refinar producto
-4. ✅ **Margen suficiente** (20% primer año, >80% después)
-5. ✅ **Potencial expansión** a otros periodistas locales
-6. ✅ **Break-even inmediato** (cubre costes operativos desde mes 1)
+### NO incluido (cobrar aparte)
+- ❌ Cambios de scope (nuevas features)
+- ❌ Integración con nuevas plataformas
+- ❌ Formación adicional (>2h)
+- ❌ Desarrollo custom fuera de roadmap
 
-**Riesgo**: Bajo (cliente técnico, presupuesto ajustado pero viable)  
-**Oportunidad**: Alta (validación producto + referencias)
+### Condiciones de pago
+- Setup: 50% al firmar, 50% al entregar
+- Mensualidad: Pago adelantado cada mes
+- Forma de pago: Transferencia o Stripe
+
+### Cancelación
+- Aviso: 30 días antes
+- Penalización si <6 meses: 50% mensualidades restantes
+- Plan 3 (12 meses): No cancelable antes de mes 12
+
+---
+
+## 10. PRÓXIMOS PASOS
+
+1. **Hoy 5 dic**: Enviar esta propuesta a Txus por email
+2. **Lunes 9 dic**: Follow-up si no responde
+3. **Miércoles 11 dic**: Llamada para aclarar dudas
+4. **Antes 20 dic**: Cierre y firma contrato
+5. **Enero 2025**: Inicio implementación
+
+---
+
+## RESUMEN EJECUTIVO PARA TI
+
+### Recomendación: **Plan 2 (Profesional) a 300€/mes + 1,050€ setup**
+
+**Por qué**:
+- ✅ Cashflow inmediato (1,050€ en diciembre/enero)
+- ✅ Margen positivo año 1 (1,224€)
+- ✅ Compromiso solo 6 meses (bajo riesgo)
+- ✅ Txus ve valor claro (todo lo importante incluido)
+- ✅ Setup separado = profesionalidad (no parece "barato")
+
+**Tu ganancia**:
+- Año 1: 1,224€ + 1,050€ setup = **2,274€**
+- Año 2: 1,224€
+- Año 3: 1,224€
+
+**Total 3 años: 4,722€** con cliente satisfecho que puede referir.
 
 ---
 
 **Preparado por**: Igor Laburu (gako.ai)  
 **Fecha**: 5 diciembre 2025  
-**Próxima acción**: Enviar propuesta formal 10 diciembre
+**Acción**: Enviar propuesta hoy
