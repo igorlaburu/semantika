@@ -256,7 +256,7 @@ class DiscoveryFlow:
                             "discovered_from": "gnews_llm_search",
                             "discovered_at": datetime.utcnow().isoformat(),
                             "contact_email": analysis.get("contact_email"),
-                            "company_id": "pool",
+                            "company_id": "00000000-0000-0000-0000-000000000999",  # Pool company UUID
                             "is_active": True
                         }
                         
