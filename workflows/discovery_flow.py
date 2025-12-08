@@ -264,16 +264,16 @@ class DiscoveryFlow:
                             .insert(source_data)\
                             .execute()
                         
-                            if result.data:
-                                discovered_sources.append(result.data[0])
-                                all_discovered_sources.append(result.data[0])
-                                logger.info("source_discovered_and_saved",
-                                    config_id=config.get("config_id"),
-                                    url=source_url,
-                                    source_name=source_data["source_name"],
-                                    confidence=confidence,
-                                    quality=analysis.get("estimated_quality")
-                                )
+                        if result.data:
+                            discovered_sources.append(result.data[0])
+                            all_discovered_sources.append(result.data[0])
+                            logger.info("source_discovered_and_saved",
+                                config_id=config.get("config_id"),
+                                url=source_url,
+                                source_name=source_data["source_name"],
+                                confidence=confidence,
+                                quality=analysis.get("estimated_quality")
+                            )
                     
                     except Exception as e:
                         logger.error("headline_discovery_error",
