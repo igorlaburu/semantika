@@ -61,18 +61,26 @@ class DiscoveryConnector:
             logger.error("fetch_error", url=url, error=str(e))
             return None
     
-    async def analyze_press_room(self, url: str, html_content: str) -> Dict[str, Any]:
+    async def analyze_press_room(self, url: str) -> Dict[str, Any]:
         """
         Analyze if URL is a press room and extract metadata.
         
         Args:
-            url: Source URL
-            html_content: HTML content
+            url: Source URL to analyze
             
         Returns:
-            Analysis result with is_press_room, press_room_url, etc.
+            Analysis result with is_press_room, confidence, org_name, etc.
         """
         try:
+            # Fetch page
+            html_content = await self.fetch_page(url)
+            if not html_content:
+                return {
+                    "is_press_room": False,
+                    "confidence": 0.0,
+                    "error": "Failed to fetch page"
+                }
+            
             soup = BeautifulSoup(html_content, "lxml")
             
             # Remove noise
@@ -91,25 +99,22 @@ class DiscoveryConnector:
             press_links = []
             for link in soup.find_all("a", href=True):
                 href = link.get("href", "").lower()
-                text = link.get_text().lower()
+                link_text = link.get_text().lower()
                 
-                if any(keyword in href or keyword in text for keyword in [
+                if any(keyword in href or keyword in link_text for keyword in [
                     "prensa", "press", "sala-prensa", "press-room",
                     "media", "noticias", "news", "comunicados"
                 ]):
                     press_links.append(link.get("href"))
             
-            # Analyze with LLM
+            # Analyze with LLM using groq_fast directly
             prompt = f"""Analiza esta página web y determina:
 
-1. ¿Es una sala de prensa / press room / blog de organización?
+1. ¿Es una sala de prensa / press room / comunicados de organización pública?
 2. ¿Publica noticias o comunicados regularmente?
 3. ¿Cuál es el nombre de la organización?
 4. ¿Tiene un email de contacto visible?
-5. Calidad estimada (0.0-1.0) basada en:
-   - Frecuencia aparente de publicación
-   - Profesionalidad del diseño
-   - Relevancia del contenido
+5. Calidad estimada (0.0-1.0) basada en frecuencia de publicación y profesionalidad
 
 URL: {url}
 Título: {title}
@@ -123,13 +128,38 @@ Responde en JSON:
     "is_press_room": true/false,
     "confidence": 0.0-1.0,
     "org_name": "Nombre organización",
-    "press_room_url": "URL sala prensa si es diferente",
     "contact_email": "email@example.com o null",
     "estimated_quality": 0.0-1.0,
     "notes": "Breve justificación"
 }}"""
 
-            analysis = await self.llm.analyze_atomic(text=prompt)
+            # Call groq_fast directly
+            from utils.llm_registry import get_llm_registry
+            import json
+            
+            registry = get_llm_registry()
+            provider = registry.get('groq_fast')
+            
+            config = {
+                'tracking': {
+                    'organization_id': 'SYSTEM-POOL',
+                    'operation': 'analyze_press_room'
+                }
+            }
+            
+            response = await provider.ainvoke(prompt, config=config)
+            
+            # Clean markdown
+            content = response.content.strip()
+            if content.startswith("```json"):
+                content = content[7:]
+            elif content.startswith("```"):
+                content = content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
+            
+            analysis = json.loads(content)
             
             logger.info("press_room_analyzed",
                 url=url,
@@ -147,100 +177,6 @@ Responde en JSON:
                 "error": str(e)
             }
     
-    async def discover_origin(self, article_url: str) -> Optional[Dict[str, Any]]:
-        """
-        Discover the origin source of an article.
-        
-        Args:
-            article_url: URL of the article
-            
-        Returns:
-            Discovery result with source metadata
-        """
-        try:
-            logger.info("discovering_origin", url=article_url)
-            
-            # Fetch article page
-            content = await self.fetch_page(article_url)
-            if not content:
-                return None
-            
-            # Extract domain
-            domain = self.extract_domain(article_url)
-            if not domain:
-                return None
-            
-            # Try to find press room URL
-            base_url = f"{urlparse(article_url).scheme}://{domain}"
-            
-            # Common press room paths
-            press_paths = [
-                "/sala-prensa",
-                "/prensa",
-                "/press",
-                "/press-room",
-                "/noticias",
-                "/news",
-                "/comunicados",
-                "/blog"
-            ]
-            
-            # Try each path
-            press_room_url = None
-            press_room_content = None
-            
-            for path in press_paths:
-                test_url = base_url + path
-                test_content = await self.fetch_page(test_url)
-                
-                if test_content:
-                    # Quick check if it looks like press room
-                    if any(keyword in test_content.lower() for keyword in [
-                        "comunicado", "nota de prensa", "press release"
-                    ]):
-                        press_room_url = test_url
-                        press_room_content = test_content
-                        break
-            
-            # If no press room found, use base URL
-            if not press_room_url:
-                press_room_url = base_url
-                press_room_content = content
-            
-            # Analyze press room
-            analysis = await self.analyze_press_room(
-                press_room_url,
-                press_room_content
-            )
-            
-            # Build result
-            result = {
-                "article_url": article_url,
-                "domain": domain,
-                "press_room_url": press_room_url,
-                "is_press_room": analysis.get("is_press_room", False),
-                "confidence": analysis.get("confidence", 0.0),
-                "org_name": analysis.get("org_name"),
-                "contact_email": analysis.get("contact_email"),
-                "estimated_quality": analysis.get("estimated_quality", 0.5),
-                "notes": analysis.get("notes", "")
-            }
-            
-            logger.info("origin_discovered",
-                article_url=article_url,
-                press_room_url=press_room_url,
-                is_press_room=result["is_press_room"],
-                confidence=result["confidence"]
-            )
-            
-            return result
-        
-        except Exception as e:
-            logger.error("discover_origin_error",
-                url=article_url,
-                error=str(e)
-            )
-            return None
 
 
 def get_discovery_connector() -> DiscoveryConnector:

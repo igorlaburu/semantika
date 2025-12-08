@@ -89,98 +89,137 @@ class DiscoveryFlow:
                 sampled=len(sampled_articles)
             )
             
-            # Step 3: Extract unique domains
-            domains_seen = set()
-            articles_by_domain = {}
+            # Step 3: Search original sources for each headline
+            discovered_sources = []
+            sources_seen = set()
             
             for article in sampled_articles:
-                url = article.get("url", "")
-                domain = self.gnews.extract_domain(url)
-                
-                if domain and domain not in domains_seen:
-                    domains_seen.add(domain)
-                    articles_by_domain[domain] = article
-            
-            logger.info("unique_domains_extracted", count=len(domains_seen))
-            
-            # Step 4: Discover origin for each domain
-            discovered_sources = []
-            
-            for domain, article in articles_by_domain.items():
                 try:
-                    # Check if domain already exists
-                    existing = self.supabase.client.table("discovered_sources")\
-                        .select("source_id")\
-                        .eq("url", article["url"])\
-                        .execute()
-                    
-                    if existing.data:
-                        logger.debug("domain_already_exists", domain=domain)
+                    title = article.get("title", "")
+                    if not title:
                         continue
                     
-                    # Discover origin
-                    origin = await self.discovery.discover_origin(article["url"])
+                    logger.info("searching_original_source", title=title[:80])
                     
-                    if not origin:
-                        logger.warn("origin_discovery_failed", domain=domain)
+                    # Search original source with LLM
+                    from utils.llm_client import get_llm_client
+                    llm = get_llm_client()
+                    
+                    search_result = await llm.search_original_source(
+                        headline=title,
+                        organization_id="SYSTEM-POOL"
+                    )
+                    
+                    found_sources = search_result.get("sources", [])
+                    
+                    if not found_sources:
+                        logger.debug("no_original_source_found", title=title[:80])
                         continue
                     
-                    # Only save if confidence > 0.5
-                    if origin.get("confidence", 0) < 0.5:
-                        logger.debug("low_confidence_skipped",
-                            domain=domain,
-                            confidence=origin.get("confidence")
-                        )
-                        continue
+                    logger.info("original_sources_found",
+                        title=title[:80],
+                        count=len(found_sources)
+                    )
                     
-                    # Save to discovered_sources
-                    source_data = {
-                        "source_name": origin.get("org_name", domain),
-                        "source_type": "scraping",
-                        "source_code": domain.replace(".", "_"),
-                        "url": origin.get("press_room_url", article["url"]),
-                        "config": {
-                            "original_article": article["url"],
-                            "discovered_from_gnews": True,
-                            "gnews_query": query
-                        },
-                        "schedule_config": {
-                            "frequency_minutes": 360  # Every 6h by default
-                        },
-                        "status": "trial",
-                        "relevance_score": origin.get("confidence", 0.5),
-                        "avg_quality_score": origin.get("estimated_quality", 0.5),
-                        "content_count_7d": 0,
-                        "discovered_from": "gnews_discovery",
-                        "discovered_at": datetime.utcnow().isoformat(),
-                        "contact_email": origin.get("contact_email"),
-                        "company_id": "pool",
-                        "is_active": True
-                    }
-                    
-                    result = self.supabase.client.table("discovered_sources")\
-                        .insert(source_data)\
-                        .execute()
-                    
-                    if result.data:
-                        discovered_sources.append(result.data[0])
-                        logger.info("source_discovered_and_saved",
-                            domain=domain,
-                            source_name=source_data["source_name"],
-                            confidence=origin.get("confidence"),
-                            quality=origin.get("estimated_quality")
-                        )
+                    # Process each found source
+                    for source_info in found_sources:
+                        source_url = source_info.get("url", "")
+                        source_type = source_info.get("type", "")
+                        
+                        # Skip if not press_room type
+                        if source_type != "press_room":
+                            logger.debug("skipping_non_press_room",
+                                url=source_url,
+                                type=source_type
+                            )
+                            continue
+                        
+                        # Skip if already seen
+                        if source_url in sources_seen:
+                            logger.debug("source_already_processed", url=source_url)
+                            continue
+                        
+                        sources_seen.add(source_url)
+                        
+                        # Check if already in database
+                        existing = self.supabase.client.table("discovered_sources")\
+                            .select("source_id")\
+                            .eq("url", source_url)\
+                            .execute()
+                        
+                        if existing.data:
+                            logger.debug("source_already_in_db", url=source_url)
+                            continue
+                        
+                        # Analyze press room
+                        analysis = await self.discovery.analyze_press_room(source_url)
+                        
+                        if not analysis.get("is_press_room"):
+                            logger.debug("not_confirmed_press_room", url=source_url)
+                            continue
+                        
+                        # Only save if confidence > 0.5
+                        confidence = analysis.get("confidence", 0.0)
+                        if confidence < 0.5:
+                            logger.debug("low_confidence_skipped",
+                                url=source_url,
+                                confidence=confidence
+                            )
+                            continue
+                        
+                        # Extract domain for source_code
+                        from urllib.parse import urlparse
+                        domain = urlparse(source_url).netloc
+                        source_code = domain.replace(".", "_").replace("-", "_")
+                        
+                        # Save to discovered_sources
+                        source_data = {
+                            "source_name": analysis.get("org_name", source_info.get("organization", domain)),
+                            "source_type": "scraping",
+                            "source_code": source_code,
+                            "url": source_url,
+                            "config": {
+                                "discovered_from_headline": title,
+                                "original_gnews_article": article.get("url"),
+                                "llm_search_result": source_info
+                            },
+                            "schedule_config": {
+                                "frequency_minutes": 360  # Every 6h by default
+                            },
+                            "status": "trial",
+                            "relevance_score": confidence,
+                            "avg_quality_score": analysis.get("estimated_quality", 0.5),
+                            "content_count_7d": 0,
+                            "discovered_from": "gnews_llm_search",
+                            "discovered_at": datetime.utcnow().isoformat(),
+                            "contact_email": analysis.get("contact_email"),
+                            "company_id": "pool",
+                            "is_active": True
+                        }
+                        
+                        result = self.supabase.client.table("discovered_sources")\
+                            .insert(source_data)\
+                            .execute()
+                        
+                        if result.data:
+                            discovered_sources.append(result.data[0])
+                            logger.info("source_discovered_and_saved",
+                                url=source_url,
+                                source_name=source_data["source_name"],
+                                confidence=confidence,
+                                quality=analysis.get("estimated_quality")
+                            )
                 
                 except Exception as e:
-                    logger.error("domain_discovery_error",
-                        domain=domain,
+                    logger.error("headline_discovery_error",
+                        title=article.get("title", "")[:80],
                         error=str(e)
                     )
                     continue
             
             logger.info("discovery_flow_completed",
                 articles_found=len(articles),
-                domains_analyzed=len(domains_seen),
+                articles_sampled=len(sampled_articles),
                 sources_discovered=len(discovered_sources)
             )
             
@@ -188,7 +227,6 @@ class DiscoveryFlow:
                 "success": True,
                 "articles_found": len(articles),
                 "articles_sampled": len(sampled_articles),
-                "domains_analyzed": len(domains_seen),
                 "sources_discovered": len(discovered_sources),
                 "discovered_sources": discovered_sources
             }

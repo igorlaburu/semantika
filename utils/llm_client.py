@@ -444,6 +444,93 @@ Extract and respond in JSON:
             )
             return {"title": "", "summary": "", "tags": [], "atomic_facts": []}
     
+    async def search_original_source(
+        self,
+        headline: str,
+        organization_id: str = "SYSTEM-POOL"
+    ) -> Dict[str, Any]:
+        """Search for original public source of a news headline using Groq Compound.
+        
+        Args:
+            headline: News headline to search for
+            organization_id: Organization ID for tracking (default: SYSTEM-POOL)
+            
+        Returns:
+            Dict with sources: [{"url": "...", "type": "press_room"|"media", "title": "..."}, ...]
+        """
+        import json
+        
+        try:
+            provider = self.registry.get('groq_compound')
+            config = {
+                'tracking': {
+                    'organization_id': organization_id,
+                    'operation': 'search_original_source'
+                }
+            }
+            
+            prompt = f"""Busca la FUENTE ORIGINAL PÚBLICA de esta noticia:
+
+"{headline}"
+
+IMPORTANTE:
+- Busca salas de prensa corporativas (.com/newsroom, .es/sala-prensa, etc.)
+- Busca comunicados de ayuntamientos, instituciones públicas
+- Ignora medios generalistas (abc.es, elmundo.es, etc.)
+- Si no hay fuente pública clara, devuelve lista vacía
+
+Responde en JSON:
+{{
+    "sources": [
+        {{
+            "url": "https://empresa.com/newsroom/comunicado-123",
+            "type": "press_room",
+            "title": "Título del comunicado original",
+            "organization": "Nombre organización"
+        }}
+    ]
+}}
+
+Si NO encuentras fuente pública original, devuelve: {{"sources": []}}"""
+
+            logger.debug("search_original_source_start", headline=headline[:100])
+            
+            response = await provider.ainvoke(prompt, config=config)
+            
+            logger.info("search_original_source_response_received",
+                response_length=len(response.content),
+                response_preview=response.content[:200]
+            )
+            
+            # Clean markdown
+            content = response.content.strip()
+            if content.startswith("```json"):
+                content = content[7:]
+            elif content.startswith("```"):
+                content = content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
+            
+            logger.debug("search_original_source_parsing_json", content_preview=content[:200])
+            
+            result = json.loads(content)
+            
+            logger.info("search_original_source_completed",
+                sources_found=len(result.get("sources", [])),
+                provider="groq_compound"
+            )
+            
+            return result
+        
+        except Exception as e:
+            logger.error("search_original_source_error",
+                headline=headline[:100],
+                error=str(e),
+                error_type=type(e).__name__
+            )
+            return {"sources": []}
+    
     async def extract_news_links(
         self,
         html: str,
