@@ -447,13 +447,13 @@ Extract and respond in JSON:
     async def search_original_source(
         self,
         headline: str,
-        organization_id: str = "SYSTEM-POOL"
+        organization_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Search for original public source of a news headline using Groq Compound.
         
         Args:
             headline: News headline to search for
-            organization_id: Organization ID for tracking (default: SYSTEM-POOL)
+            organization_id: Organization ID for tracking (default: SYSTEM org)
             
         Returns:
             Dict with sources: [{"url": "...", "type": "press_room"|"media", "title": "..."}, ...]
@@ -461,13 +461,27 @@ Extract and respond in JSON:
         import json
         
         try:
+            # Get SYSTEM organization ID if not provided
+            if not organization_id:
+                from utils.supabase_client import get_supabase_client
+                supabase = get_supabase_client()
+                system_org = supabase.client.table('organizations')\
+                    .select('id')\
+                    .eq('slug', 'system')\
+                    .execute()
+                if system_org.data:
+                    organization_id = system_org.data[0]['id']
+                else:
+                    logger.warn("system_org_not_found", message="SYSTEM org not found, skipping tracking")
+                    organization_id = None
+            
             provider = self.registry.get('groq_compound')
-            config = {
-                'tracking': {
+            config = {}
+            if organization_id:
+                config['tracking'] = {
                     'organization_id': organization_id,
                     'operation': 'search_original_source'
                 }
-            }
             
             prompt = f"""Busca la FUENTE ORIGINAL PÚBLICA de esta noticia:
 

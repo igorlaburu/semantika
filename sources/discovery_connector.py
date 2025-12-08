@@ -135,17 +135,31 @@ Responde en JSON:
 
             # Call groq_fast directly
             from utils.llm_registry import get_llm_registry
+            from utils.supabase_client import get_supabase_client
             import json
+            
+            # Get SYSTEM organization ID
+            supabase = get_supabase_client()
+            system_org = supabase.client.table('organizations')\
+                .select('id')\
+                .eq('slug', 'system')\
+                .execute()
+            
+            organization_id = None
+            if system_org.data:
+                organization_id = system_org.data[0]['id']
+            else:
+                logger.warn("system_org_not_found", message="SYSTEM org not found, skipping tracking")
             
             registry = get_llm_registry()
             provider = registry.get('groq_fast')
             
-            config = {
-                'tracking': {
-                    'organization_id': 'SYSTEM-POOL',
+            config = {}
+            if organization_id:
+                config['tracking'] = {
+                    'organization_id': organization_id,
                     'operation': 'analyze_press_room'
                 }
-            }
             
             response = await provider.ainvoke(prompt, config=config)
             

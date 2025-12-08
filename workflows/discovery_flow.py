@@ -101,14 +101,11 @@ class DiscoveryFlow:
                     
                     logger.info("searching_original_source", title=title[:80])
                     
-                    # Search original source with LLM
+                    # Search original source with LLM (uses SYSTEM org by default)
                     from utils.llm_client import get_llm_client
                     llm = get_llm_client()
                     
-                    search_result = await llm.search_original_source(
-                        headline=title,
-                        organization_id="SYSTEM-POOL"
-                    )
+                    search_result = await llm.search_original_source(headline=title)
                     
                     found_sources = search_result.get("sources", [])
                     
