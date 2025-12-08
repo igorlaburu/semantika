@@ -163,8 +163,15 @@ Responde en JSON:
             
             response = await provider.ainvoke(prompt, config=config)
             
-            # Clean markdown
+            # Clean markdown and extract JSON
             content = response.content.strip()
+            
+            logger.debug("press_room_raw_response",
+                url=url,
+                content_preview=content[:300]
+            )
+            
+            # Remove markdown code blocks
             if content.startswith("```json"):
                 content = content[7:]
             elif content.startswith("```"):
@@ -172,6 +179,24 @@ Responde en JSON:
             if content.endswith("```"):
                 content = content[:-3]
             content = content.strip()
+            
+            # Handle cases where LLM returns text before JSON
+            # Look for first { and last }
+            json_start = content.find('{')
+            json_end = content.rfind('}')
+            
+            if json_start == -1 or json_end == -1:
+                logger.error("press_room_no_json_found",
+                    url=url,
+                    content=content[:500]
+                )
+                return {
+                    "is_press_room": False,
+                    "confidence": 0.0,
+                    "error": "No JSON found in response"
+                }
+            
+            content = content[json_start:json_end+1]
             
             analysis = json.loads(content)
             
