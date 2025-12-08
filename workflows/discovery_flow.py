@@ -1,12 +1,36 @@
 """
-Discovery flow for Pool sources.
+Discovery flow for Pool sources (Auto-discovery system).
 
-Orchestrates:
-1. GNews search (24h filter)
-2. Random sampling (20%)
-3. Origin hunting per domain
-4. Press room validation
-5. Save to discovered_sources table
+PURPOSE:
+Automatically discover new press rooms and institutional sources from news headlines.
+
+FULL FLOW:
+1. Read active configs from pool_discovery_config table (geographic filters: Álava, Bizkaia, etc.)
+2. For each config:
+   a. Fetch news from GNews API (last 24h, filtered by area)
+   b. Sample 5% of articles randomly
+   c. For each sampled headline:
+      - Search original source with Groq Compound (web search LLM)
+      - Extract INDEX URL from article URL (find /news, /sala-prensa parent page)
+      - Analyze press room (validate it's institutional, extract metadata)
+      - Save to discovered_sources table with status='trial'
+
+KEY IMPROVEMENTS:
+- extract_index_url(): Converts specific article URLs to index/listing URLs
+  Example: /events/106714-foo → /events
+- Uses Groq Compound for web search (finds original sources before media republishes)
+- Geographic filtering via pool_discovery_config table
+
+SCHEDULING:
+- Runs every 3 days at 8:00 UTC (see scheduler.py)
+- Triggered by: pool_discovery_job()
+
+OUTPUT:
+- New entries in discovered_sources table
+- Status: 'trial' (needs validation via ingestion quality)
+
+NEXT STEP:
+- Ingestion flow scrapes these discovered sources hourly
 """
 
 import random
@@ -195,57 +219,87 @@ class DiscoveryFlow:
                                 )
                                 continue
                         
-                        # Skip if already seen
-                        if source_url in sources_seen:
-                            logger.debug("source_already_processed", url=source_url)
-                            continue
-                        
-                        sources_seen.add(source_url)
-                        
-                        # Check if already in database
-                        existing = self.supabase.client.table("discovered_sources")\
-                            .select("source_id")\
-                            .eq("url", source_url)\
-                            .execute()
-                        
-                        if existing.data:
-                            logger.debug("source_already_in_db", url=source_url)
-                            continue
-                        
-                        # Analyze press room
-                        analysis = await self.discovery.analyze_press_room(source_url)
-                        
-                        if not analysis.get("is_press_room"):
-                            logger.debug("not_confirmed_press_room", url=source_url)
-                            continue
-                        
-                        # Only save if confidence > 0.5
-                        confidence = analysis.get("confidence", 0.0)
-                        if confidence < 0.5:
-                            logger.debug("low_confidence_skipped",
-                                url=source_url,
-                                confidence=confidence
+                            # Skip if already seen
+                            if source_url in sources_seen:
+                                logger.debug("source_already_processed", url=source_url)
+                                continue
+                            
+                            sources_seen.add(source_url)
+                            
+                            # STEP 1: Extract index URL from specific article
+                            # The LLM search might return a specific article URL, not the index
+                            # Use extract_index_url() to find the parent index/listing page
+                            logger.info("extracting_index_url",
+                                original_url=source_url[:80]
                             )
-                            continue
-                        
-                        # Extract domain for source_code
-                        from urllib.parse import urlparse
-                        domain = urlparse(source_url).netloc
-                        source_code = domain.replace(".", "_").replace("-", "_")
-                        
-                        # Save to discovered_sources
-                        source_data = {
-                            "source_name": analysis.get("org_name", source_info.get("organization", domain)),
-                            "source_type": "scraping",
-                            "source_code": source_code,
-                            "url": source_url,
-                            "config": {
-                                "discovered_from_headline": title,
-                                "original_gnews_article": article.get("url"),
-                                "llm_search_result": source_info,
-                                "discovery_config_id": config.get("config_id"),
-                                "geographic_area": config.get("geographic_area")
-                            },
+                            
+                            html_content = await self.discovery.fetch_page(source_url)
+                            if not html_content:
+                                logger.warn("fetch_failed_for_index_extraction", url=source_url)
+                                continue
+                            
+                            index_result = await self.discovery.extract_index_url(source_url, html_content)
+                            index_url = index_result.get("index_url", source_url)
+                            index_confidence = index_result.get("confidence", 0.0)
+                            
+                            logger.info("index_url_found",
+                                original_url=source_url[:80],
+                                index_url=index_url[:80],
+                                confidence=index_confidence,
+                                method=index_result.get("method")
+                            )
+                            
+                            # Use index URL from now on
+                            final_url = index_url
+                            
+                            # Check if index already in database
+                            existing = self.supabase.client.table("discovered_sources")\
+                                .select("source_id")\
+                                .eq("url", final_url)\
+                                .execute()
+                            
+                            if existing.data:
+                                logger.debug("source_already_in_db", url=final_url)
+                                continue
+                            
+                            # STEP 2: Analyze press room (now with index URL)
+                            analysis = await self.discovery.analyze_press_room(final_url)
+                            
+                            if not analysis.get("is_press_room"):
+                                logger.debug("not_confirmed_press_room", url=final_url)
+                                continue
+                            
+                            # Only save if confidence > 0.5
+                            confidence = analysis.get("confidence", 0.0)
+                            if confidence < 0.5:
+                                logger.debug("low_confidence_skipped",
+                                    url=final_url,
+                                    confidence=confidence
+                                )
+                                continue
+                            
+                            # Extract domain for source_code (use final index URL)
+                            from urllib.parse import urlparse
+                            domain = urlparse(final_url).netloc
+                            source_code = domain.replace(".", "_").replace("-", "_")
+                            
+                            # STEP 3: Save to discovered_sources (with index URL)
+                            source_data = {
+                                "source_name": analysis.get("org_name", source_info.get("organization", domain)),
+                                "source_type": "scraping",
+                                "source_code": source_code,
+                                "url": final_url,  # Store index URL, not article URL
+                                "config": {
+                                    "discovered_from_headline": title,
+                                    "original_gnews_article": article.get("url"),
+                                    "original_source_url": source_url,  # Keep the original article URL
+                                    "index_url": final_url,  # The extracted index URL
+                                    "index_extraction_method": index_result.get("method"),
+                                    "index_extraction_confidence": index_confidence,
+                                    "llm_search_result": source_info,
+                                    "discovery_config_id": config.get("config_id"),
+                                    "geographic_area": config.get("geographic_area")
+                                },
                             "schedule_config": {
                                 "frequency_minutes": 360  # Every 6h by default
                             },
@@ -264,16 +318,17 @@ class DiscoveryFlow:
                             .insert(source_data)\
                             .execute()
                         
-                        if result.data:
-                            discovered_sources.append(result.data[0])
-                            all_discovered_sources.append(result.data[0])
-                            logger.info("source_discovered_and_saved",
-                                config_id=config.get("config_id"),
-                                url=source_url,
-                                source_name=source_data["source_name"],
-                                confidence=confidence,
-                                quality=analysis.get("estimated_quality")
-                            )
+                            if result.data:
+                                discovered_sources.append(result.data[0])
+                                all_discovered_sources.append(result.data[0])
+                                logger.info("source_discovered_and_saved",
+                                    config_id=config.get("config_id"),
+                                    index_url=final_url[:80],
+                                    original_article_url=source_url[:80],
+                                    source_name=source_data["source_name"],
+                                    confidence=confidence,
+                                    quality=analysis.get("estimated_quality")
+                                )
                     
                     except Exception as e:
                         logger.error("headline_discovery_error",

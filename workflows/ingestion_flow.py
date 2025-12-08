@@ -1,12 +1,41 @@
 """
-Ingestion flow for Pool sources.
+Ingestion flow for Pool sources (Hourly scraping + Qdrant ingestion).
 
-Orchestrates:
-1. Get active sources from discovered_sources
-2. Scrape each source
-3. Quality gate (threshold 0.4)
-4. Ingest to Pool (Qdrant)
-5. Update source stats
+PURPOSE:
+Scrape discovered sources, enrich content, and ingest to shared Pool collection in Qdrant.
+
+FULL FLOW:
+1. Get active sources from discovered_sources table (status='trial' or 'active')
+2. For each source:
+   a. Scrape URL with WebScraper (respects robots.txt, extracts content)
+   b. Enrich content with LLM (extract title, summary, category, atomic facts)
+   c. Quality gate: Reject if quality_score < 0.4
+   d. Ingest to Qdrant Pool collection via pool_client.ingest_to_pool()
+   e. Update source stats (content_count_7d, avg_quality_score, last_scraped_at)
+
+KEY ARCHITECTURE:
+- Uses WebScraper directly (NO sources table needed - Pool is independent)
+- Uses pool_client.py for Qdrant operations (768d embeddings, deduplication)
+- Company ID: 00000000-0000-0000-0000-000000000999 (Pool company UUID)
+- Qdrant collection: 'pool' (shared across all companies)
+
+QUALITY THRESHOLD:
+- Only content with quality_score >= 0.4 is ingested
+- Quality score based on: richness, atomic facts count, professional tone
+
+SCHEDULING:
+- Runs every hour (see scheduler.py)
+- Triggered by: pool_ingestion_job()
+
+OUTPUT:
+- New points in Qdrant Pool collection
+- Updated stats in discovered_sources table
+- Low-quality sources get low avg_quality_score → eventually archived
+
+CONSUMED BY:
+- GET /pool/search (search endpoint)
+- GET /pool/context/{id} (detail endpoint)
+- POST /pool/adopt (companies can adopt Pool content)
 """
 
 from typing import Dict, Any, List
@@ -142,12 +171,12 @@ class IngestionFlow:
                 source_id=source["source_id"]
             )
             
-            # Enrich content with SYSTEM org for tracking
+            # Enrich content (tracked under Pool company)
+            # Note: LLM tracking is done automatically via company_id lookup
             enriched = await enrich_content(
                 raw_text=raw_text,
                 source_type="scraping",
                 company_id="00000000-0000-0000-0000-000000000999",  # Pool company UUID
-                organization_id="88044361-8529-46c8-8196-d1345ca7bbe8",  # SYSTEM org UUID
                 pre_filled={
                     "title": title
                 }

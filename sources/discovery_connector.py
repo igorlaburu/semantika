@@ -16,7 +16,15 @@ logger = get_logger("discovery_connector")
 
 
 class DiscoveryConnector:
-    """Connector for discovering news sources."""
+    """
+    Connector for discovering news sources (Pool system).
+    
+    Main functions:
+    1. extract_index_url() - Find press room index page from specific article URL
+    2. analyze_press_room() - Validate if URL is a press room and extract metadata
+    
+    Used by: workflows/discovery_flow.py
+    """
     
     def __init__(self):
         """Initialize discovery connector."""
@@ -61,12 +69,138 @@ class DiscoveryConnector:
             logger.error("fetch_error", url=url, error=str(e))
             return None
     
+    async def extract_index_url(self, url: str, html_content: str) -> Dict[str, Any]:
+        """
+        Extract press room index URL from a specific news article page.
+        
+        Strategy: Give full HTML to LLM and let it find the index/listing page URL.
+        The LLM analyzes breadcrumbs, navigation, links, and URL structure to find
+        the parent index page (e.g., /news, /noticias, /sala-prensa).
+        
+        Args:
+            url: Current article URL
+            html_content: Full HTML of the page
+            
+        Returns:
+            Dict with:
+            - index_url: URL of the index/listing page
+            - confidence: 0.0-1.0
+            - method: how it was found (breadcrumb_link, navigation_link, url_inference)
+        """
+        try:
+            soup = BeautifulSoup(html_content, "lxml")
+            
+            # Remove noise but keep navigation structure and links
+            for element in soup(["script", "style", "svg", "img"]):
+                element.decompose()
+            
+            # Get clean HTML (first 8000 chars to fit LLM context)
+            clean_html = str(soup)[:8000]
+            
+            prompt = f"""Analiza este HTML de una noticia específica y encuentra la URL del ÍNDICE/LISTADO de noticias.
+
+URL actual: {url}
+
+HTML (con todos los links y navegación):
+{clean_html}
+
+TAREA:
+1. Busca en breadcrumbs, navigation, o links el que lleve al listado de noticias
+2. Ignora: homepage, contacto, about, aviso legal
+3. Busca patterns típicos: /news, /noticias, /sala-prensa, /comunicados, /events, /press
+4. Convierte href relativo a absoluto si es necesario
+5. Si NO encuentras link claro, infiere quitando el slug final de la URL actual
+
+Ejemplos:
+- URL actual: https://irekia.eus/es/events/106714-algo → Index: https://irekia.eus/es/events
+- URL actual: https://empresa.com/sala-prensa/noticia-123 → Index: https://empresa.com/sala-prensa
+
+Responde en JSON:
+{{
+    "index_url": "https://irekia.euskadi.eus/es/events",
+    "confidence": 0.9,
+    "method": "breadcrumb_link"
+}}
+
+Métodos posibles: "breadcrumb_link", "navigation_link", "url_inference"""
+            
+            # Get SYSTEM organization ID for tracking
+            from utils.llm_registry import get_llm_registry
+            from utils.supabase_client import get_supabase_client
+            import json
+            
+            supabase = get_supabase_client()
+            system_org = supabase.client.table('organizations')\
+                .select('id')\
+                .eq('slug', 'system')\
+                .execute()
+            
+            organization_id = system_org.data[0]['id'] if system_org.data else None
+            
+            registry = get_llm_registry()
+            provider = registry.get('groq_fast')
+            
+            config = {}
+            if organization_id:
+                config['tracking'] = {
+                    'organization_id': organization_id,
+                    'operation': 'extract_index_url'
+                }
+            
+            response = await provider.ainvoke(prompt, config=config)
+            
+            # Clean and parse response
+            content = response.content.strip()
+            if content.startswith("```json"):
+                content = content[7:]
+            elif content.startswith("```"):
+                content = content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
+            
+            # Extract JSON
+            json_start = content.find('{')
+            json_end = content.rfind('}')
+            
+            if json_start == -1 or json_end == -1:
+                logger.error("extract_index_no_json", url=url)
+                return {
+                    "index_url": url,  # Fallback to original
+                    "confidence": 0.3,
+                    "method": "fallback"
+                }
+            
+            content = content[json_start:json_end+1]
+            result = json.loads(content)
+            
+            logger.info("index_url_extracted",
+                original_url=url[:80],
+                index_url=result.get("index_url", "")[:80],
+                confidence=result.get("confidence"),
+                method=result.get("method")
+            )
+            
+            return result
+        
+        except Exception as e:
+            logger.error("extract_index_url_error", url=url, error=str(e))
+            return {
+                "index_url": url,  # Fallback to original
+                "confidence": 0.0,
+                "method": "error",
+                "error": str(e)
+            }
+    
     async def analyze_press_room(self, url: str) -> Dict[str, Any]:
         """
         Analyze if URL is a press room and extract metadata.
         
+        IMPORTANT: This should receive an INDEX page URL (e.g., /news, /sala-prensa)
+        not a specific article URL. Use extract_index_url() first if needed.
+        
         Args:
-            url: Source URL to analyze
+            url: Press room index URL to analyze
             
         Returns:
             Analysis result with is_press_room, confidence, org_name, etc.
