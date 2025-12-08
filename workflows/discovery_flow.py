@@ -38,7 +38,7 @@ class DiscoveryFlow:
         lang: str = "es",
         country: str = "es",
         max_articles: int = 100,
-        sample_rate: float = 0.2
+        sample_rate: float = 0.05
     ) -> Dict[str, Any]:
         """
         Run discovery flow.
@@ -48,7 +48,7 @@ class DiscoveryFlow:
             lang: Language code
             country: Country code
             max_articles: Max articles from GNews
-            sample_rate: Sampling rate (0.0-1.0)
+            sample_rate: Sampling rate (0.0-1.0, default 0.05 = 5%)
             
         Returns:
             Discovery result summary

@@ -479,15 +479,15 @@ async def schedule_sources(scheduler: AsyncIOScheduler):
 
         logger.info("ttl_cleanup_scheduled", time="03:00 UTC daily")
         
-        # Schedule Pool discovery job (daily at 8:00 AM UTC = 9:00 CET in winter, 10:00 CEST in summer)
+        # Schedule Pool discovery job (every 3 days at 8:00 AM UTC = 9:00 CET in winter, 10:00 CEST in summer)
         scheduler.add_job(
             pool_discovery_job,
-            trigger=CronTrigger(hour=8, minute=0),
+            trigger=CronTrigger(hour=8, minute=0, day='*/3'),
             id="pool_discovery",
             replace_existing=True
         )
         
-        logger.info("pool_discovery_scheduled", time="08:00 UTC daily")
+        logger.info("pool_discovery_scheduled", time="08:00 UTC every 3 days")
         
         # Schedule Pool ingestion job (hourly)
         scheduler.add_job(
