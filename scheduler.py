@@ -263,6 +263,48 @@ async def cleanup_old_data():
         logger.error("ttl_cleanup_error", error=str(e))
 
 
+async def pool_discovery_job():
+    """Pool discovery job (daily at 8:00 AM UTC)."""
+    logger.info("starting_pool_discovery_job")
+    
+    try:
+        from workflows.discovery_flow import execute_discovery_job
+        
+        result = await execute_discovery_job()
+        
+        if result.get("success"):
+            logger.info("pool_discovery_job_completed",
+                articles_found=result.get("articles_found"),
+                sources_discovered=result.get("sources_discovered")
+            )
+        else:
+            logger.error("pool_discovery_job_failed", error=result.get("error"))
+    
+    except Exception as e:
+        logger.error("pool_discovery_job_error", error=str(e))
+
+
+async def pool_ingestion_job():
+    """Pool ingestion job (hourly)."""
+    logger.info("starting_pool_ingestion_job")
+    
+    try:
+        from workflows.ingestion_flow import execute_ingestion_job
+        
+        result = await execute_ingestion_job()
+        
+        if result.get("success"):
+            logger.info("pool_ingestion_job_completed",
+                sources_processed=result.get("sources_processed"),
+                items_ingested=result.get("items_ingested")
+            )
+        else:
+            logger.error("pool_ingestion_job_failed", error=result.get("error"))
+    
+    except Exception as e:
+        logger.error("pool_ingestion_job_error", error=str(e))
+
+
 async def schedule_sources(scheduler: AsyncIOScheduler):
     """Load sources from Supabase and schedule them."""
     logger.info("loading_sources", timestamp=datetime.utcnow().isoformat())
@@ -436,6 +478,26 @@ async def schedule_sources(scheduler: AsyncIOScheduler):
         )
 
         logger.info("ttl_cleanup_scheduled", time="03:00 UTC daily")
+        
+        # Schedule Pool discovery job (daily at 8:00 AM UTC = 9:00 CET in winter, 10:00 CEST in summer)
+        scheduler.add_job(
+            pool_discovery_job,
+            trigger=CronTrigger(hour=8, minute=0),
+            id="pool_discovery",
+            replace_existing=True
+        )
+        
+        logger.info("pool_discovery_scheduled", time="08:00 UTC daily")
+        
+        # Schedule Pool ingestion job (hourly)
+        scheduler.add_job(
+            pool_ingestion_job,
+            trigger=IntervalTrigger(hours=1),
+            id="pool_ingestion",
+            replace_existing=True
+        )
+        
+        logger.info("pool_ingestion_scheduled", interval="hourly")
 
     except Exception as e:
         logger.error("schedule_sources_error", error=str(e))

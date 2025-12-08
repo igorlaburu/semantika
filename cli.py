@@ -672,6 +672,111 @@ async def create_auth_user(email: str, password: str, company_id: str, name: Opt
         sys.exit(1)
 
 
+async def pool_discover():
+    """Run Pool discovery flow (GNews + origin hunting)."""
+    try:
+        from workflows.discovery_flow import execute_discovery_job
+        
+        print("\n🔍 Starting Pool discovery flow...\n")
+        
+        result = await execute_discovery_job()
+        
+        if result.get("success"):
+            print(f"✅ Discovery completed!")
+            print(f"   Articles found: {result.get('articles_found', 0)}")
+            print(f"   Domains analyzed: {result.get('domains_analyzed', 0)}")
+            print(f"   Sources discovered: {result.get('sources_discovered', 0)}\n")
+            
+            logger.info("cli_pool_discover_completed", result=result)
+        else:
+            print(f"❌ Discovery failed: {result.get('error')}\n")
+            logger.error("cli_pool_discover_error", error=result.get('error'))
+            sys.exit(1)
+    
+    except Exception as e:
+        print(f"\n❌ Error running discovery: {str(e)}\n")
+        logger.error("cli_pool_discover_exception", error=str(e))
+        sys.exit(1)
+
+
+async def pool_ingest():
+    """Run Pool ingestion flow (scrape active sources)."""
+    try:
+        from workflows.ingestion_flow import execute_ingestion_job
+        
+        print("\n📥 Starting Pool ingestion flow...\n")
+        
+        result = await execute_ingestion_job()
+        
+        if result.get("success"):
+            print(f"✅ Ingestion completed!")
+            print(f"   Sources processed: {result.get('sources_processed', 0)}")
+            print(f"   Items ingested: {result.get('items_ingested', 0)}\n")
+            
+            logger.info("cli_pool_ingest_completed", result=result)
+        else:
+            print(f"❌ Ingestion failed: {result.get('error')}\n")
+            logger.error("cli_pool_ingest_error", error=result.get('error'))
+            sys.exit(1)
+    
+    except Exception as e:
+        print(f"\n❌ Error running ingestion: {str(e)}\n")
+        logger.error("cli_pool_ingest_exception", error=str(e))
+        sys.exit(1)
+
+
+async def pool_stats():
+    """Show Pool statistics."""
+    try:
+        from utils.pool_client import get_pool_client
+        
+        supabase = get_supabase_client()
+        pool = get_pool_client()
+        
+        print(f"\n📊 Pool Statistics:\n")
+        
+        # Qdrant stats
+        qdrant_stats = pool.get_stats()
+        print(f"Qdrant Collection: {qdrant_stats.get('collection_name', 'N/A')}")
+        print(f"Total context units: {qdrant_stats.get('total_context_units', 0):,}\n")
+        
+        # Discovered sources stats
+        sources_result = supabase.client.table("discovered_sources")\
+            .select("status", count="exact")\
+            .execute()
+        
+        total_sources = sources_result.count or 0
+        
+        # By status
+        trial = supabase.client.table("discovered_sources")\
+            .select("source_id", count="exact")\
+            .eq("status", "trial")\
+            .execute()
+        
+        active = supabase.client.table("discovered_sources")\
+            .select("source_id", count="exact")\
+            .eq("status", "active")\
+            .execute()
+        
+        inactive = supabase.client.table("discovered_sources")\
+            .select("source_id", count="exact")\
+            .eq("status", "inactive")\
+            .execute()
+        
+        print(f"Discovered Sources:")
+        print(f"   Total: {total_sources}")
+        print(f"   Trial: {trial.count or 0}")
+        print(f"   Active: {active.count or 0}")
+        print(f"   Inactive: {inactive.count or 0}\n")
+        
+        logger.info("cli_pool_stats_viewed")
+    
+    except Exception as e:
+        print(f"\n❌ Error getting Pool stats: {str(e)}\n")
+        logger.error("cli_pool_stats_error", error=str(e))
+        sys.exit(1)
+
+
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -758,6 +863,11 @@ def main():
     create_user_parser.add_argument("--company-id", required=True, help="Company UUID")
     create_user_parser.add_argument("--name", help="User display name (optional)")
 
+    # POOL COMMANDS
+    subparsers.add_parser("pool-discover", help="Run Pool discovery flow (GNews + origin hunting)")
+    subparsers.add_parser("pool-ingest", help="Run Pool ingestion flow (scrape active sources)")
+    subparsers.add_parser("pool-stats", help="Show Pool statistics")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -795,6 +905,12 @@ def main():
         asyncio.run(create_company(args.name, args.cif, args.tier))
     elif args.command == "create-auth-user":
         asyncio.run(create_auth_user(args.email, args.password, args.company_id, args.name if hasattr(args, 'name') else None))
+    elif args.command == "pool-discover":
+        asyncio.run(pool_discover())
+    elif args.command == "pool-ingest":
+        asyncio.run(pool_ingest())
+    elif args.command == "pool-stats":
+        asyncio.run(pool_stats())
 
 
 if __name__ == "__main__":
