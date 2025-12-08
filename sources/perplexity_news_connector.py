@@ -54,23 +54,18 @@ class PerplexityNewsConnector:
             logger.info("fetching_perplexity_news", location=location, count=news_count)
             
             # Prepare the prompt
-            prompt = f"""{news_count} noticias de {location}. Para cada noticia, extrae:
+            prompt = f"""Dame {news_count} noticias recientes de {location}.
 
-1. CONTENIDO EXTENSO: 15-20 frases que capturen TODO el contenido semántico
-2. DECLARACIONES: Si hay quotes de personas, identifícalas con formato: "PERSONA: declaración textual"
-3. DATOS: Fechas, cifras, nombres completos
-4. CONTEXTO: Antecedentes relevantes
+Para cada noticia proporciona:
+- titulo: Título claro de la noticia
+- texto: Resumen de 5-10 frases con los hechos principales
+- fuente: URL de la noticia
+- fecha: Fecha en formato YYYY-MM-DD
 
-Formato del texto:
-- Una frase por línea
-- Mantén orden cronológico del artículo original
-- Incluye declaraciones literales con comillas y atribución
-- Sin estructura de artículo, solo contenido semántico neutral
+Responde en formato JSON:
+{{"news": [{{"titulo": "...", "texto": "...", "fuente": "URL", "fecha": "YYYY-MM-DD"}}]}}
 
-Responde SOLO este JSON:
-{{"news": [{{"titulo": "...", "texto": "LINEA1\nLINEA2\nPERSONA: \"declaración\"\nLINEA3...", "fuente": "URL", "fecha": "YYYY-MM-DD"}}]}}
-
-SIN markdown, {news_count} items exactos."""
+Sin markdown. Exactamente {news_count} noticias."""
 
             # Prepare the request payload
             payload = {
@@ -113,22 +108,47 @@ SIN markdown, {news_count} items exactos."""
                 logger.error("empty_perplexity_response", response_data=response_data)
                 return []
             
-            # Parse JSON from content
+            # Parse JSON from content with robust error handling
             try:
                 # Remove potential markdown formatting
                 content = content.strip()
                 if content.startswith("```json"):
                     content = content[7:]
+                elif content.startswith("```"):
+                    content = content[3:]
                 if content.endswith("```"):
                     content = content[:-3]
                 content = content.strip()
                 
-                # Clean invalid control characters that break JSON parsing
-                import re
-                content = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', content)
-                content = content.replace('\n', '\\n').replace('\r', '\\r')
+                # Try direct JSON parse first
+                try:
+                    parsed_data = json.loads(content)
+                except json.JSONDecodeError:
+                    # If failed, try aggressive cleaning
+                    import re
+                    # Remove control characters except newlines we want
+                    content_clean = re.sub(r'[\x00-\x09\x0b-\x1f\x7f-\x9f]', '', content)
+                    
+                    # Try to fix common JSON issues
+                    # Fix unescaped quotes inside strings (heuristic)
+                    # This is tricky - we'll try a simple regex
+                    content_clean = re.sub(r'(?<!\\)"(?=\w)', r'\\"', content_clean)
+                    
+                    try:
+                        parsed_data = json.loads(content_clean)
+                    except json.JSONDecodeError as e2:
+                        # Last resort: try to extract JSON object manually
+                        logger.warn("json_parse_failed_trying_extraction", error=str(e2))
+                        
+                        # Find first { and last }
+                        start = content.find('{')
+                        end = content.rfind('}')
+                        if start != -1 and end != -1:
+                            content_extracted = content[start:end+1]
+                            parsed_data = json.loads(content_extracted)
+                        else:
+                            raise
                 
-                parsed_data = json.loads(content)
                 news_items = parsed_data.get("news", [])
                 
                 logger.info("perplexity_news_fetched", 
@@ -141,7 +161,13 @@ SIN markdown, {news_count} items exactos."""
             except json.JSONDecodeError as e:
                 logger.error("perplexity_json_parse_error", 
                     error=str(e),
-                    content_preview=content[:200]
+                    content_preview=content[:500]
+                )
+                return []
+            except Exception as e:
+                logger.error("perplexity_json_parse_unexpected_error",
+                    error=str(e),
+                    error_type=type(e).__name__
                 )
                 return []
                 
