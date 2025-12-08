@@ -11,6 +11,8 @@ services:
       - .env
     volumes:
       - .:/app  # Mount for development hot-reload
+      - fastembed_cache:/root/.cache/fastembed  # Cache FastEmbed models
+      - whisper_cache:/root/.cache/whisper  # Cache Whisper models
     restart: unless-stopped
     networks:
       - semantika-network
@@ -23,9 +25,15 @@ services:
       - .env
     volumes:
       - .:/app  # Mount for development hot-reload
+      - fastembed_cache:/root/.cache/fastembed  # Cache FastEmbed models
+      - whisper_cache:/root/.cache/whisper  # Cache Whisper models
     restart: unless-stopped
     networks:
       - semantika-network
+
+volumes:
+  fastembed_cache:
+  whisper_cache:
 
 networks:
   semantika-network:
