@@ -12,11 +12,11 @@ Orchestrates:
 from typing import Dict, Any, List
 from datetime import datetime, timedelta
 
-from sources.scraper_workflow import ScraperWorkflow
 from utils.logger import get_logger
 from utils.supabase_client import get_supabase_client
 from utils.pool_client import get_pool_client
 from utils.unified_content_enricher import enrich_content
+from sources.web_scraper import WebScraper
 
 logger = get_logger("ingestion_flow")
 
@@ -28,7 +28,7 @@ class IngestionFlow:
         """Initialize ingestion flow."""
         self.supabase = get_supabase_client()
         self.pool = get_pool_client()
-        self.scraper = ScraperWorkflow()
+        self.scraper = WebScraper()
         
         logger.info("ingestion_flow_initialized")
     
@@ -78,24 +78,30 @@ class IngestionFlow:
                 url=url
             )
             
-            # Run scraper workflow
-            result = await self.scraper.run(
-                company_id="pool",
-                source_id=source_id,
+            # Use WebScraper directly (no need for sources table)
+            # Try to scrape as single article first
+            documents = await self.scraper.scrape_url(
                 url=url,
-                url_type="article"  # Most press rooms are article pages
+                extract_multiple=False,
+                check_robots=True
             )
             
-            if result.get("error"):
-                logger.error("scrape_error",
+            if not documents:
+                logger.warn("no_content_extracted",
                     source_id=source_id,
-                    url=url,
-                    error=result["error"]
+                    url=url
                 )
                 return []
             
-            # Extract content items
-            content_items = result.get("content_items", [])
+            # Convert to content items format
+            content_items = []
+            for doc in documents:
+                content_items.append({
+                    "title": doc.get("title", "Untitled"),
+                    "raw_text": doc.get("text", ""),
+                    "url": url,
+                    "published_at": None  # Will be extracted by enricher if possible
+                })
             
             logger.info("source_scraped",
                 source_id=source_id,
@@ -136,11 +142,12 @@ class IngestionFlow:
                 source_id=source["source_id"]
             )
             
-            # Enrich content
+            # Enrich content with SYSTEM org for tracking
             enriched = await enrich_content(
                 raw_text=raw_text,
                 source_type="scraping",
-                company_id="pool",
+                company_id="00000000-0000-0000-0000-000000000999",  # Pool company UUID
+                organization_id="88044361-8529-46c8-8196-d1345ca7bbe8",  # SYSTEM org UUID
                 pre_filled={
                     "title": title
                 }
