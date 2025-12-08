@@ -128,6 +128,7 @@ def extract_from_meta_tags(soup: BeautifulSoup) -> List[Tuple[datetime, str, flo
         List of (datetime, source, confidence) tuples
     """
     dates = []
+    now = datetime.now()
     
     # Common meta tag names for publication date
     meta_names = [
@@ -151,10 +152,15 @@ def extract_from_meta_tags(soup: BeautifulSoup) -> List[Tuple[datetime, str, flo
         
         if tag and tag.get('content'):
             dt = parse_date_string(tag['content'])
-            if dt:
+            if dt and dt <= now:
                 dates.append((dt, f'meta_tag:{name}', 0.95))
                 logger.debug("date_from_meta_tag", 
                     meta_name=name, 
+                    date=dt.isoformat()
+                )
+            elif dt and dt > now:
+                logger.warn("future_date_ignored_meta",
+                    meta_name=name,
                     date=dt.isoformat()
                 )
     
@@ -171,6 +177,7 @@ def extract_from_jsonld(soup: BeautifulSoup) -> List[Tuple[datetime, str, float]
         List of (datetime, source, confidence) tuples
     """
     dates = []
+    now = datetime.now()
     
     # Find all JSON-LD script tags
     jsonld_scripts = soup.find_all('script', type='application/ld+json')
@@ -190,9 +197,14 @@ def extract_from_jsonld(soup: BeautifulSoup) -> List[Tuple[datetime, str, float]
                 for key in ['datePublished', 'dateCreated', 'publishDate']:
                     if key in item:
                         dt = parse_date_string(item[key])
-                        if dt:
+                        if dt and dt <= now:
                             dates.append((dt, f'jsonld:{key}', 0.95))
                             logger.debug("date_from_jsonld",
+                                key=key,
+                                date=dt.isoformat()
+                            )
+                        elif dt and dt > now:
+                            logger.warn("future_date_ignored_jsonld",
                                 key=key,
                                 date=dt.isoformat()
                             )
@@ -258,6 +270,7 @@ def extract_from_css_selectors(soup: BeautifulSoup) -> List[Tuple[datetime, str,
         List of (datetime, source, confidence) tuples
     """
     dates = []
+    now = datetime.now()
     
     # Common CSS selectors for date display
     selectors = [
@@ -286,9 +299,14 @@ def extract_from_css_selectors(soup: BeautifulSoup) -> List[Tuple[datetime, str,
                 
                 if date_str:
                     dt = parse_date_string(date_str)
-                    if dt:
+                    if dt and dt <= now:
                         dates.append((dt, f'css_selector:{selector}', 0.75))
                         logger.debug("date_from_css_selector",
+                            selector=selector,
+                            date=dt.isoformat()
+                        )
+                    elif dt and dt > now:
+                        logger.warn("future_date_ignored_css",
                             selector=selector,
                             date=dt.isoformat()
                         )
@@ -342,7 +360,8 @@ If no date found, respond: {{{{date: null}}}}""")
         
         if result.get('date'):
             dt = parse_date_string(result['date'])
-            if dt:
+            now = datetime.now()
+            if dt and dt <= now:
                 # Lower confidence (60%) since LLM can hallucinate
                 logger.info("date_from_llm",
                     date=dt.isoformat(),
@@ -350,6 +369,11 @@ If no date found, respond: {{{{date: null}}}}""")
                     llm_source=result.get('source')
                 )
                 return [(dt, f'llm:{result.get("source", "unknown")}', 0.60)]
+            elif dt and dt > now:
+                logger.warn("future_date_ignored_llm",
+                    date=dt.isoformat(),
+                    llm_confidence=result.get('confidence')
+                )
         
         return []
         
