@@ -154,7 +154,8 @@ SIN markdown, {news_count} items exactos."""
         news_items: List[Dict[str, Any]],
         company: Dict[str, Any],
         organization: Dict[str, Any],
-        source: Dict[str, Any]
+        source: Dict[str, Any],
+        location: str
     ) -> List[Dict[str, Any]]:
         """
         Process news items through workflow.
@@ -400,7 +401,7 @@ async def execute_perplexity_news_task(source: Dict[str, Any]) -> Dict[str, Any]
         
         # Process news through workflow
         processed_units = await connector.process_news_with_workflow(
-            news_items, company, organization, source
+            news_items, company, organization, source, location
         )
         
         logger.info("perplexity_news_task_completed",
