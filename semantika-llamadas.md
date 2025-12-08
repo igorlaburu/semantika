@@ -134,15 +134,48 @@ scheduler.py::main()
 
 ## Utilidades Compartidas (Shared Utilities)
 
-### unified_content_enricher.enrich_content()
+### 1. unified_content_enricher.enrich_content()
+
+**¿Qué hace?**  
+Enriquece texto plano con metadata estructurada usando LLM (Groq Llama 3.3 70B).
+
+**¿Cuándo se usa?**  
+Después de obtener contenido raw de cualquier fuente (scraping, email, Perplexity), antes de guardar en BD.
+
+**¿Qué genera?**  
+- `title`: Título claro y conciso
+- `summary`: Resumen de 2-3 frases
+- `tags`: Lista de etiquetas relevantes
+- `category`: Categoría única (política, economía, cultura, etc.)
+- `atomic_statements`: Hechos atómicos extraídos
+
+**Flujo**:
 ```
 ├─► llm_client.analyze_atomic(text)
-│   └─► Groq Llama 3.3 70B
+│   └─► Groq Llama 3.3 70B (FREE, FAST)
 │       └─► Returns: {title, summary, tags, category, atomic_facts}
 └─► Output: {enrichment_cost_usd, enrichment_model, ...}
 ```
 
-### unified_context_verifier.verify_novelty()
+**Por qué centralizado**: Categorización consistente en todas las fuentes, un solo lugar para cambiar lógica.
+
+---
+
+### 2. unified_context_verifier.verify_novelty()
+
+**¿Qué hace?**  
+Verifica si contenido es nuevo (novel) o duplicado ANTES de llamar a LLMs costosos.
+
+**¿Cuándo se usa?**  
+ANTES de `enrich_content()` y ANTES de `ingest_context_unit()` para ahorrar costes.
+
+**¿Cómo verifica?**  
+- **Scraping**: Multi-tier change detection (hash → simhash → embedding)
+- **Email**: Lookup de Message-ID en BD
+- **Perplexity/API**: Busca título + fecha en últimas 24h
+- **Manual**: Siempre novel (skip)
+
+**Flujo**:
 ```
 ├─► [scraping] → change_detector.detect_change()
 ├─► [email] → Check Message-ID
@@ -150,7 +183,26 @@ scheduler.py::main()
 └─► [manual] → Always novel
 ```
 
-### unified_context_ingester.ingest_context_unit()
+**Por qué importante**: Ahorra costes LLM, evita saturar BD con duplicados.
+
+---
+
+### 3. unified_context_ingester.ingest_context_unit()
+
+**¿Qué hace?**  
+Punto final de convergencia para TODOS los flujos. Guarda context units en BD con embeddings y deduplicación semántica.
+
+**¿Cuándo se usa?**  
+Última etapa de todos los flujos (scraping, email, Perplexity, manual).
+
+**¿Qué hace internamente?**  
+- Genera campos faltantes con GPT-4o-mini (si needed)
+- Normaliza atomic_statements a formato estándar
+- Genera embeddings 768d con FastEmbed
+- Busca duplicados semánticos (threshold 0.98)
+- Inserta en `press_context_units`
+
+**Flujo**:
 ```
 ├─► Generate missing fields (GPT-4o-mini if needed)
 ├─► normalize_atomic_statements()
@@ -161,25 +213,82 @@ scheduler.py::main()
 └─► supabase.table("press_context_units").insert()
 ```
 
-### embedding_generator.generate_embedding()
+**Por qué centralizado**: Un solo lugar para guardar, deduplicación consistente.
+
+---
+
+### 4. embedding_generator.generate_embedding()
+
+**¿Qué hace?**  
+Genera vectores de 768 dimensiones para búsqueda semántica y deduplicación.
+
+**¿Cómo funciona?**  
+1. **Primary**: FastEmbed local (gratis, 768d, multilingüe)
+2. **Fallback**: OpenAI API (pago, 384d) si falla FastEmbed
+
+**¿Qué embeddea?**  
+Combina `title + summary` en un solo texto.
+
+**¿Cuándo se usa?**  
+- Al guardar context units
+- Para deduplicación semántica
+- Para búsqueda por vector (/search)
+
+**Flujo**:
 ```
 ├─► [force_openai=false] (default)
 │   ├─► Try: FastEmbed TextEmbedding (768d)
+│   │   └─► Model: paraphrase-multilingual-mpnet-base-v2
+│   │   └─► Languages: 50+ (Spanish, Basque, etc.)
+│   │   └─► Cost: $0.00
 │   └─► Fallback: OpenRouter OpenAI (384d)
-└─► Returns: List[float]
+│       └─► Cost: ~$0.02 per 1M tokens
+└─► Returns: List[float] (768 or 384 dimensions)
 ```
 
-### llm_client.analyze_atomic()
+**Por qué importante**: Búsqueda semántica precisa, deduplicación automática, gratis y local.
+
+---
+
+### 5. llm_client.analyze_atomic()
+
+**¿Qué hace?**  
+Extrae metadata estructurada de texto raw usando Groq Llama 3.3 70B.
+
+**¿Cuándo se usa?**  
+Llamado por `enrich_content()` en flujos de scraping y Perplexity.
+
+**Flujo**:
 ```
-├─► Groq Llama 3.3 70B Versatile
+├─► Groq Llama 3.3 70B Versatile (FREE)
+│   └─► Input: text[:8000] (max 8K tokens)
+│   └─► LangChain: prompt | llm_groq_fast | JsonOutputParser()
 └─► Returns: {title, summary, tags, category, atomic_facts[]}
 ```
 
-### llm_client.generate_context_unit()
+**Formato atomic_facts**: `[{order: 1, type: "fact", speaker: null, text: "..."}]`
+
+---
+
+### 6. llm_client.generate_context_unit()
+
+**¿Qué hace?**  
+Genera metadata completa usando GPT-4o-mini (fallback universal).
+
+**¿Cuándo se usa?**  
+- Cuando `enrich_content()` necesita generar campos faltantes
+- En flujo de email (contenido menos estructurado)
+- Como fallback si Groq no disponible
+
+**Flujo**:
 ```
-├─► GPT-4o-mini via OpenRouter
+├─► GPT-4o-mini via OpenRouter (PAID)
+│   └─► Input: raw_text
+│   └─► LangChain: prompt | llm_fast | JsonOutputParser()
 └─► Returns: {title, summary, tags, category, atomic_statements}
 ```
+
+**Costo**: ~$0.15 per 1M input + $0.60 per 1M output tokens
 
 ## Flujos Principales (Main Flows)
 

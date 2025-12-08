@@ -1,17 +1,42 @@
-"""Universal content enrichment layer for all source types.
+"""UNIFIED CONTENT ENRICHER - Enriquecimiento LLM centralizado para todas las fuentes.
 
-This module provides a centralized LLM-based enrichment pipeline that:
-- Accepts raw text from any source (manual, scraping, email, perplexity, etc.)
-- Optionally accepts pre-filled fields (title, tags, etc.)
-- Generates missing metadata via LLM (GPT-4o-mini)
-- Returns standardized enriched content
+¿QUÉ HACE?
+-----------
+Acepta texto plano de cualquier fuente (scraping, email, Perplexity, manual, etc.) y lo
+enriquece con metadata estructurada usando Groq Llama 3.3 70B.
 
-Benefits:
-- Single source of truth for categorization logic
-- Consistent enrichment across all sources
-- Flexible pre-filling (sources can skip LLM for known fields)
-- Centralized cost tracking
-- Easy to test and maintain
+¿QUÉ GENERA?
+------------
+- title: Título claro y conciso
+- summary: Resumen de 2-3 frases
+- tags: Lista de etiquetas relevantes
+- category: Categoría única (política, economía, sociedad, cultura, etc.)
+- atomic_statements: Hechos atómicos extraídos del texto
+
+¿CUÁNDO SE USA?
+---------------
+- Scraping: Después de parsear HTML, antes de guardar
+- Perplexity: Después de fetch JSON, antes de ingest
+- Email: Después de combinar body+attachments
+- Manual: Cuando usuario sube texto sin metadata
+
+¿POR QUÉ CENTRALIZADO?
+----------------------
+- ✅ Categorización consistente en todas las fuentes
+- ✅ Un solo lugar para cambiar lógica de enrichment
+- ✅ Tracking de costes LLM centralizado
+- ✅ Permite pre-filling (skip LLM si ya tienes título, etc.)
+- ✅ Fácil testing y mantenimiento
+
+EJEMPLO DE USO:
+---------------
+enriched = await enrich_content(
+    raw_text="Texto del artículo...",
+    source_type="scraping",
+    company_id="uuid-123",
+    pre_filled={"title": "Título ya conocido"}  # Skip LLM para título
+)
+# Returns: {title, summary, tags, category, atomic_statements, enrichment_cost_usd, enrichment_model}
 """
 
 from typing import Dict, Any, Optional, List

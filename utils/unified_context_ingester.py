@@ -1,18 +1,56 @@
-"""Unified context unit ingester - flexible mega-ingester for all sources.
+"""UNIFIED CONTEXT INGESTER - Guardado final de context units con embeddings y deduplicación.
 
-Phase 2: Generate and save context unit with maximum flexibility.
+¿QUÉ HACE?
+-----------
+Punto final de convergencia para TODOS los flujos. Acepta contenido enriquecido
+(o raw) y lo guarda en press_context_units con embeddings y deduplicación semántica.
 
-Accepts ANY combination of inputs:
+¿QUÉ ACEPTA?
+------------
+Combinaciones flexibles:
 - raw_text + url
-- pre-generated title + raw_text
-- title + summary + tags (pre-generated)
-- url only (fetch and process)
-- etc.
+- title + summary + tags (pre-generado)
+- raw_text solo (genera metadata con LLM)
+- title + raw_text (genera resto con LLM)
 
-Always generates:
-- Embeddings (768d multilingual)
-- Semantic deduplication check
-- Complete context unit in press_context_units
+¿QUÉ GENERA?
+------------
+- Embeddings: FastEmbed multilingual 768d
+- Campos faltantes: Via GPT-4o-mini si needed
+- Normalización: atomic_statements en formato estándar
+- Deduplicación: Búsqueda semántica threshold 0.98
+
+¿CUÁNDO SE USA?
+---------------
+- Scraping: Después de parse + enrich
+- Perplexity: Después de fetch + enrich
+- Email: Después de combine + enrich
+- Manual: Después de validación
+
+¿POR QUÉ CENTRALIZADO?
+----------------------
+- ✅ Un solo lugar para guardar context units
+- ✅ Deduplicación semántica consistente
+- ✅ Embedding generation centralizado
+- ✅ Normalización de atomic_statements
+- ✅ Todos los flujos convergen aquí
+
+EJEMPLO DE USO:
+---------------
+result = await ingest_context_unit(
+    title="Título ya enriquecido",
+    summary="Resumen...",
+    raw_text="Texto completo...",
+    tags=["política", "bilbao"],
+    category="política",
+    atomic_statements=[...],
+    company_id="uuid-123",
+    source_type="scraping",
+    source_id="uuid-456",
+    generate_embedding_flag=True,
+    check_duplicates=True
+)
+# Returns: {success, context_unit_id, duplicate, generated_fields, ...}
 """
 
 from typing import Optional, Dict, Any, List

@@ -1,9 +1,51 @@
-"""Embedding generation for semantika using FastEmbed.
+"""EMBEDDING GENERATOR - Generación de vectores 768d para búsqueda semántica.
 
-Generates 384-dimensional embeddings using FastEmbed multilingual model
-for duplicate detection and semantic search.
+¿QUÉ HACE?
+-----------
+Genera embeddings (vectores) de 768 dimensiones para contenido de texto usando
+FastEmbed multilingual local. Si falla, usa OpenAI como fallback.
 
-Supports both local FastEmbed (default) and OpenAI fallback.
+¿CÓMO FUNCIONA?
+---------------
+1. Primary: FastEmbed (local, gratis, 768d)
+   - Modelo: paraphrase-multilingual-mpnet-base-v2
+   - Idiomas: 50+ incluyendo español y euskera
+   - Velocidad: ~100-200ms/embedding
+   - Costo: $0.00
+
+2. Fallback: OpenAI text-embedding-3-small (API, pago, 384d)
+   - Solo si FastEmbed falla
+   - Truncado de 1536d a 384d
+   - Costo: ~$0.02 per 1M tokens
+
+¿QUÉ SE EMBEDDEA?
+-----------------
+Combina title + summary en un solo texto:
+  "Título del artículo. Resumen del contenido..."
+
+¿CUÁNDO SE USA?
+---------------
+- En unified_context_ingester (al guardar context unit)
+- En context_unit_saver (scraping workflow)
+- En url_content_units (multi-noticia)
+- Para deduplicación semántica (threshold 0.98)
+- Para búsqueda por vector (/search endpoint)
+
+¿POR QUÉ IMPORTANTE?
+--------------------
+- ✅ Búsqueda semántica precisa (entiende significado, no solo palabras)
+- ✅ Deduplicación automática (detecta contenido similar)
+- ✅ Gratis y local (FastEmbed sin API calls)
+- ✅ Optimizado para español/euskera (multilingüe)
+
+EJEMPLO DE USO:
+---------------
+embedding = await generate_embedding(
+    title="Nuevo metro en Bilbao",
+    summary="La Diputación aprueba fondos...",
+    company_id="uuid-123"
+)
+# Returns: [0.123, -0.456, 0.789, ...] (768 floats)
 """
 
 from typing import List, Optional, Dict, Any

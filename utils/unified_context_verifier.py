@@ -1,12 +1,50 @@
-"""Unified novelty verification for all context unit sources.
+"""UNIFIED CONTEXT VERIFIER - Verificación de novedad antes de procesamiento LLM.
 
-Phase 1: Verify if content is novel BEFORE generating context unit.
+¿QUÉ HACE?
+-----------
+Verifica si el contenido es nuevo (novel) o duplicado ANTES de llamar a LLMs costosos.
+Evita reprocessar contenido que ya existe en la base de datos.
 
-Source-specific verification strategies:
-- Scraping: Hash/SimHash comparison (reuse change_detector.py)
-- Email: Message-ID lookup in database
-- Perplexity: Title + date in 24h window
-- API/Manual: Skip verification (always novel)
+¿CÓMO VERIFICA?
+---------------
+- Scraping: Multi-tier change detection (hash → simhash → embedding)
+- Email: Lookup de Message-ID en BD
+- Perplexity: Busca título + fecha en últimas 24h
+- API/Manual: Siempre novel (skip verification)
+
+¿CUÁNDO SE USA?
+---------------
+- ANTES de enrich_content() (ahorra llamadas LLM)
+- ANTES de ingest_context_unit() (evita duplicados)
+- En todos los flujos excepto manual/api
+
+¿QUÉ RETORNA?
+-------------
+{
+    "is_novel": True/False,           # ¿Procesar o skip?
+    "reason": "explanation",           # Por qué novel/duplicado
+    "duplicate_id": "uuid-123",        # ID del duplicado (si existe)
+    "verification_metadata": {...}     # Data adicional del check
+}
+
+¿POR QUÉ IMPORTANTE?
+--------------------
+- ✅ Ahorra costes LLM (no procesar duplicados)
+- ✅ Evita saturar BD con contenido repetido
+- ✅ Mejora rendimiento (skip temprano)
+- ✅ Verificación específica por source type
+
+EJEMPLO DE USO:
+---------------
+result = await verify_novelty(
+    source_type="email",
+    content_data={"message_id": "<abc@gmail.com>", "source_id": "uuid-456"},
+    company_id="uuid-123"
+)
+if result["is_novel"]:
+    # Procesar con LLM
+else:
+    # Skip (ya existe)
 """
 
 from typing import Optional, Dict, Any
