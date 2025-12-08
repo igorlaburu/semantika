@@ -57,14 +57,15 @@ class PerplexityNewsConnector:
             prompt = f"""Dame {news_count} noticias recientes de {location}.
 
 Para cada noticia proporciona:
-- titulo: Título claro de la noticia
-- texto: Resumen de 5-10 frases con los hechos principales
+- titulo: Título claro y completo
+- texto: Contenido EXTENSO con 15-20 frases. Incluye todos los hechos, datos, cifras, nombres y contexto relevante. Si hay declaraciones de personas, inclúyelas textualmente.
 - fuente: URL de la noticia
 - fecha: Fecha en formato YYYY-MM-DD
 
-Responde en formato JSON:
+Responde en formato JSON válido:
 {{"news": [{{"titulo": "...", "texto": "...", "fuente": "URL", "fecha": "YYYY-MM-DD"}}]}}
 
+MUY IMPORTANTE: El campo texto debe ser una cadena simple sin saltos de línea internos. Todo el contenido en una sola línea.
 Sin markdown. Exactamente {news_count} noticias."""
 
             # Prepare the request payload
