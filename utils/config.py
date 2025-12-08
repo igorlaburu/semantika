@@ -73,6 +73,26 @@ class Settings(BaseSettings):
         default="",
         description="Perplexity API key for news fetching"
     )
+    
+    # GNews Configuration (for Pool Discovery)
+    gnews_api_key: str = Field(
+        default="",
+        description="GNews API key for discovering news sources"
+    )
+    
+    # Pool Configuration
+    pool_api_key: str = Field(
+        default="change_this_in_production",
+        description="API key for Pool endpoints (public read access)"
+    )
+    system_api_key: str = Field(
+        default="change_this_system_key_in_production",
+        description="System API key for admin operations"
+    )
+    pool_collection_name: str = Field(
+        default="pool",
+        description="Qdrant collection name for Pool (shared news)"
+    )
 
     # Text Processing Configuration
     chunk_size: int = Field(

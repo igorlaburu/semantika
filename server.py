@@ -3415,6 +3415,344 @@ async def semantic_search(
         raise HTTPException(status_code=500, detail=f"Semantic search failed: {str(e)}")
 
 
+# ============================================
+# POOL ENDPOINTS
+# ============================================
+
+async def verify_pool_access(api_key: str = Header(None, alias="X-API-Key")):
+    """Verify Pool API key (simple, no JWT)."""
+    if api_key != settings.pool_api_key:
+        raise HTTPException(status_code=401, detail="Invalid Pool API key")
+    return True
+
+
+async def verify_system_access(system_key: str = Header(None, alias="X-System-Key")):
+    """Verify System API key (admin operations)."""
+    if system_key != settings.system_api_key:
+        raise HTTPException(status_code=403, detail="Forbidden - Invalid system key")
+    return True
+
+
+class PoolSearchRequest(BaseModel):
+    query: str
+    limit: int = 10
+    filters: Optional[Dict[str, Any]] = None
+    score_threshold: float = 0.7
+
+
+@app.post("/pool/search")
+async def search_pool(
+    request: PoolSearchRequest,
+    authorized: bool = Depends(verify_pool_access)
+):
+    """
+    Search in Pool (Qdrant shared news collection).
+    
+    Requires Pool API Key in X-API-Key header.
+    
+    Filters supported:
+    - categories: List[str]
+    - date_from: str (ISO format)
+    - date_to: str (ISO format)
+    - min_quality_score: float
+    - tags: List[str]
+    """
+    try:
+        from utils.pool_client import get_pool_client
+        
+        start_time = datetime.utcnow()
+        
+        pool = get_pool_client()
+        
+        # Extract filters
+        filters = request.filters or {}
+        
+        # Search in Pool
+        results = await pool.search(
+            query_text=request.query,
+            limit=request.limit,
+            categories=filters.get("categories"),
+            date_from=filters.get("date_from"),
+            date_to=filters.get("date_to"),
+            min_quality=filters.get("min_quality_score"),
+            tags=filters.get("tags"),
+            score_threshold=request.score_threshold
+        )
+        
+        query_time_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+        
+        logger.info("pool_search_completed",
+            query=request.query[:50],
+            results_count=len(results),
+            query_time_ms=round(query_time_ms, 2)
+        )
+        
+        return {
+            "results": results,
+            "total": len(results),
+            "query_time_ms": round(query_time_ms, 2),
+            "query": request.query
+        }
+    
+    except Exception as e:
+        logger.error("pool_search_error", query=request.query[:50], error=str(e))
+        raise HTTPException(status_code=500, detail=f"Pool search failed: {str(e)}")
+
+
+@app.get("/pool/context/{context_id}")
+async def get_pool_context(
+    context_id: str,
+    authorized: bool = Depends(verify_pool_access)
+):
+    """
+    Get Pool context unit by ID.
+    
+    Requires Pool API Key.
+    """
+    try:
+        from utils.pool_client import get_pool_client
+        
+        pool = get_pool_client()
+        context = pool.get_by_id(context_id)
+        
+        if not context:
+            raise HTTPException(status_code=404, detail="Context unit not found in Pool")
+        
+        # Get source info
+        source_id = context.get("source_id")
+        if source_id:
+            source_result = supabase_client.client.table("discovered_sources").select(
+                "source_id, source_name, url, status, relevance_score"
+            ).eq("source_id", source_id).execute()
+            
+            if source_result.data:
+                context["source"] = source_result.data[0]
+        
+        logger.info("pool_context_retrieved", context_id=context_id)
+        
+        return context
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("get_pool_context_error", context_id=context_id, error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/pool/sources")
+async def list_pool_sources(
+    status: Optional[str] = None,
+    limit: int = 50,
+    authorized: bool = Depends(verify_pool_access)
+):
+    """
+    List discovered sources in Pool.
+    
+    Requires Pool API Key.
+    
+    Query params:
+    - status: Filter by status (trial, active, inactive, archived)
+    - limit: Max results (default 50)
+    """
+    try:
+        query = supabase_client.client.table("discovered_sources").select("*")
+        
+        if status:
+            query = query.eq("status", status)
+        
+        query = query.limit(limit).order("relevance_score", desc=True)
+        
+        result = query.execute()
+        
+        logger.info("pool_sources_listed",
+            status_filter=status,
+            count=len(result.data)
+        )
+        
+        return {
+            "sources": result.data,
+            "total": len(result.data),
+            "filters_applied": {
+                "status": status
+            }
+        }
+    
+    except Exception as e:
+        logger.error("list_pool_sources_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class AdoptRequest(BaseModel):
+    pool_id: str
+    edits: Optional[Dict[str, Any]] = None
+
+
+@app.post("/pool/adopt")
+async def adopt_from_pool(
+    request: AdoptRequest,
+    user: dict = Depends(get_current_user_from_jwt)
+):
+    """
+    Adopt Pool context unit to private collection with optional edits.
+    
+    Requires JWT auth (user's private context).
+    
+    Edits can include:
+    - title: Custom title
+    - summary: Custom summary
+    - tags: Custom tags
+    - custom_notes: Private notes
+    """
+    try:
+        from utils.pool_client import get_pool_client
+        
+        pool = get_pool_client()
+        
+        # Get from Pool
+        pool_item = pool.get_by_id(request.pool_id)
+        
+        if not pool_item:
+            raise HTTPException(status_code=404, detail="Pool item not found")
+        
+        # Apply user edits
+        edits = request.edits or {}
+        
+        final_data = {
+            "title": edits.get("title") or pool_item.get("title"),
+            "summary": edits.get("summary") or pool_item.get("summary"),
+            "raw_text": pool_item.get("content"),
+            "tags": edits.get("tags") or pool_item.get("tags", []),
+            "category": pool_item.get("category"),
+            "atomic_statements": pool_item.get("atomic_statements", [])
+        }
+        
+        # Ingest to private collection
+        result = await ingest_context_unit(
+            company_id=user["company_id"],
+            source_type="adopted_from_pool",
+            source_id=pool_item.get("source_id"),
+            source_metadata={
+                "pool_id": request.pool_id,
+                "adopted_at": datetime.utcnow().isoformat(),
+                "adopted_by_user": user.get("user_id"),
+                "original_url": pool_item.get("url"),
+                "user_edits": edits,
+                "custom_notes": edits.get("custom_notes")
+            },
+            **final_data
+        )
+        
+        if not result["success"]:
+            raise HTTPException(status_code=500, detail=result.get("error"))
+        
+        # Register adoption in Pool
+        pool.register_adoption(request.pool_id, user["company_id"])
+        
+        logger.info("pool_context_adopted",
+            pool_id=request.pool_id,
+            private_id=result["context_unit_id"],
+            company_id=user["company_id"]
+        )
+        
+        return {
+            "success": True,
+            "private_context_id": result["context_unit_id"],
+            "pool_id": request.pool_id,
+            "adopted_at": datetime.utcnow().isoformat(),
+            "message": "Context unit adoptado exitosamente"
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("adopt_from_pool_error", pool_id=request.pool_id, error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/pool/system/health")
+async def pool_system_health(
+    authorized: bool = Depends(verify_system_access)
+):
+    """
+    Pool system health check.
+    
+    Requires System API Key.
+    
+    Returns:
+    - Pool stats (total context units, sources count)
+    - Sources health (status distribution)
+    - Last job executions
+    """
+    try:
+        from utils.pool_client import get_pool_client
+        
+        pool = get_pool_client()
+        
+        # Pool stats
+        pool_stats = pool.get_stats()
+        
+        # Sources by status
+        sources_result = supabase_client.client.table("discovered_sources").select(
+            "status"
+        ).execute()
+        
+        sources_by_status = {}
+        for row in sources_result.data:
+            status = row["status"]
+            sources_by_status[status] = sources_by_status.get(status, 0) + 1
+        
+        pool_stats["total_sources"] = len(sources_result.data)
+        pool_stats["sources_by_status"] = sources_by_status
+        
+        logger.info("pool_health_check_completed")
+        
+        return {
+            "status": "healthy",
+            "pool_stats": pool_stats,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    
+    except Exception as e:
+        logger.error("pool_health_check_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/pool/system/stats")
+async def pool_system_stats(
+    authorized: bool = Depends(verify_system_access)
+):
+    """
+    Pool detailed statistics.
+    
+    Requires System API Key.
+    """
+    try:
+        from utils.pool_client import get_pool_client
+        
+        pool = get_pool_client()
+        stats = pool.get_stats()
+        
+        # Add source stats
+        sources_result = supabase_client.client.table("discovered_sources").select(
+            "status, relevance_score, avg_quality_score"
+        ).execute()
+        
+        if sources_result.data:
+            avg_relevance = sum(s.get("relevance_score", 0) for s in sources_result.data) / len(sources_result.data)
+            avg_quality = sum(s.get("avg_quality_score", 0) for s in sources_result.data) / len(sources_result.data)
+            
+            stats["avg_source_relevance"] = round(avg_relevance, 2)
+            stats["avg_source_quality"] = round(avg_quality, 2)
+        
+        logger.info("pool_stats_retrieved")
+        
+        return stats
+    
+    except Exception as e:
+        logger.error("pool_stats_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
 
