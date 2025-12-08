@@ -129,10 +129,7 @@ Responde en JSON:
     "notes": "Breve justificación"
 }}"""
 
-            analysis = await self.llm.analyze_atomic(
-                text=prompt,
-                fast_mode=True
-            )
+            analysis = await self.llm.analyze_atomic(text=prompt)
             
             logger.info("press_room_analyzed",
                 url=url,
