@@ -495,7 +495,11 @@ Si NO encuentras fuente pública original, devuelve: {{"sources": []}}"""
 
             logger.debug("search_original_source_start", headline=headline[:100])
             
-            response = await provider.ainvoke(prompt, config=config)
+            # Groq Compound expects messages format
+            from langchain_core.messages import HumanMessage
+            messages = [HumanMessage(content=prompt)]
+            
+            response = await provider.ainvoke(messages, config=config)
             
             logger.info("search_original_source_response_received",
                 response_length=len(response.content),
