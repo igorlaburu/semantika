@@ -495,19 +495,21 @@ Si NO encuentras fuente pública original, devuelve: {{"sources": []}}"""
 
             logger.debug("search_original_source_start", headline=headline[:100])
             
-            # Groq Compound expects messages format
-            from langchain_core.messages import HumanMessage
-            messages = [HumanMessage(content=prompt)]
+            # Groq Compound expects messages array (not LangChain messages)
+            messages = [{"role": "user", "content": prompt}]
             
             response = await provider.ainvoke(messages, config=config)
             
+            # Groq Compound returns different response format
+            content = response.choices[0].message.content
+            
             logger.info("search_original_source_response_received",
-                response_length=len(response.content),
-                response_preview=response.content[:200]
+                response_length=len(content),
+                response_preview=content[:200]
             )
             
             # Clean markdown
-            content = response.content.strip()
+            content = content.strip()
             if content.startswith("```json"):
                 content = content[7:]
             elif content.startswith("```"):
