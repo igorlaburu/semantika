@@ -98,21 +98,8 @@ scheduler.py::main()
 │       │               ├─► Check semantic duplicates (threshold 0.98)
 │       │               └─► supabase.table("press_context_units").insert()
 │       │
-│       ├─► [source_type="api" + connector="dfa_subsidies"]
-│       │   └─► dfa_subsidies_monitor.check_for_updates(source, company)
-│       │       ├─► fetch_page(target_url)
-│       │       ├─► content_hasher.compare_content()
-│       │       │   ├─► Tier 1: content_hash (MD5)
-│       │       │   └─► Tier 2: simhash
-│       │       │
-│       │       └─► [changes detected]
-│       │           └─► unified_context_ingester.ingest_web_context_unit()
-│       │               ├─► Generate missing fields with LLM
-│       │               ├─► embedding_generator.generate_embedding()
-│       │               └─► supabase.table("web_context_units").upsert()
-│       │
 │       └─► [source_type="webhook"]
-│           └─► (Triggered externally)
+│           └─► (Triggered externally, no scheduler action)
 │
 ├─► run_multi_company_email_monitor()
 │   └─► MultiCompanyEmailMonitor.start()
@@ -236,17 +223,18 @@ monitor → check_inbox → transcribe → verify → ingest → embed → save
 - **Embedding**: FastEmbed multilingual 768d
 - **Salida**: `press_context_units`
 
-### 4. DFA SUBSIDIES FLOW (Government Forms)
+### 4. WEBHOOK FLOW (External Triggers)
 ```
-scheduler → check_updates → detect_changes → ingest → save
+External service → POST /webhook → verify → enrich → ingest → embed → save
 ```
 
 **Detalles**:
-- **Entrada**: URL de página de subvenciones DFA
-- **Detección**: Multi-tier change detection (hash → simhash)
-- **Workflow**: SubsidyExtractionWorkflow (custom)
-- **Embedding**: FastEmbed multilingual 768d
-- **Salida**: `web_context_units`
+- **Entrada**: Webhook POST con payload JSON
+- **Trigger**: Externo (no scheduler)
+- **Verificación**: Según configuración de source
+- **Enriquecimiento**: Según workflow configurado
+- **Salida**: `press_context_units`
+
 
 ## Modelos LLM Utilizados
 
@@ -354,10 +342,10 @@ scheduler → check_updates → detect_changes → ingest → save
 - `last_scraped_at`, `last_modified_at`
 
 ### web_context_units
-**Contenido**: Context units de web (DFA subsidies, custom scrapers)
+**Contenido**: Context units de web (custom scrapers, monitores especializados)
 
 **Campos clave**:
-- `source_type`: dfa_subsidies, web_monitoring, custom_scraper
+- `source_type`: web_monitoring, custom_scraper, government_forms
 - `version`: Versionado de contenido
 - `replaced_by_id`: Para tracking de actualizaciones
 - `is_latest`: Boolean flag

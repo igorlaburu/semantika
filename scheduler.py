@@ -201,67 +201,6 @@ async def execute_source_task(source: Dict[str, Any]):
                     result=result
                 )
             
-            # Check if it's DFA subsidies monitor
-            elif connector_type == "dfa_subsidies":
-                from sources.dfa_subsidies_monitor import get_dfa_subsidies_monitor
-                
-                # Get company data
-                company_result = supabase.client.table("companies")\
-                    .select("*")\
-                    .eq("id", company_id)\
-                    .single()\
-                    .execute()
-                
-                if not company_result.data:
-                    logger.error("dfa_subsidies_company_not_found", 
-                        source_id=source_id, 
-                        company_id=company_id
-                    )
-                    return
-                
-                company = company_result.data
-                
-                # Execute monitor
-                monitor = get_dfa_subsidies_monitor()
-                changes_detected = await monitor.check_for_updates(
-                    source=source,
-                    company=company
-                )
-                
-                # Log execution
-                duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
-                await supabase.log_execution(
-                    client_id=client_id,
-                    company_id=company_id,
-                    source_name=source_name,
-                    source_type="api",
-                    items_count=1 if changes_detected else 0,
-                    status_code=200,
-                    status="success",
-                    details=f"DFA Subsidies: Cambios detectados" if changes_detected else "DFA Subsidies: Sin cambios",
-                    metadata={
-                        "connector_type": "dfa_subsidies",
-                        "url": config.get("target_url"),
-                        "changes_detected": changes_detected
-                    },
-                    duration_ms=duration_ms,
-                    workflow_code=source.get("workflow_code", "subsidy_extraction")
-                )
-                
-                # Update source execution stats
-                await supabase.update_source_execution_stats(
-                    source_id,
-                    success=True,
-                    items_processed=1 if changes_detected else 0
-                )
-                
-                logger.info("dfa_subsidies_task_completed",
-                    source_id=source_id,
-                    changes_detected=changes_detected
-                )
-                
-                return  # Exit after DFA processing
-                
             else:
                 logger.warn("unknown_api_connector_type", 
                     source_id=source_id,
