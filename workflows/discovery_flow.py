@@ -34,102 +34,166 @@ class DiscoveryFlow:
     
     async def run_discovery(
         self,
-        query: str = "España",
-        lang: str = "es",
-        country: str = "es",
-        max_articles: int = 100,
-        sample_rate: float = 0.05
+        query: str = None,
+        lang: str = None,
+        country: str = None,
+        max_articles: int = None,
+        sample_rate: float = None,
+        config_id: str = None
     ) -> Dict[str, Any]:
         """
-        Run discovery flow.
+        Run discovery flow using pool_discovery_config.
         
         Args:
-            query: GNews search query
-            lang: Language code
-            country: Country code
-            max_articles: Max articles from GNews
-            sample_rate: Sampling rate (0.0-1.0, default 0.05 = 5%)
+            query: GNews search query (overrides config)
+            lang: Language code (overrides config)
+            country: Country code (overrides config)
+            max_articles: Max articles from GNews (overrides config)
+            sample_rate: Sampling rate (overrides config)
+            config_id: Specific config to use (default: all active configs)
             
         Returns:
             Discovery result summary
         """
         try:
-            logger.info("discovery_flow_start",
-                query=query,
-                lang=lang,
-                max_articles=max_articles,
-                sample_rate=sample_rate
-            )
+            # Load active discovery configs from DB
+            if config_id:
+                configs_result = self.supabase.client.table("pool_discovery_config")\
+                    .select("*")\
+                    .eq("config_id", config_id)\
+                    .eq("is_active", True)\
+                    .execute()
+            else:
+                configs_result = self.supabase.client.table("pool_discovery_config")\
+                    .select("*")\
+                    .eq("is_active", True)\
+                    .order("priority")\
+                    .execute()
             
-            # Step 1: Fetch news from GNews (24h)
-            articles = await self.gnews.search_news(
-                query=query,
-                lang=lang,
-                country=country,
-                max_results=max_articles,
-                hours_back=24
-            )
-            
-            if not articles:
-                logger.warn("no_articles_found", query=query)
+            if not configs_result.data:
+                logger.warn("no_active_discovery_configs")
                 return {
-                    "success": True,
-                    "articles_found": 0,
-                    "sources_discovered": 0
+                    "success": False,
+                    "error": "No active discovery configs found"
                 }
             
-            logger.info("gnews_articles_fetched", count=len(articles))
+            # Process each config
+            total_articles = 0
+            total_sampled = 0
+            all_discovered_sources = []
             
-            # Step 2: Sample articles
-            sample_size = max(1, int(len(articles) * sample_rate))
-            sampled_articles = random.sample(articles, sample_size)
+            for config in configs_result.data:
+                # Use config values or overrides
+                _query = query or config.get("search_query")
+                _lang = lang or config.get("gnews_lang", "es")
+                _country = country or config.get("gnews_country", "es")
+                _max_articles = max_articles or config.get("max_articles", 100)
+                _sample_rate = sample_rate or config.get("sample_rate", 0.05)
+                
+                logger.info("discovery_flow_start",
+                    config_id=config.get("config_id"),
+                    geographic_area=config.get("geographic_area"),
+                    query=_query,
+                    lang=_lang,
+                    max_articles=_max_articles,
+                    sample_rate=_sample_rate
+                )
             
-            logger.info("articles_sampled",
-                total=len(articles),
-                sampled=len(sampled_articles)
-            )
-            
-            # Step 3: Search original sources for each headline
-            discovered_sources = []
-            sources_seen = set()
-            
-            for article in sampled_articles:
-                try:
-                    title = article.get("title", "")
-                    if not title:
-                        continue
-                    
-                    logger.info("searching_original_source", title=title[:80])
-                    
-                    # Search original source with LLM (uses SYSTEM org by default)
-                    from utils.llm_client import get_llm_client
-                    llm = get_llm_client()
-                    
-                    search_result = await llm.search_original_source(headline=title)
-                    
-                    found_sources = search_result.get("sources", [])
-                    
-                    if not found_sources:
-                        logger.debug("no_original_source_found", title=title[:80])
-                        continue
-                    
-                    logger.info("original_sources_found",
-                        title=title[:80],
-                        count=len(found_sources)
+                # Step 1: Fetch news from GNews (24h)
+                articles = await self.gnews.search_news(
+                    query=_query,
+                    lang=_lang,
+                    country=_country,
+                    max_results=_max_articles,
+                    hours_back=24
+                )
+                
+                if not articles:
+                    logger.warn("no_articles_found",
+                        config_id=config.get("config_id"),
+                        query=_query
                     )
-                    
-                    # Process each found source
-                    for source_info in found_sources:
-                        source_url = source_info.get("url", "")
-                        source_type = source_info.get("type", "")
+                    continue
+                
+                logger.info("gnews_articles_fetched",
+                    config_id=config.get("config_id"),
+                    count=len(articles)
+                )
+                
+                total_articles += len(articles)
+                
+                # Step 2: Sample articles
+                sample_size = max(1, int(len(articles) * _sample_rate))
+                sampled_articles = random.sample(articles, sample_size)
+                
+                total_sampled += len(sampled_articles)
+                
+                logger.info("articles_sampled",
+                    config_id=config.get("config_id"),
+                    total=len(articles),
+                    sampled=len(sampled_articles)
+                )
+                
+                # Get excluded domains from config
+                excluded_domains = set(config.get("excluded_domains", []))
+                target_types = set(config.get("target_source_types", ["press_room"]))
+                
+                # Step 3: Search original sources for each headline
+                discovered_sources = []
+                sources_seen = set()
+            
+                for article in sampled_articles:
+                    try:
+                        title = article.get("title", "")
+                        article_url = article.get("url", "")
+                        if not title:
+                            continue
                         
-                        # Skip if not press_room type
-                        if source_type != "press_room":
-                            logger.debug("skipping_non_press_room",
-                                url=source_url,
-                                type=source_type
+                        # Skip if article is from excluded domain
+                        from urllib.parse import urlparse
+                        article_domain = urlparse(article_url).netloc
+                        if any(excluded in article_domain for excluded in excluded_domains):
+                            logger.debug("skipping_excluded_domain",
+                                title=title[:80],
+                                domain=article_domain
                             )
                             continue
+                        
+                        logger.info("searching_original_source",
+                            config_id=config.get("config_id"),
+                            title=title[:80]
+                        )
+                        
+                        # Search original source with LLM (uses SYSTEM org by default)
+                        from utils.llm_client import get_llm_client
+                        llm = get_llm_client()
+                        
+                        search_result = await llm.search_original_source(headline=title)
+                        
+                        found_sources = search_result.get("sources", [])
+                        
+                        if not found_sources:
+                            logger.debug("no_original_source_found", title=title[:80])
+                            continue
+                        
+                        logger.info("original_sources_found",
+                            title=title[:80],
+                            count=len(found_sources)
+                        )
+                        
+                        # Process each found source
+                        for source_info in found_sources:
+                            source_url = source_info.get("url", "")
+                            source_type = source_info.get("type", "")
+                            
+                            # Skip if not in target types
+                            if source_type not in target_types:
+                                logger.debug("skipping_non_target_type",
+                                    url=source_url,
+                                    type=source_type,
+                                    target_types=list(target_types)
+                                )
+                                continue
                         
                         # Skip if already seen
                         if source_url in sources_seen:
@@ -178,7 +242,9 @@ class DiscoveryFlow:
                             "config": {
                                 "discovered_from_headline": title,
                                 "original_gnews_article": article.get("url"),
-                                "llm_search_result": source_info
+                                "llm_search_result": source_info,
+                                "discovery_config_id": config.get("config_id"),
+                                "geographic_area": config.get("geographic_area")
                             },
                             "schedule_config": {
                                 "frequency_minutes": 360  # Every 6h by default
@@ -198,34 +264,47 @@ class DiscoveryFlow:
                             .insert(source_data)\
                             .execute()
                         
-                        if result.data:
-                            discovered_sources.append(result.data[0])
-                            logger.info("source_discovered_and_saved",
-                                url=source_url,
-                                source_name=source_data["source_name"],
-                                confidence=confidence,
-                                quality=analysis.get("estimated_quality")
-                            )
+                            if result.data:
+                                discovered_sources.append(result.data[0])
+                                all_discovered_sources.append(result.data[0])
+                                logger.info("source_discovered_and_saved",
+                                    config_id=config.get("config_id"),
+                                    url=source_url,
+                                    source_name=source_data["source_name"],
+                                    confidence=confidence,
+                                    quality=analysis.get("estimated_quality")
+                                )
+                    
+                    except Exception as e:
+                        logger.error("headline_discovery_error",
+                            config_id=config.get("config_id"),
+                            title=article.get("title", "")[:80],
+                            error=str(e)
+                        )
+                        continue
                 
-                except Exception as e:
-                    logger.error("headline_discovery_error",
-                        title=article.get("title", "")[:80],
-                        error=str(e)
-                    )
-                    continue
+                logger.info("config_discovery_completed",
+                    config_id=config.get("config_id"),
+                    geographic_area=config.get("geographic_area"),
+                    articles_found=len(articles),
+                    articles_sampled=len(sampled_articles),
+                    sources_discovered=len(discovered_sources)
+                )
             
             logger.info("discovery_flow_completed",
-                articles_found=len(articles),
-                articles_sampled=len(sampled_articles),
-                sources_discovered=len(discovered_sources)
+                configs_processed=len(configs_result.data),
+                total_articles=total_articles,
+                total_sampled=total_sampled,
+                total_sources_discovered=len(all_discovered_sources)
             )
             
             return {
                 "success": True,
-                "articles_found": len(articles),
-                "articles_sampled": len(sampled_articles),
-                "sources_discovered": len(discovered_sources),
-                "discovered_sources": discovered_sources
+                "configs_processed": len(configs_result.data),
+                "total_articles": total_articles,
+                "total_sampled": total_sampled,
+                "total_sources_discovered": len(all_discovered_sources),
+                "discovered_sources": all_discovered_sources
             }
         
         except Exception as e:
