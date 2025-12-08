@@ -262,7 +262,7 @@ Sin markdown. Exactamente {news_count} noticias."""
                     
                     # Phase 1: Verify novelty
                     verification_result = await verify_novelty(
-                        source_type="perplexity",
+                        source_type="api",
                         content_data={
                             "title": news_item.get("titulo"),
                             "source_id": source["source_id"],
@@ -284,7 +284,7 @@ Sin markdown. Exactamente {news_count} noticias."""
                     
                     enriched = await enrich_content(
                         raw_text=news_item.get("texto", ""),
-                        source_type="perplexity",
+                        source_type="api",
                         company_id=company["id"],
                         pre_filled={
                             "title": news_item.get("titulo")
@@ -302,10 +302,11 @@ Sin markdown. Exactamente {news_count} noticias."""
                             atomic_statements=enriched["atomic_statements"],
 
                             company_id=company["id"],
-                            source_type="perplexity",
+                            source_type="api",
                             source_id=source["source_id"],
 
                             source_metadata={
+                                "connector_type": "perplexity_news",
                                 "perplexity_query": location,
                                 "perplexity_source": news_item.get("fuente"),
                                 "perplexity_date": news_item.get("fecha"),
