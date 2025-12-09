@@ -2191,14 +2191,17 @@ async def enrichment_context_unit(
             )
 
         # Get context unit from database
+        # Allow access to both client's own units AND pool units
+        pool_company_id = "99999999-9999-9999-9999-999999999999"
+        
         result = supabase_client.client.table("press_context_units")\
             .select("*")\
             .eq("id", context_unit_id)\
-            .eq("company_id", client["company_id"])\
+            .or_(f"company_id.eq.{client['company_id']},company_id.eq.{pool_company_id}")\
             .maybe_single()\
             .execute()
 
-        if not result.data:
+        if not result or not result.data:
             logger.warn(
                 "context_unit_not_found",
                 context_unit_id=context_unit_id,
@@ -2322,14 +2325,17 @@ async def save_enriched_statements(
         )
 
         # Get context unit from database
+        # Allow access to both client's own units AND pool units
+        pool_company_id = "99999999-9999-9999-9999-999999999999"
+        
         result = supabase_client.client.table("press_context_units")\
             .select("*")\
             .eq("id", context_unit_id)\
-            .eq("company_id", client["company_id"])\
+            .or_(f"company_id.eq.{client['company_id']},company_id.eq.{pool_company_id}")\
             .maybe_single()\
             .execute()
 
-        if not result.data:
+        if not result or not result.data:
             logger.warn(
                 "context_unit_not_found",
                 context_unit_id=context_unit_id,
@@ -2338,6 +2344,9 @@ async def save_enriched_statements(
             raise HTTPException(status_code=404, detail="Context unit not found")
 
         context_unit = result.data
+        pool_company_id = "99999999-9999-9999-9999-999999999999"
+        is_pool_unit = context_unit.get("company_id") == pool_company_id
+        base_id = context_unit.get("base_id", context_unit_id)
 
         # Get current atomic_statements to calculate next order number
         atomic_statements = context_unit.get("atomic_statements", [])
@@ -2400,10 +2409,64 @@ async def save_enriched_statements(
             # Replace all
             final_statements = new_statements
 
-        # Update database
-        update_result = supabase_client.client.table("press_context_units").update({
-            "enriched_statements": final_statements
-        }).eq("id", context_unit_id).execute()
+        # DECISION: Pool unit → create enrichment child, Own unit → update directly
+        if is_pool_unit:
+            # Check if enrichment child already exists for this user
+            enrichment_check = supabase_client.client.table("press_context_units")\
+                .select("id, enriched_statements")\
+                .eq("base_id", base_id)\
+                .eq("company_id", client["company_id"])\
+                .maybe_single()\
+                .execute()
+            
+            if enrichment_check.data:
+                # Update existing enrichment
+                existing_enriched_statements = enrichment_check.data.get("enriched_statements", [])
+                if request.append:
+                    final_statements = existing_enriched_statements + new_statements
+                
+                update_result = supabase_client.client.table("press_context_units").update({
+                    "enriched_statements": final_statements
+                }).eq("id", enrichment_check.data["id"]).execute()
+                
+                enrichment_id = enrichment_check.data["id"]
+                logger.info("enrichment_child_updated",
+                    base_id=base_id,
+                    enrichment_id=enrichment_id,
+                    company_id=client["company_id"]
+                )
+            else:
+                # Create new enrichment child
+                import uuid
+                enrichment_id = str(uuid.uuid4())
+                
+                insert_result = supabase_client.client.table("press_context_units").insert({
+                    "id": enrichment_id,
+                    "base_id": base_id,
+                    "company_id": client["company_id"],
+                    "client_id": client["client_id"],
+                    "source_id": None,
+                    "title": None,  # Inherit from base
+                    "summary": None,  # Inherit from base
+                    "category": None,  # Inherit from base
+                    "tags": [],
+                    "atomic_statements": [],
+                    "enriched_statements": final_statements,
+                    "embedding": None,
+                    "created_at": datetime.utcnow().isoformat()
+                }).execute()
+                
+                update_result = insert_result
+                logger.info("enrichment_child_created",
+                    base_id=base_id,
+                    enrichment_id=enrichment_id,
+                    company_id=client["company_id"]
+                )
+        else:
+            # Own unit - update directly
+            update_result = supabase_client.client.table("press_context_units").update({
+                "enriched_statements": final_statements
+            }).eq("id", context_unit_id).execute()
 
         if not update_result.data:
             logger.error(
@@ -2807,24 +2870,68 @@ async def get_context_unit(
     """
     Get a single context unit by ID.
     
-    Returns context unit if it belongs to user's company OR to pool (via RLS policy).
+    Returns context unit merged with user's enrichments if available.
+    Supports both base units and enrichment children.
     """
     try:
         company_id = user["company_id"]
+        pool_company_id = "99999999-9999-9999-9999-999999999999"
         supabase = get_supabase_client()
 
-        # RLS will automatically filter - user can access own company + pool
-        # No need to manually filter by company_id here
-        result = supabase.client.table("press_context_units")\
+        # First, get the requested unit to determine its base_id
+        initial_result = supabase.client.table("press_context_units")\
             .select("*")\
             .eq("id", context_unit_id)\
             .single()\
             .execute()
 
-        if not result.data:
+        if not initial_result.data:
             raise HTTPException(status_code=404, detail="Context unit not found or access denied")
 
-        return result.data
+        initial_unit = initial_result.data
+        base_id = initial_unit.get("base_id", context_unit_id)
+        
+        # Fetch base + user's enrichment (if exists)
+        all_units_result = supabase.client.table("press_context_units")\
+            .select("*")\
+            .eq("base_id", base_id)\
+            .in_("company_id", [pool_company_id, company_id])\
+            .execute()
+        
+        units = all_units_result.data or [initial_unit]
+        
+        # Separate base and enrichment
+        base_unit = None
+        enrichment_unit = None
+        
+        for unit in units:
+            if unit["id"] == unit.get("base_id"):
+                # This is the base unit
+                base_unit = unit
+            elif unit.get("company_id") == company_id:
+                # This is user's enrichment
+                enrichment_unit = unit
+        
+        # Fallback if no base found (shouldn't happen)
+        if not base_unit:
+            base_unit = initial_unit
+        
+        # Merge enrichment into base
+        merged = dict(base_unit)
+        
+        if enrichment_unit:
+            # Merge enriched_statements
+            base_enriched = base_unit.get("enriched_statements", [])
+            user_enriched = enrichment_unit.get("enriched_statements", [])
+            merged["enriched_statements"] = base_enriched + user_enriched
+            
+            # Add metadata about enrichment
+            merged["has_user_enrichment"] = True
+            merged["enrichment_id"] = enrichment_unit["id"]
+        else:
+            merged["has_user_enrichment"] = False
+        
+        return merged
 
     except HTTPException:
         raise
