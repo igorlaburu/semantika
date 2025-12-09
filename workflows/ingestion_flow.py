@@ -45,7 +45,6 @@ from utils.logger import get_logger
 from utils.supabase_client import get_supabase_client
 from utils.unified_context_ingester import ingest_context_unit
 from utils.unified_content_enricher import enrich_content
-from sources.web_scraper import WebScraper
 
 logger = get_logger("ingestion_flow")
 
@@ -56,7 +55,6 @@ class IngestionFlow:
     def __init__(self):
         """Initialize ingestion flow."""
         self.supabase = get_supabase_client()
-        self.scraper = WebScraper()
         
         logger.info("ingestion_flow_initialized")
     
@@ -89,7 +87,7 @@ class IngestionFlow:
         source: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """
-        Scrape a source and extract content items.
+        Scrape a source and extract content items using advanced workflow.
         
         Args:
             source: Source from discovered_sources
@@ -98,6 +96,8 @@ class IngestionFlow:
             List of extracted content items
         """
         try:
+            from sources.scraper_workflow import scrape_url
+            
             url = source["url"]
             source_id = source["source_id"]
             
@@ -106,29 +106,36 @@ class IngestionFlow:
                 url=url
             )
             
-            # Use WebScraper directly (no need for sources table)
-            # Try to scrape as single article first
-            documents = await self.scraper.scrape_url(
+            # Use advanced scraper workflow (supports index detection)
+            # Start with url_type="index" to extract article links
+            result = await scrape_url(
+                company_id="99999999-9999-9999-9999-999999999999",
+                source_id=source_id,
                 url=url,
-                extract_multiple=False,
-                check_robots=True
+                url_type="index"  # Treat as index to extract article links
             )
             
-            if not documents:
+            # Extract content items from workflow result
+            workflow_items = result.get("content_items", [])
+            
+            if not workflow_items:
                 logger.warn("no_content_extracted",
                     source_id=source_id,
                     url=url
                 )
                 return []
             
-            # Convert to content items format
+            # Convert workflow format to ingestion format
             content_items = []
-            for doc in documents:
+            for item in workflow_items:
                 content_items.append({
-                    "title": doc.get("title", "Untitled"),
-                    "raw_text": doc.get("text", ""),
+                    "title": item.get("title", "Untitled"),
+                    "raw_text": item.get("content", ""),
                     "url": url,
-                    "published_at": None  # Will be extracted by enricher if possible
+                    "published_at": None,
+                    "tags": item.get("tags", []),
+                    "category": item.get("category", "general"),
+                    "atomic_statements": item.get("atomic_statements", [])
                 })
             
             logger.info("source_scraped",
@@ -165,21 +172,35 @@ class IngestionFlow:
             raw_text = item.get("raw_text", "")
             url = item.get("url", source["url"])
             
-            logger.info("enriching_content",
-                title=title[:50],
-                source_id=source["source_id"]
-            )
-            
-            # Enrich content (tracked under Pool company)
-            # Note: LLM tracking is done automatically via company_id lookup
-            # IMPORTANT: NEVER pre-fill title - always let LLM generate it from content
-            # User requirement: "la idea es que el llm genere el titulo SIEMPRE"
-            enriched = await enrich_content(
-                raw_text=raw_text,
-                source_type="scraping",
-                company_id="99999999-9999-9999-9999-999999999999",  # Pool company UUID
-                pre_filled={}  # Empty - LLM always generates title
-            )
+            # Check if content is already enriched by scraper_workflow
+            # If yes, use it directly to avoid double LLM calls
+            if item.get("tags") and item.get("category") and item.get("atomic_statements"):
+                logger.info("using_pre_enriched_content",
+                    title=title[:50],
+                    source_id=source["source_id"]
+                )
+                enriched = {
+                    "title": title,
+                    "summary": item.get("summary", ""),
+                    "tags": item.get("tags", []),
+                    "category": item.get("category", "general"),
+                    "atomic_statements": item.get("atomic_statements", []),
+                    "enrichment_cost_usd": 0.0,  # Already enriched
+                    "enrichment_model": "scraper_workflow"
+                }
+            else:
+                logger.info("enriching_content",
+                    title=title[:50],
+                    source_id=source["source_id"]
+                )
+                
+                # Enrich content (tracked under Pool company)
+                enriched = await enrich_content(
+                    raw_text=raw_text,
+                    source_type="scraping",
+                    company_id="99999999-9999-9999-9999-999999999999",
+                    pre_filled={}  # Empty - LLM always generates title
+                )
             
             # Check quality threshold
             quality_score = enriched.get("quality_score", 0.5)
