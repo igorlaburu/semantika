@@ -172,13 +172,17 @@ class IngestionFlow:
             
             # Enrich content (tracked under Pool company)
             # Note: LLM tracking is done automatically via company_id lookup
+            # IMPORTANT: Only pre-fill title if it's NOT the source name (generic)
+            # Let LLM extract proper title from content if HTML title is generic
+            pre_filled = {}
+            if title and title != source["source_name"] and title != "Untitled":
+                pre_filled["title"] = title
+            
             enriched = await enrich_content(
                 raw_text=raw_text,
                 source_type="scraping",
                 company_id="99999999-9999-9999-9999-999999999999",  # Pool company UUID
-                pre_filled={
-                    "title": title
-                }
+                pre_filled=pre_filled
             )
             
             # Check quality threshold
