@@ -307,16 +307,18 @@ async def execute_redact_news_rich(
         organization_id = client.get("organization_id", "00000000-0000-0000-0000-000000000001")
         
         context_units = []
+        pool_company_id = "99999999-9999-9999-9999-999999999999"
+        
         for cu_id in context_unit_ids:
-            # Fetch context unit
+            # Fetch context unit (allow client's own units OR pool units)
             result = supabase_client.client.table("press_context_units")\
                 .select("*")\
                 .eq("id", cu_id)\
-                .eq("company_id", client["company_id"])\
+                .or_(f"company_id.eq.{client['company_id']},company_id.eq.{pool_company_id}")\
                 .maybe_single()\
                 .execute()
 
-            if result.data:
+            if result and result.data:
                 cu_data = result.data
 
                 # Try to fetch source information if source_id is a valid UUID
