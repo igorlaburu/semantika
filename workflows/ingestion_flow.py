@@ -16,7 +16,7 @@ FULL FLOW:
 KEY ARCHITECTURE:
 - Uses WebScraper directly (NO sources table needed - Pool is independent)
 - Uses pool_client.py for Qdrant operations (768d embeddings, deduplication)
-- Company ID: 00000000-0000-0000-0000-000000000999 (Pool company UUID)
+- Company ID: 99999999-9999-9999-9999-999999999999 (Pool company UUID)
 - Qdrant collection: 'pool' (shared across all companies)
 
 QUALITY THRESHOLD:
@@ -43,7 +43,7 @@ from datetime import datetime, timedelta
 
 from utils.logger import get_logger
 from utils.supabase_client import get_supabase_client
-from utils.pool_client import get_pool_client
+from utils.unified_context_ingester import ingest_context_unit
 from utils.unified_content_enricher import enrich_content
 from sources.web_scraper import WebScraper
 
@@ -56,7 +56,6 @@ class IngestionFlow:
     def __init__(self):
         """Initialize ingestion flow."""
         self.supabase = get_supabase_client()
-        self.pool = get_pool_client()
         self.scraper = WebScraper()
         
         logger.info("ingestion_flow_initialized")
@@ -176,7 +175,7 @@ class IngestionFlow:
             enriched = await enrich_content(
                 raw_text=raw_text,
                 source_type="scraping",
-                company_id="00000000-0000-0000-0000-000000000999",  # Pool company UUID
+                company_id="99999999-9999-9999-9999-999999999999",  # Pool company UUID
                 pre_filled={
                     "title": title
                 }
@@ -196,29 +195,27 @@ class IngestionFlow:
                     "quality_score": quality_score
                 }
             
-            # Ingest to Pool
-            result = await self.pool.ingest_to_pool(
-                title=enriched["title"],
-                content=raw_text,
-                url=url,
+            # Ingest to PostgreSQL via unified ingester
+            pool_company_id = "99999999-9999-9999-9999-999999999999"
+            result = await ingest_context_unit(
+                company_id=pool_company_id,
                 source_id=source["source_id"],
-                quality_score=quality_score,
-                category=enriched.get("category"),
-                tags=enriched.get("tags", []),
-                published_at=item.get("published_at"),
-                atomic_statements=enriched.get("atomic_statements", []),
+                content=raw_text,
+                enriched_data=enriched,
+                source_type="scraping",
+                origin_url=url,
                 metadata={
                     "source_name": source["source_name"],
                     "source_code": source["source_code"],
-                    "enrichment_model": enriched.get("enrichment_model"),
-                    "enrichment_cost_usd": enriched.get("enrichment_cost_usd")
+                    "quality_score": quality_score,
+                    "is_pool": True
                 }
             )
             
             if result.get("success"):
                 logger.info("item_ingested_to_pool",
                     title=title[:50],
-                    point_id=result.get("point_id"),
+                    context_unit_id=result.get("context_unit_id"),
                     quality_score=quality_score
                 )
             
