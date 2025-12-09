@@ -659,7 +659,7 @@ class SemanticSearchRequest(BaseModel):
     """Request model for semantic search."""
     query: str = Field(..., description="Search query to vectorize and match")
     limit: int = Field(default=10, ge=1, le=100, description="Maximum number of results")
-    threshold: float = Field(default=0.25, ge=0.0, le=1.0, description="Minimum similarity score (0.0-1.0, default 0.25 for precise matches)")
+    threshold: float = Field(default=0.18, ge=0.0, le=1.0, description="Minimum similarity score (0.0-1.0, default 0.18 for broader matches)")
     max_days: Optional[int] = Field(default=None, ge=1, description="Maximum age of context units in days (e.g., 30 = last 30 days)")
     filters: Optional[Dict[str, Any]] = Field(default=None, description="Optional filters (category, source_type, etc.)")
     include_pool: bool = Field(default=False, description="Include pool content (company_id = 99999999-9999-9999-9999-999999999999)")
@@ -3343,15 +3343,19 @@ Choose the MOST relevant category. Only use "general" if the content truly doesn
 
 
 @app.post("/api/v1/context-units/search-vector")
-async def semantic_search(
+async def hybrid_semantic_search(
     request: SemanticSearchRequest,
     company_id: str = Depends(get_company_id_from_auth)
 ):
     """
-    Semantic search across context units using vector similarity.
+    Hybrid search: Semantic (pgvector) + Keyword (full-text) with query expansion.
 
-    Vectorizes the query using FastEmbed multilingual model and searches
-    for similar context units using pgvector cosine similarity.
+    Combines three techniques:
+    1. Query expansion (cache + local synonyms + LLM if needed)
+    2. Semantic search (pgvector cosine similarity)
+    3. Keyword search (PostgreSQL full-text search)
+    
+    Results are merged and re-ranked by combined score (70% semantic + 30% keyword).
 
     **Authentication**: Accepts either JWT (Authorization: Bearer) or API Key (X-API-Key)
 
@@ -3360,11 +3364,12 @@ async def semantic_search(
         company_id: Company ID from authentication (JWT or API Key)
 
     Returns:
-        List of matching context units with similarity scores
+        List of matching context units with similarity scores and query expansion info
     """
     try:
+        start_time = datetime.utcnow()
 
-        logger.info("semantic_search_start",
+        logger.info("hybrid_search_start",
             company_id=company_id,
             query=request.query[:100],
             limit=request.limit,
@@ -3372,7 +3377,23 @@ async def semantic_search(
             max_days=request.max_days
         )
 
-        # Generate embedding for query using FastEmbed (MUST match DB embeddings)
+        # Step 1: Query expansion (cache + local synonyms + LLM)
+        from utils.query_expander import get_query_expander
+        
+        expander = get_query_expander()
+        expanded_terms = await expander.expand(request.query, use_llm=True)
+        
+        # Combine expanded terms for keyword search
+        query_text_expanded = " ".join(expanded_terms)
+        
+        logger.debug("query_expanded",
+            original=request.query[:50],
+            expanded=query_text_expanded[:100],
+            terms_count=len(expanded_terms)
+        )
+
+        # Step 2: Generate embedding for ORIGINAL query (not expanded)
+        # Reason: Semantic search works better with original intent
         from utils.embedding_generator import generate_embedding_fastembed
 
         query_embedding = await generate_embedding_fastembed(request.query)
@@ -3385,20 +3406,12 @@ async def semantic_search(
         # Convert embedding to string format for pgvector
         embedding_str = f"[{','.join(map(str, query_embedding))}]"
 
-        # Build RPC parameters with pool inclusion
-        pool_uuid = "99999999-9999-9999-9999-999999999999"
-        
-        if request.include_pool:
-            # Search in both company and pool
-            company_ids = [company_id, pool_uuid]
-        else:
-            # Search only in own company
-            company_ids = [company_id]
-        
+        # Step 3: Build RPC parameters for hybrid search
         rpc_params = {
             'p_company_id': company_id,
-            'p_query_embedding': embedding_str,
-            'p_threshold': request.threshold,
+            'p_query_text': query_text_expanded,  # Expanded for keyword search
+            'p_query_embedding': embedding_str,    # Original for semantic search
+            'p_semantic_threshold': request.threshold,
             'p_limit': request.limit,
             'p_max_days': request.max_days,
             'p_category': request.filters.get('category') if request.filters else None,
@@ -3406,17 +3419,20 @@ async def semantic_search(
             'p_include_pool': request.include_pool
         }
 
-        # Execute search via Supabase RPC function
-        result = supabase_client.client.rpc('search_context_units_by_vector', rpc_params).execute()
+        # Step 4: Execute hybrid search via new RPC function
+        result = supabase_client.client.rpc('hybrid_search_context_units', rpc_params).execute()
 
         results = result.data or []
+        
+        query_time_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
 
-        logger.info("semantic_search_completed",
+        logger.info("hybrid_search_completed",
             company_id=company_id,
             query=request.query[:50],
+            expanded_terms_count=len(expanded_terms),
             results_count=len(results),
             threshold=request.threshold,
-            max_days=request.max_days
+            query_time_ms=round(query_time_ms, 2)
         )
 
         response = {
@@ -3424,7 +3440,15 @@ async def semantic_search(
             "results": results,
             "count": len(results),
             "threshold_used": request.threshold,
-            "max_results": request.limit
+            "max_results": request.limit,
+            "query_expansion": {
+                "original": request.query,
+                "expanded_terms": expanded_terms,
+                "terms_count": len(expanded_terms),
+                "expanded_query": query_text_expanded
+            },
+            "search_method": "hybrid_semantic_keyword",
+            "query_time_ms": round(query_time_ms, 2)
         }
 
         # Add max_days to response if filter was used
@@ -3434,12 +3458,12 @@ async def semantic_search(
         return response
 
     except Exception as e:
-        logger.error("semantic_search_error",
-            company_id=user.get("company_id"),
+        logger.error("hybrid_search_error",
+            company_id=company_id,
             query=request.query[:50],
             error=str(e)
         )
-        raise HTTPException(status_code=500, detail=f"Semantic search failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Hybrid search failed: {str(e)}")
 
 
 # ============================================
