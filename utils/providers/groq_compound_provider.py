@@ -84,7 +84,8 @@ class GroqCompoundProvider(LLMProvider):
         response = await self._client.chat.completions.create(
             model=self.model_name,
             messages=messages,
-            temperature=config.get('temperature', 0.0)
+            temperature=config.get('temperature', 0.0),
+            max_tokens=config.get('max_tokens', 2048)
         )
 
         # Extract and track usage
