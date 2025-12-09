@@ -211,7 +211,7 @@ Text:
 {text}
 
 Respond in JSON:
-{{"title": "...", "summary": "...", "tags": [...], "atomic_facts": [{{"order": 1, "type": "fact", "speaker": null, "text": "..."}}, {{"order": 2, "type": "quote", "speaker": "Name", "text": "..."}}], "category": "economía"}}""")
+{{"title": "...", "summary": "...", "tags": [...], "atomic_facts": [{{"order": 1, "type": "fact", "speaker": null, "timestamp": null, "text": "..."}}, {{"order": 2, "type": "quote", "speaker": "Name", "timestamp": null, "text": "..."}}], "category": "economía"}}""")
         ])
 
         self.analyze_atomic_chain = RunnableSequence(
