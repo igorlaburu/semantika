@@ -1,7 +1,7 @@
 # Pool System - Estado de Implementación
 
-**Fecha actualización:** 8 Diciembre 2024  
-**Status:** ✅ Funcional (Discovery + Ingestion + Endpoints)
+**Fecha actualización:** 9 Diciembre 2024  
+**Status:** ✅ Funcional (Discovery + Ingestion + PostgreSQL + Búsqueda Híbrida)
 
 ---
 
@@ -42,12 +42,14 @@
 │ workflows/ingestion_flow.py (cada hora)                    │
 │   - Scrape con WebScraper (sin tabla sources)              │
 │   - Enrich con LLM (category, atomic facts, quality)       │
-│   - Quality gate: >= 0.4                                   │
+│   - Quality gate: >= 0.4 + mínimo 2 statements             │
 │   ↓                                                         │
-│ Qdrant Pool collection (company_id="pool")                 │
+│ PostgreSQL press_context_units                             │
+│   (company_id="99999999-9999-9999-9999-999999999999")      │
 │   - Embeddings 768d (FastEmbed multilingual)               │
 │   - Deduplicación automática (similarity > 0.98)           │
-│   - Todas las companies pueden consultar                   │
+│   - Búsqueda híbrida (semantic 0.7 + keyword 0.3)          │
+│   - RLS: Todas las companies pueden SELECT pool            │
 └────────────────────────────────────────────────────────────┘
 ```
 
