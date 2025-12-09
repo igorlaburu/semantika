@@ -522,7 +522,7 @@ Si NO encuentras fuente pública original, devuelve: {{"sources": []}}"""
                 response_preview=content[:200]
             )
             
-            # Clean markdown
+            # Clean markdown and extract JSON
             content = content.strip()
             if content.startswith("```json"):
                 content = content[7:]
@@ -531,6 +531,19 @@ Si NO encuentras fuente pública original, devuelve: {{"sources": []}}"""
             if content.endswith("```"):
                 content = content[:-3]
             content = content.strip()
+            
+            # Extract JSON object (handle LLM returning text before JSON)
+            json_start = content.find('{')
+            json_end = content.rfind('}')
+            
+            if json_start == -1 or json_end == -1:
+                logger.error("search_original_source_no_json",
+                    headline=headline[:100],
+                    content_preview=content[:500]
+                )
+                return {"sources": []}
+            
+            content = content[json_start:json_end+1]
             
             logger.debug("search_original_source_parsing_json", content_preview=content[:200])
             
