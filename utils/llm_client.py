@@ -370,7 +370,7 @@ Extract and respond in JSON:
     async def analyze_atomic(
         self,
         text: str,
-        organization_id: Optional[str] = None,
+        company_id: Optional[str] = None,
         client_id: Optional[str] = None  # Deprecated, kept for backward compatibility
     ) -> Dict[str, Any]:
         """Analyze text and extract title, summary, tags, atomic facts.
@@ -383,11 +383,10 @@ Extract and respond in JSON:
             # Use Groq for fast, free processing (ideal for scraping)
             provider = self.registry.get('groq_fast')
             config = {}
-            if organization_id:
+            if company_id:
                 config['tracking'] = {
-                    'organization_id': organization_id,
+                    'company_id': company_id,
                     'operation': 'analyze_atomic'
-                    # Note: client_id removed, tracking by organization_id (company) for billing
                 }
 
             logger.debug("analyze_atomic_start",

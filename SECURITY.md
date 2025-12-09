@@ -84,7 +84,7 @@ while True:
 Consecuencias:
 - Sobrecarga del servidor
 - Costos altos en OpenRouter ($$$)
-- Llenado de Qdrant
+- Llenado de PostgreSQL/pgvector
 - Consumo de créditos de Supabase
 
 **Solución:**

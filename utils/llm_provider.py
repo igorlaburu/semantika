@@ -162,10 +162,10 @@ class LLMProvider(ABC):
         
         Args:
             usage: UsageInfo with token counts and cost
-            tracking_config: Dict with organization_id, operation, etc.
+            tracking_config: Dict with company_id, operation, etc.
         """
-        if not tracking_config.get('organization_id'):
-            logger.warn("no_organization_for_tracking", 
+        if not tracking_config.get('company_id'):
+            logger.warn("no_company_for_tracking", 
                 model=self.model_name,
                 tracking_config=tracking_config
             )
@@ -182,7 +182,7 @@ class LLMProvider(ABC):
         }
         
         await tracker.track(
-            organization_id=tracking_config['organization_id'],
+            company_id=tracking_config['company_id'],
             model=f"{self.get_provider_name()}/{self.model_name}",
             operation=tracking_config.get('operation', 'unknown'),
             input_tokens=usage.prompt_tokens,

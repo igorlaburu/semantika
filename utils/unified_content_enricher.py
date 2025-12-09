@@ -128,7 +128,7 @@ async def enrich_content(
         
         llm_result = await llm_client.analyze_atomic(
             text=raw_text[:8000],
-            organization_id=company_id
+            company_id=company_id
         )
         
         enriched = {

@@ -58,7 +58,7 @@ Elimina un cliente y revoca su API Key.
 **Parámetros:**
 - `--client-id`: UUID del cliente (requerido)
 
-**Advertencia:** Esta acción NO elimina los documentos del cliente en Qdrant. Solo revoca el acceso.
+**Advertencia:** Esta acción NO elimina los documentos del cliente en PostgreSQL. Solo revoca el acceso.
 
 #### 4. Crear Company (Empresa/Organización)
 ```bash

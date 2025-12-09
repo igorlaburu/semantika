@@ -43,7 +43,7 @@ class UsageTracker:
         operation: str,
         input_tokens: int,
         output_tokens: int,
-        organization_id: str,
+        company_id: str,
         client_id: Optional[str] = None,
         context_unit_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None
@@ -56,7 +56,7 @@ class UsageTracker:
             operation: Operation type (e.g., "context_unit", "article", "style")
             input_tokens: Prompt tokens
             output_tokens: Completion tokens
-            organization_id: Organization UUID (required)
+            company_id: Company UUID (required)
             client_id: Client UUID (optional, for API calls)
             context_unit_id: Context unit UUID (optional)
             metadata: Additional metadata (optional)
@@ -73,7 +73,7 @@ class UsageTracker:
 
             # Create usage record (let Postgres generate the UUID)
             data = {
-                "organization_id": organization_id,
+                "company_id": company_id,
                 "context_unit_id": context_unit_id,
                 "timestamp": datetime.utcnow().isoformat(),
                 "model": model,
@@ -110,14 +110,14 @@ class UsageTracker:
 
     async def get_usage_summary(
         self,
-        organization_id: Optional[str] = None,
+        company_id: Optional[str] = None,
         days: int = 30
     ) -> Dict[str, Any]:
         """
-        Get usage summary for organization or all.
+        Get usage summary for company or all.
 
         Args:
-            organization_id: Filter by organization (None for all)
+            company_id: Filter by company (None for all)
             days: Number of days to look back
 
         Returns:
@@ -132,8 +132,8 @@ class UsageTracker:
                 .select("*") \
                 .gte("timestamp", cutoff)
 
-            if organization_id:
-                query = query.eq("organization_id", organization_id)
+            if company_id:
+                query = query.eq("company_id", company_id)
 
             result = query.execute()
 

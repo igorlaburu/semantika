@@ -1,6 +1,6 @@
 # Documentación API y Servicios - Sistema Ekimen
 
-**Versión**: 0.2.2
+**Versión**: 0.3.0
 **Última actualización**: 2024-12-09
 **Base URL**: `https://api.ekimen.ai`
 
@@ -48,9 +48,10 @@ El sistema **ekimen** es una plataforma multi-tenant para procesamiento semánti
             │                     │
     ┌───────┴───────┬─────────────┴──────┬───────────────┐
     │               │                    │               │
-┌───▼────┐   ┌──────▼──────┐   ┌────────▼──────┐   ┌───▼────┐
-│Supabase│   │   Qdrant    │   │  OpenRouter   │   │External│
-│(Config)│   │  (Vectores) │   │    (LLMs)     │   │ APIs   │
+┌───▼────┐   ┌─────────────┐   ┌────────▼──────┐   ┌───▼────┐
+│Supabase│   │ FastEmbed   │   │  OpenRouter   │   │External│
+│PG+Vec  │   │  (Local)    │   │   + Groq      │   │ APIs   │
+│768d    │   │  768d       │   │    (LLMs)     │   │        │
 └────────┘   └─────────────┘   └───────────────┘   └────────┘
 ```
 
@@ -62,13 +63,13 @@ El sistema **ekimen** es una plataforma multi-tenant para procesamiento semánti
 ### Stack Tecnológico
 
 - **Backend**: Python 3.10+, FastAPI, APScheduler
-- **Base de Datos**: Supabase (PostgreSQL + pgvector)
-- **Vector Store**: Qdrant Cloud
-- **LLM**: OpenRouter (Claude 3.5 Sonnet, GPT-4o-mini, Groq Llama 3.3 70B)
-- **Embeddings**: FastEmbed (integrado en Qdrant)
+- **Base de Datos**: Supabase (PostgreSQL + pgvector para vectores y config)
+- **LLM**: OpenRouter (Claude 3.5 Sonnet), Groq (Llama 3.3 70B - gratis)
+- **Embeddings**: FastEmbed local (paraphrase-multilingual-mpnet-base-v2, 768d)
+- **Búsqueda**: Híbrida (semantic pgvector + keyword PostgreSQL FTS)
 - **TTS**: Piper (es_ES-carlfm-x_low, 28MB)
 - **STT**: Whisper (OpenAI)
-- **Deployment**: Docker + GitHub Actions
+- **Deployment**: EasyPanel + Docker + GitHub Actions
 
 ### Arquitectura de Sources: Manual Source
 
@@ -1388,39 +1389,50 @@ El sistema usa **OpenRouter** para acceso a múltiples modelos LLM:
 
 ---
 
-### 🔍 Búsqueda Semántica (Qdrant)
+### 🔍 Búsqueda Híbrida (PostgreSQL + pgvector)
 
-Vector store para búsquedas semánticas multi-tenant.
+Sistema unificado para búsquedas semánticas y keyword en PostgreSQL.
 
 #### Características
 
-- **Embeddings**: FastEmbed (integrado en Qdrant)
-- **Modelo**: `sentence-transformers/all-MiniLM-L6-v2`
-- **Dimensiones**: 384
-- **Similitud**: Cosine similarity
+- **Embeddings**: FastEmbed local (sin coste API)
+- **Modelo**: `paraphrase-multilingual-mpnet-base-v2`
+- **Dimensiones**: 768d
+- **Similitud**: Cosine similarity (pgvector)
+- **Keyword**: PostgreSQL Full-Text Search (Spanish config)
+- **Re-ranking**: 0.7 * semantic + 0.3 * keyword
 
 #### Filtrado Multi-tenant
 
-Todos los queries incluyen filtro automático por `client_id`:
+Todos los queries incluyen filtro automático por `company_id` (RLS policies):
 
-```python
-search_results = qdrant.search(
-    collection_name="semantika_prod",
-    query_vector=embedding,
-    query_filter={
-        "must": [
-            {"key": "client_id", "match": {"value": client_id}}
-        ]
-    },
-    limit=10
-)
+```sql
+-- Búsqueda híbrida en PostgreSQL
+SELECT * FROM hybrid_search_context_units(
+    p_company_id := 'uuid-company',
+    p_query_text := 'lehendakari reunión',
+    p_query_embedding := embedding_768d,
+    p_semantic_threshold := 0.18,
+    p_limit := 10
+);
 ```
+
+#### Query Expansion
+
+Antes de la búsqueda:
+1. **Cache** (1h TTL) para queries repetidas
+2. **Diccionario local** (español/euskera) para sinónimos comunes
+3. **LLM (Groq)** solo para queries cortos (<4 palabras) sin match local
+
+Ejemplo:
+- Input: `"lehendakari reunión"`
+- Expansion: `["lehendakari", "presidente", "lehendakaritza", "reunión", "bilera"]`
 
 #### Deduplicación
 
 Antes de insertar nuevo contenido:
 1. Calcular embedding del título o primeros 200 chars
-2. Buscar similitud > 0.98 en Qdrant
+2. Buscar similitud > 0.98 en PostgreSQL
 3. Si existe duplicado → Descartar y loguear
 4. Si no existe → Insertar
 
@@ -1866,27 +1878,26 @@ await supabase.create_context_unit(
 )
 ```
 
-#### 5. Qdrant
+#### 5. PostgreSQL + pgvector
 
 ```python
-from utils.qdrant_client import get_qdrant_client
+from utils.supabase_client import get_supabase_client
+from utils.embedding_generator import generate_embedding_fastembed
 
-qdrant = get_qdrant_client()
+supabase = get_supabase_client()
 
-await qdrant.upsert(
-    collection_name="semantika_prod",
-    points=[
-        {
-            "id": str(uuid.uuid4()),
-            "vector": embedding,
-            "payload": {
-                "client_id": client_id,
-                "text": content,
-                "metadata": metadata
-            }
-        }
-    ]
-)
+# Generar embedding local
+embedding = await generate_embedding_fastembed(content)
+embedding_str = f"[{','.join(map(str, embedding))}]"
+
+# Insertar en PostgreSQL
+supabase.client.table("press_context_units").insert({
+    "company_id": company_id,
+    "title": title,
+    "content": content,
+    "embedding": embedding_str,  # vector(768)
+    "metadata": metadata
+}).execute()
 ```
 
 ---
@@ -1970,22 +1981,16 @@ class GitHubIssuesMonitor(BaseSource):
 Archivo `.env` en la raíz del proyecto:
 
 ```bash
-# Supabase (Base de datos de configuración)
+# Supabase (PostgreSQL + pgvector)
 SUPABASE_URL=https://tu-proyecto.supabase.co
 SUPABASE_KEY=tu-supabase-service-role-key
-
-# Qdrant (Vector store)
-QDRANT_URL=https://cluster.cloud.qdrant.io:6333
-QDRANT_API_KEY=tu-qdrant-api-key
-QDRANT_COLLECTION_NAME=semantika_prod
 
 # OpenRouter (LLMs)
 OPENROUTER_API_KEY=sk-or-v1-tu-clave
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 OPENROUTER_DEFAULT_MODEL=anthropic/claude-3.5-sonnet
-OPENROUTER_FAST_MODEL=openai/gpt-4o-mini
 
-# Groq (Scraping rápido)
+# Groq (Análisis rápido - gratis)
 GROQ_API_KEY=tu-groq-api-key
 
 # ScraperTech (Twitter)
@@ -1995,10 +2000,12 @@ SCRAPERTECH_BASE_URL=https://api.scraper.tech
 # Perplexity (Noticias)
 PERPLEXITY_API_KEY=pplx-tu-clave
 
-# Procesamiento de texto
-CHUNK_SIZE=1000
-CHUNK_OVERLAP=200
-SIMILARITY_THRESHOLD=0.98
+# Búsqueda híbrida
+SEMANTIC_THRESHOLD=0.18
+SIMILARITY_THRESHOLD_DEDUPE=0.98
+
+# Query expansion
+QUERY_EXPANSION_CACHE_TTL=3600
 
 # TTL (días antes de borrar datos no especiales)
 DATA_TTL_DAYS=30
@@ -2151,8 +2158,10 @@ GET /usage/report?start_date=2025-11-01&end_date=2025-11-30
 ### Rate Limits
 
 - **TTS**: 15 segundos timeout por request
-- **LLM (Groq)**: 12,000 tokens por request
-- **Búsqueda Qdrant**: 100 resultados máximo por query
+- **LLM (Groq)**: 12,000 tokens por request (gratis)
+- **LLM (Claude)**: Según plan de OpenRouter
+- **Búsqueda PostgreSQL**: 100 resultados máximo por query
+- **FastEmbed**: Sin límites (local)
 
 ### Tamaño de Datos
 
@@ -2227,8 +2236,8 @@ curl https://api.semantika.es/health
 curl https://api.semantika.es/tts/health \
   -H "X-API-Key: sk-xxxxx"
 
-# Qdrant health (directo)
-curl https://cluster.cloud.qdrant.io:6333/health
+# PostgreSQL health (Supabase)
+curl https://tu-proyecto.supabase.co/rest/v1/
 ```
 
 ---
@@ -2278,12 +2287,14 @@ El **Sistema Pool** es un componente que descubre automáticamente fuentes de co
 │ workflows/ingestion_flow.py (cada hora)                    │
 │   - Scrape con WebScraper                                  │
 │   - Enrich con LLM (category, atomic facts, quality)       │
-│   - Quality gate: >= 0.4                                   │
+│   - Quality gate: >= 0.4 + mínimo 2 statements             │
 │   ↓                                                         │
-│ Qdrant Pool collection (company_id="pool")                 │
-│   - Embeddings 768d (FastEmbed multilingual)               │
+│ PostgreSQL press_context_units (pool UUID)                │
+│   (company_id="99999999-9999-9999-9999-999999999999")      │
+│   - Embeddings 768d (FastEmbed local)                      │
 │   - Deduplicación automática (similarity > 0.98)           │
-│   - Todas las companies pueden consultar                   │
+│   - Búsqueda híbrida (semantic 0.7 + keyword 0.3)          │
+│   - RLS: Todas las companies pueden SELECT pool            │
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -2328,7 +2339,8 @@ El **Sistema Pool** es un componente que descubre automáticamente fuentes de co
 
 **Archivos**:
 - `workflows/ingestion_flow.py`: Flow principal
-- `utils/pool_client.py`: Cliente Qdrant para Pool operations
+- `utils/unified_context_ingester.py`: Ingesta unificada a PostgreSQL
+- `utils/unified_content_enricher.py`: Enriquecimiento con LLM
 
 ### Endpoints Pool
 
@@ -2530,9 +2542,11 @@ VALUES (
 
 - **Embeddings**: 768d multilingual (paraphrase-multilingual-mpnet-base-v2)
 - **Deduplicación**: Automática por similitud > 0.98
-- **Quality Threshold**: Solo ingesta content con quality_score >= 0.4
+- **Quality Gate**: quality_score >= 0.4 + mínimo 2 atomic statements
 - **Rate Limiting**: 5% sampling + discovery cada 3 días para evitar límites de Groq
-- **Company UUID Pool**: `00000000-0000-0000-0000-000000000999`
+- **Company UUID Pool**: `99999999-9999-9999-9999-999999999999`
+- **Storage**: PostgreSQL press_context_units (mismo schema que private content)
+- **Acceso**: RLS policies permiten SELECT del pool a todas las companies
 
 ### Documentación Completa
 
@@ -2542,12 +2556,20 @@ Ver `POOL_SYSTEM_STATUS.md` para documentación detallada del estado actual del 
 
 ## Changelog
 
-### v0.2.2 (2024-12-09)
+### v0.3.0 (2024-12-09)
+- ✅ Migración completa de Qdrant a PostgreSQL + pgvector
+- ✅ Búsqueda híbrida (semantic + keyword) con re-ranking
+- ✅ Query expansion (cache + diccionario local + Groq LLM)
+- ✅ FastEmbed local (768d) - sin coste API
+- ✅ Pool unificado en PostgreSQL (mismo schema que private content)
+- ✅ Endpoints /pool/* deprecados - usar include_pool=true en APIs existentes
+- ✅ Quality gate mejorado: mínimo 2 atomic statements
+- ✅ Fix generic titles en ingestion flow
+
+### v0.2.2 (2024-12-08)
 - ✅ Sistema Pool completo (discovery + ingestion)
 - ✅ Discovery flow con extract_index_url (LLM-based)
-- ✅ Pool endpoints: search, sources, adopt, system/health, system/stats
 - ✅ Geographic filtering via pool_discovery_config
-- ✅ Quality gates y deduplicación automática
 
 ### v0.1.2 (2024-11-11)
 - ✅ Añadido servicio TTS con Piper (modelo x_low)

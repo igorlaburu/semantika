@@ -129,7 +129,7 @@ scheduler.py::main()
 │
 └─► cleanup_old_data()
     └─► CronTrigger(hour=3, minute=0)
-        └─► qdrant.delete_old_points(cutoff_timestamp)
+        └─► supabase.delete_old_context_units(cutoff_timestamp)
 ```
 
 ## Utilidades Compartidas (Shared Utilities)
