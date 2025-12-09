@@ -849,9 +849,15 @@ async def save_monitored_url(state: ScraperState) -> ScraperState:
         supabase = get_supabase_client()
         change_info = state.get("change_info", {})
         
+        # Determine source_table based on company_id
+        # Pool uses discovered_sources, regular clients use sources
+        is_pool = company_id == "99999999-9999-9999-9999-999999999999"
+        source_table = "discovered_sources" if is_pool else "sources"
+        
         monitored_url_data = {
             "company_id": company_id,
             "source_id": source_id,
+            "source_table": source_table,
             "url": url,
             "url_type": state["url_type"],
             "title": state.get("title"),

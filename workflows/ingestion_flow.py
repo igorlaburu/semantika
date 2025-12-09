@@ -128,8 +128,12 @@ class IngestionFlow:
             # Convert workflow format to ingestion format
             content_items = []
             for item in workflow_items:
+                item_title = item.get("title", "").strip()
+                if not item_title or item_title == "Sin título":
+                    item_title = None
+                
                 content_items.append({
-                    "title": item.get("title", "Untitled"),
+                    "title": item_title,
                     "raw_text": item.get("content", ""),
                     "url": url,
                     "published_at": None,
@@ -168,13 +172,23 @@ class IngestionFlow:
             Ingest result
         """
         try:
-            title = item.get("title", "Untitled")
+            title = item.get("title")
             raw_text = item.get("raw_text", "")
             url = item.get("url", source["url"])
             
             # Check if content is already enriched by scraper_workflow
             # If yes, use it directly to avoid double LLM calls
-            if item.get("tags") and item.get("category") and item.get("atomic_statements"):
+            # IMPORTANT: Check title is valid (not "Sin título")
+            has_valid_title = title and title.strip() and title != "Sin título"
+            is_pre_enriched = (
+                has_valid_title and
+                item.get("tags") and 
+                item.get("category") and 
+                item.get("atomic_statements") and
+                len(item.get("atomic_statements", [])) >= 2
+            )
+            
+            if is_pre_enriched:
                 logger.info("using_pre_enriched_content",
                     title=title[:50],
                     source_id=source["source_id"]
@@ -190,20 +204,27 @@ class IngestionFlow:
                 }
             else:
                 logger.info("enriching_content",
-                    title=title[:50],
+                    has_partial_data=(title is not None),
                     source_id=source["source_id"]
                 )
                 
                 # Enrich content (tracked under Pool company)
+                # Pass valid title if available, otherwise LLM will generate
+                pre_filled = {}
+                if has_valid_title:
+                    pre_filled["title"] = title
+                
                 enriched = await enrich_content(
                     raw_text=raw_text,
                     source_type="scraping",
                     company_id="99999999-9999-9999-9999-999999999999",
-                    pre_filled={}  # Empty - LLM always generates title
+                    pre_filled=pre_filled
                 )
             
-            # Check quality threshold
+            # Quality gate: Check both quality_score AND statement count
             quality_score = enriched.get("quality_score", 0.5)
+            atomic_statements = enriched.get("atomic_statements", [])
+            statement_count = len(atomic_statements)
             
             if quality_score < 0.4:
                 logger.info("item_rejected_quality",
@@ -214,6 +235,17 @@ class IngestionFlow:
                     "success": False,
                     "reason": "quality_too_low",
                     "quality_score": quality_score
+                }
+            
+            if statement_count < 2:
+                logger.info("item_rejected_statements",
+                    title=title[:50],
+                    statement_count=statement_count
+                )
+                return {
+                    "success": False,
+                    "reason": "insufficient_statements",
+                    "statement_count": statement_count
                 }
             
             # Ingest to PostgreSQL via unified ingester
