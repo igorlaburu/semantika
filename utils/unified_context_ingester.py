@@ -64,8 +64,9 @@ from .logger import get_logger
 
 logger = get_logger("unified_context_ingester")
 
-# Duplicate detection threshold
-DUPLICATE_THRESHOLD = 0.98
+# Duplicate detection thresholds
+DUPLICATE_THRESHOLD_CLIENT = 0.98  # Regular clients: very strict (avoid duplicating own content)
+DUPLICATE_THRESHOLD_POOL = 0.92    # Pool: more sensitive (aggregate from multiple sources)
 
 
 def normalize_atomic_statements(
@@ -351,9 +352,14 @@ async def ingest_context_unit(
         if check_duplicates and embedding:
             try:
                 supabase = get_supabase_client()
+                
+                # Select threshold based on company type
+                # Pool uses lower threshold (0.92) to catch more duplicates from multiple sources
+                # Clients use higher threshold (0.98) to avoid false positives
+                is_pool = company_id == "99999999-9999-9999-9999-999999999999"
+                threshold = DUPLICATE_THRESHOLD_POOL if is_pool else DUPLICATE_THRESHOLD_CLIENT
 
                 # Use search RPC function for duplicate detection
-                # (cosine similarity > 0.98)
                 embedding_str = '[' + ','.join(map(str, embedding)) + ']'
 
                 result = supabase.client.rpc(
@@ -361,7 +367,7 @@ async def ingest_context_unit(
                     {
                         'p_company_id': company_id,
                         'p_query_embedding': embedding_str,
-                        'p_threshold': DUPLICATE_THRESHOLD,
+                        'p_threshold': threshold,
                         'p_limit': 1
                     }
                 ).execute()
