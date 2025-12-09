@@ -3499,7 +3499,120 @@ async def search_pool(
         raise HTTPException(status_code=500, detail=f"Pool search failed: {str(e)}")
 
 
-@app.get("/pool/context/{context_id}")
+@app.get("/pool/context-units")
+async def list_pool_context_units(
+    limit: int = 20,
+    offset: int = 0,
+    timePeriod: str = "24h",
+    category: str = "all",
+    source: str = "all",
+    authorized: bool = Depends(verify_pool_access)
+) -> Dict:
+    """
+    Get filtered and paginated list of Pool context units.
+    
+    Requires Pool API Key.
+    
+    Query params:
+    - limit: Max results (1-100, default 20)
+    - offset: Pagination offset (default 0)
+    - timePeriod: 24h, week, month, all (default 24h)
+    - category: Filter by category or 'all' (default all)
+    - source: Filter by source_code or 'all' (default all)
+    """
+    try:
+        from utils.pool_client import get_pool_client
+        
+        # Validate limit
+        if limit < 1 or limit > 100:
+            raise HTTPException(status_code=400, detail="Limit must be between 1 and 100")
+        
+        pool = get_pool_client()
+        
+        # Build filters for Qdrant scroll
+        from qdrant_client.models import Filter as QFilter, FieldCondition, MatchValue, Range
+        
+        conditions = [
+            FieldCondition(key="company_id", match=MatchValue(value="pool"))
+        ]
+        
+        # Time period filter
+        if timePeriod != "all":
+            now = datetime.utcnow()
+            if timePeriod == "24h":
+                cutoff = now - timedelta(hours=24)
+            elif timePeriod == "week":
+                cutoff = now - timedelta(days=7)
+            elif timePeriod == "month":
+                cutoff = now - timedelta(days=30)
+            else:
+                raise HTTPException(status_code=400, detail="Invalid timePeriod. Use: 24h, week, month, all")
+            
+            conditions.append(
+                FieldCondition(
+                    key="ingested_at",
+                    range=Range(gte=cutoff.isoformat())
+                )
+            )
+        
+        # Category filter
+        if category != "all":
+            conditions.append(
+                FieldCondition(key="category", match=MatchValue(value=category))
+            )
+        
+        # Source filter
+        if source != "all":
+            conditions.append(
+                FieldCondition(key="source_code", match=MatchValue(value=source))
+            )
+        
+        query_filter = QFilter(must=conditions)
+        
+        # Scroll with filter and pagination
+        results, next_offset = pool.client.scroll(
+            collection_name=pool.collection_name,
+            scroll_filter=query_filter,
+            limit=limit,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False
+        )
+        
+        # Format items
+        items = []
+        for point in results:
+            items.append({
+                "id": str(point.id),
+                **point.payload
+            })
+        
+        logger.info("pool_context_units_listed",
+            count=len(items),
+            filters={
+                "timePeriod": timePeriod,
+                "category": category,
+                "source": source
+            }
+        )
+        
+        return {
+            "items": items,
+            "total": len(items),
+            "limit": limit,
+            "offset": offset,
+            "has_more": next_offset is not None,
+            "next_offset": next_offset
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("list_pool_context_units_error", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to list Pool context units: {str(e)}")
+
+
+@app.get("/pool/context-units/{context_id}")
 async def get_pool_context(
     context_id: str,
     authorized: bool = Depends(verify_pool_access)
