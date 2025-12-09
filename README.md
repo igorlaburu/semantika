@@ -1,228 +1,306 @@
 # semantika
 
-**Pipeline de datos semántico multi-tenant con guardrails LLM**
+**Pipeline semántico multi-tenant para agregación y análisis de noticias en español/euskera**
 
-Pipeline inteligente para ingesta, procesamiento y búsqueda semántica de documentos con:
-- 🔒 Aislamiento multi-tenant estricto
-- 🛡️ Guardrails LLM (PII, copyright, deduplicación)
-- 🔍 Búsqueda semántica vectorial
-- 📊 Agregación inteligente con LLM
-- ⏰ Scheduler para scraping automático
-- 🌐 Web scraping + Email/File monitoring + Audio transcription
+Sistema inteligente para ingesta, procesamiento y búsqueda híbrida de contenido con:
+- 🔒 Multi-tenancy seguro con RLS (Row-Level Security)
+- 🔍 Búsqueda híbrida (semantic + keyword) con query expansion
+- 🌊 Pool compartido con discovery automático de fuentes
+- 🤖 Enriquecimiento LLM (Claude 3.5 Sonnet, Groq Llama 3.3)
+- 📊 Embeddings locales FastEmbed (768d multilingual)
+- ⏰ Scheduler para scraping e ingesta automática
+- 🌐 Web scraping + Perplexity + Email monitoring
 
 ---
 
-## 🚀 Quick Start (EasyPanel)
+## 🚀 Quick Start
 
 ### 1. **Servicios Externos Requeridos**
 
-Configura estos servicios antes de desplegar:
+- **[Supabase](https://supabase.com)**: PostgreSQL + pgvector (embeddings)
+- **[OpenRouter](https://openrouter.ai)**: Claude 3.5 Sonnet (enriquecimiento)
+- **[Groq](https://console.groq.com)**: Llama 3.3 70B (gratis, análisis rápido)
 
-- **[Supabase](https://supabase.com)**: Base de datos PostgreSQL
-- **[Qdrant Cloud](https://cloud.qdrant.io)**: Vector database
-- **[OpenRouter](https://openrouter.ai)**: API de LLMs (Claude, GPT)
-
-### 2. **Desplegar en EasyPanel**
-
-Sigue la guía completa: **[DEPLOY_EASYPANEL.md](./DEPLOY_EASYPANEL.md)**
-
-Pasos resumidos:
-1. Crea proyecto en EasyPanel
-2. Conecta este repo de GitHub
-3. Configura variables de entorno (ver `.env.easypanel`)
-4. Deploy con `docker-compose.prod.yml`
-5. Verifica con `./verify-deployment.sh`
-
-### 3. **Crear Primer Cliente**
+### 2. **Deploy en VPS**
 
 ```bash
-# En EasyPanel Console (semantika-api)
-python cli.py add-client --name "Mi Cliente" --email "cliente@example.com"
+# Clonar repositorio
+git clone https://github.com/igorlaburu/semantika.git
+cd semantika
 
-# Guarda el API Key generado: sk-xxxxx
+# Configurar variables de entorno
+cp .env.example .env
+# Editar .env con tus credenciales
+
+# Levantar servicios
+docker-compose up -d --build
+
+# Verificar
+curl http://localhost:8000/health
+```
+
+**Deploy automático**: Push a `main` → GitHub Actions despliega a VPS (ver [AUTO_DEPLOY_GUIDE.md](./AUTO_DEPLOY_GUIDE.md))
+
+### 3. **Crear Primera Organización**
+
+```bash
+# Onboarding automático vía API
+curl -X POST https://api.ekimen.ai/onboard/company \
+  -H "Content-Type: application/json" \
+  -d '{
+    "company_name": "Mi Empresa",
+    "company_cif": "B12345678",
+    "email": "admin@miempresa.com",
+    "password": "contraseña-segura",
+    "full_name": "Admin Usuario"
+  }'
+
+# Respuesta incluye JWT token para autenticación
 ```
 
 ### 4. **Probar API**
 
 ```bash
 # Health check
-curl https://tu-api.easypanel.app/health
+curl https://api.ekimen.ai/health
 
-# Autenticación
-curl https://tu-api.easypanel.app/me \
-  -H "X-API-Key: sk-xxxxx"
+# Login
+curl -X POST https://api.ekimen.ai/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "admin@miempresa.com", "password": "contraseña-segura"}'
 
-# Ingestar texto
-curl -X POST https://tu-api.easypanel.app/ingest/text \
-  -H "X-API-Key: sk-xxxxx" \
+# Guardar JWT token
+export JWT="eyJhbGc..."
+
+# Buscar en contexto privado + pool
+curl -X POST https://api.ekimen.ai/api/v1/context-units/search-vector \
+  -H "Authorization: Bearer $JWT" \
   -H "Content-Type: application/json" \
   -d '{
-    "text": "Machine learning is transforming industries worldwide.",
-    "title": "ML Revolution"
+    "query": "alcalde bilbao",
+    "limit": 10,
+    "threshold": 0.18,
+    "filters": {"include_pool": true}
   }'
-
-# Buscar
-curl "https://tu-api.easypanel.app/search?query=machine%20learning&limit=5" \
-  -H "X-API-Key: sk-xxxxx"
 ```
 
 ---
 
-## 📚 Documentación
+## 📚 Arquitectura
 
-### Deployment
-- **[Guía EasyPanel](./DEPLOY_EASYPANEL.md)** - Despliegue paso a paso
-- **[Plan de Desarrollo](./PLAN.md)** - Arquitectura y fases
-- **[Arquitectura Técnica](./requirements.md)** - Detalles completos
+### Sistema Unificado PostgreSQL + pgvector
 
-### API
+**Base de datos única** (Supabase):
+- ✅ Config + vectores en una sola BD
+- ✅ RLS policies para multi-tenancy seguro
+- ✅ Búsqueda híbrida (semantic + keyword) en una query
+- ✅ Joins nativos (context_units + sources + companies)
 
-- **[API Stateless](./API_STATELESS.md)** - Procesamiento sin almacenamiento (análisis, generación de artículos, guías de estilo)
+**Tablas principales**:
+- `press_context_units`: Noticias procesadas (company-specific + pool)
+- `web_context_units`: Monitoring web (subvenciones, formularios)
+- `sources`: Configuración de fuentes de scraping
+- `companies`, `users`, `organizations`: Multi-tenancy
 
-### API Endpoints (con almacenamiento en Qdrant)
+### Pool Compartido
 
-#### **POST /ingest/text**
-Ingesta texto con guardrails automáticos.
+**UUID Pool**: `99999999-9999-9999-9999-999999999999`
+
+**Flujo automático**:
+1. **Discovery** (cada 3 días): GNews API → LLM Groq identifica fuentes originales → Extrae index URLs → Guarda en `discovered_sources`
+2. **Ingesta** (cada hora): Scrape fuentes descubiertas → Enriquece con LLM → Guarda en `press_context_units` (pool)
+3. **Acceso**: Todos los clientes buscan con `include_pool=true`
+
+### Búsqueda Híbrida
+
+**Endpoint**: `POST /api/v1/context-units/search-vector`
+
+**3 capas**:
+1. **Query expansion**: Cache (1h) + diccionario local (español/euskera) + LLM Groq (solo queries cortos)
+2. **Semantic search**: pgvector cosine similarity (FastEmbed 768d, threshold 0.18)
+3. **Keyword search**: PostgreSQL full-text search (Spanish config)
+
+**Re-ranking**: `0.7 * semantic + 0.3 * keyword`
+
+**Performance**:
+- Latencia: 150-200ms (con cache) / 300-400ms (sin cache)
+- Costo: $0 (Groq gratis, FastEmbed local)
+
+### Embeddings FastEmbed
+
+**Modelo**: `sentence-transformers/paraphrase-multilingual-mpnet-base-v2`
+- Dimensiones: 768
+- Idiomas: 50+ (español, euskera, catalán, gallego, inglés...)
+- Velocidad: ~150ms por query (CPU)
+- Costo: $0 (100% local, sin API)
+
+---
+
+## 🔌 API Endpoints
+
+### Autenticación
+
+#### `POST /onboard/company`
+Crear nueva organización + usuario admin.
 
 ```bash
-curl -X POST https://api/ingest/text \
-  -H "X-API-Key: sk-xxx" \
+curl -X POST https://api.ekimen.ai/onboard/company \
   -H "Content-Type: application/json" \
   -d '{
-    "text": "Contenido a ingestar...",
-    "title": "Título del documento",
-    "metadata": {"source": "manual", "author": "John"},
-    "skip_guardrails": false
+    "company_name": "Empresa SL",
+    "company_cif": "B12345678",
+    "email": "admin@empresa.com",
+    "password": "pass",
+    "full_name": "Admin User"
   }'
 ```
 
-**Respuesta:**
+**Respuesta**: JWT token + company_id + user_id
+
+#### `POST /auth/login`
+Login con email + password.
+
+```bash
+curl -X POST https://api.ekimen.ai/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@empresa.com", "password": "pass"}'
+```
+
+**Respuesta**: JWT token (válido 7 días)
+
+### Context Units (Noticias)
+
+#### `GET /api/v1/context-units`
+Listar context units con filtros.
+
+```bash
+curl "https://api.ekimen.ai/api/v1/context-units?limit=20&timePeriod=24h&include_pool=true" \
+  -H "Authorization: Bearer $JWT"
+```
+
+**Parámetros**:
+- `limit`: Max resultados (1-100, default 20)
+- `offset`: Paginación (default 0)
+- `timePeriod`: `24h`, `week`, `month`, `all`
+- `category`: Filtro por categoría
+- `include_pool`: Incluir contenido pool (default false)
+
+#### `POST /api/v1/context-units/search-vector`
+Búsqueda híbrida (semantic + keyword).
+
+```bash
+curl -X POST https://api.ekimen.ai/api/v1/context-units/search-vector \
+  -H "Authorization: Bearer $JWT" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "lehendakari reunión empresarios",
+    "limit": 10,
+    "threshold": 0.18,
+    "filters": {"include_pool": true, "category": "política"}
+  }'
+```
+
+**Respuesta**:
 ```json
 {
-  "status": "ok",
-  "documents_added": 1,
-  "duplicates_skipped": 0,
-  "pii_detected": false,
-  "copyright_rejected": false
+  "query": "lehendakari reunión empresarios",
+  "query_expansion": {
+    "original": "lehendakari reunión empresarios",
+    "expanded_terms": ["lehendakari", "presidente", "lehendakaritza", "reunión", "bilera", "empresarios"],
+    "terms_count": 6
+  },
+  "results": [{
+    "id": "uuid",
+    "title": "El Lehendakari se reúne...",
+    "summary": "...",
+    "semantic_score": 0.82,
+    "keyword_score": 0.15,
+    "combined_score": 0.62,
+    "category": "política",
+    "created_at": "2025-12-09T..."
+  }],
+  "count": 10,
+  "search_method": "hybrid_semantic_keyword",
+  "query_time_ms": 187
 }
 ```
 
-#### **POST /ingest/url**
-Scraping web con extracción LLM.
+#### `GET /api/v1/context-units/{id}`
+Obtener context unit por ID.
+
+### Sources (Fuentes)
+
+#### `GET /api/v1/sources`
+Listar fuentes configuradas.
+
+#### `POST /api/v1/sources`
+Crear nueva fuente de scraping.
 
 ```bash
-curl -X POST https://api/ingest/url \
-  -H "X-API-Key: sk-xxx" \
+curl -X POST https://api.ekimen.ai/api/v1/sources \
+  -H "Authorization: Bearer $JWT" \
   -H "Content-Type: application/json" \
   -d '{
-    "url": "https://techcrunch.com/ai",
-    "extract_multiple": true
-  }'
-```
-
-#### **GET /search**
-Búsqueda semántica.
-
-```bash
-curl "https://api/search?query=artificial%20intelligence&limit=10&source=web" \
-  -H "X-API-Key: sk-xxx"
-```
-
-**Respuesta:**
-```json
-{
-  "results": [
-    {
-      "id": "uuid",
-      "score": 0.89,
-      "text": "...",
-      "metadata": {"title": "...", "source": "web"}
+    "source_name": "Noticias Empresa",
+    "source_type": "scraping",
+    "config": {
+      "url": "https://empresa.com/noticias",
+      "frequency_minutes": 60
     }
-  ]
-}
+  }'
 ```
 
-#### **GET /aggregate**
-Agregación con resumen LLM.
+### Processing (Workflows)
+
+#### `POST /process/micro-edit`
+Micro-edición de texto con LLM.
 
 ```bash
-curl "https://api/aggregate?query=machine%20learning&limit=20&threshold=0.7" \
-  -H "X-API-Key: sk-xxx"
+curl -X POST https://api.ekimen.ai/process/micro-edit \
+  -H "Authorization: Bearer $JWT" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Texto original...",
+    "command": "Corrige errores ortográficos",
+    "params": {"temperature": 0.3}
+  }'
 ```
 
-**Respuesta:**
-```json
-{
-  "summary": "Resumen inteligente generado por LLM...",
-  "sources_count": 15,
-  "documents": [...]
-}
-```
+#### `POST /process/redact-news-rich`
+Redacción de noticia con estructura rich.
 
 ---
 
-## 🛠️ CLI Commands
-
-Todos los comandos se ejecutan en la Console de EasyPanel (servicio `semantika-api`):
-
-```bash
-# Gestión de clientes
-python cli.py add-client --name "Cliente" --email "email@example.com"
-python cli.py list-clients
-
-# Gestión de tareas
-python cli.py add-task \
-  --client-id "uuid" \
-  --type web_llm \
-  --target "https://news.site.com/tech" \
-  --freq 60
-
-python cli.py list-tasks
-python cli.py list-tasks --client-id "uuid"
-python cli.py delete-task --task-id "uuid"
-
-# Información Qdrant
-python cli.py qdrant-info
-```
-
----
-
-## 🏗️ Arquitectura
+## 🏗️ Arquitectura Docker
 
 ```
-┌─────────────┐
-│   Cliente   │
-└──────┬──────┘
-       │ X-API-Key
-       ▼
 ┌─────────────────────────┐
-│   semantika-api (8000)  │  ◄── FastAPI + Autenticación
-│   - /ingest/text        │
-│   - /ingest/url         │
-│   - /search             │
-│   - /aggregate          │
+│  semantika-api (8000)   │  ◄── FastAPI + Auth JWT
+│  - /api/v1/*            │
+│  - /process/*           │
+│  - /auth/*              │
 └───────┬─────────────────┘
         │
-        ├──► Supabase (PostgreSQL)
-        │    - clients, tasks, credentials
+        ├──► Supabase PostgreSQL + pgvector
+        │    - press_context_units (768d embeddings)
+        │    - companies, users, sources
+        │    - RLS policies multi-tenant
         │
-        ├──► Qdrant Cloud (Vector DB)
-        │    - Embeddings fastembed (384d)
-        │    - Aislamiento por client_id
+        ├──► FastEmbed Local (768d)
+        │    - paraphrase-multilingual-mpnet-base-v2
+        │    - ~150ms per query
         │
-        └──► OpenRouter (LLM)
-             - Claude 3.5 Sonnet (guardrails)
-             - GPT-4o-mini (fast tasks)
+        ├──► OpenRouter
+        │    - Claude 3.5 Sonnet (enriquecimiento)
+        │
+        └──► Groq (gratis)
+             - Llama 3.3 70B (análisis, query expansion)
 
 ┌─────────────────────────┐
 │ semantika-scheduler     │  ◄── APScheduler
-│ - Ejecuta tareas        │
-│ - TTL cleanup (03:00)   │
-└─────────────────────────┘
-
-┌─────────────────────────┐
-│ dozzle (8081)           │  ◄── Log viewer
-│ - JSON structured logs  │
+│ - Discovery (3 días)    │
+│ - Ingesta Pool (1h)     │
+│ - Scraping sources      │
 └─────────────────────────┘
 ```
 
@@ -230,160 +308,113 @@ python cli.py qdrant-info
 
 ## 🔒 Seguridad
 
-### Guardrails Implementados
+### Multi-tenancy con RLS
 
-1. **PII Detection & Anonymization**
-   - Detecta: nombres, emails, teléfonos, DNI
-   - Reemplaza con `[NAME]`, `[EMAIL]`, `[PHONE]`
-   - Usa Claude 3.5 Sonnet
+**Row-Level Security** en Supabase:
+```sql
+-- Context units: Solo acceso a propios + pool
+CREATE POLICY select_own_company_context_units 
+ON press_context_units FOR SELECT
+USING (
+  company_id = current_user_company_id() 
+  OR company_id = '99999999-9999-9999-9999-999999999999'::uuid
+);
+```
 
-2. **Copyright Detection**
-   - Detecta contenido protegido por copyright
-   - Rechaza si confidence > 70%
+### Guardrails de Contenido
 
-3. **Semantic Deduplication**
-   - Threshold: 0.98 similaridad coseno
-   - Evita documentos duplicados
+1. **Quality gate**: Mínimo 2 atomic statements
+2. **Deduplicación semántica**: Threshold 0.98
+3. **Robots.txt**: Web scraper respeta directivas
+4. **Título genérico**: LLM extrae título real si HTML es genérico
 
-4. **Robots.txt Compliance**
-   - Web scraper respeta robots.txt
-   - User-agent: `semantika-bot/1.0`
+### Autenticación
 
-### Multi-tenancy
-
-- Aislamiento estricto por `client_id`
-- API Keys únicos por cliente (64 chars hex)
-- Filtros Qdrant con payload index
-- Row-Level Security en Supabase (opcional)
+- **JWT tokens** (Supabase Auth) - 7 días validez
+- **Refresh tokens** - Rotación automática
+- **RLS policies** - Aislamiento por company_id
 
 ---
 
 ## 📊 Monitoreo
 
 ### Logs
-- **Dozzle**: `https://logs.tudominio.com` (puerto 8081)
-- JSON structured logs
-- Filtro por servicio: `name=semantika`
+```bash
+# Ver logs API
+docker logs -f ekimen_semantika-semantika-api-1
+
+# Ver logs Scheduler
+docker logs -f ekimen_semantika-semantika-scheduler-1
+
+# Logs JSON estructurados
+{"level": "INFO", "timestamp": "...", "service": "hybrid_search", "query": "..."}
+```
 
 ### Métricas
-- **Supabase**: Dashboard de tablas
-- **Qdrant Cloud**: Dashboard de cluster
-  - Vectores almacenados
-  - Queries/segundo
-  - Storage usado
-- **OpenRouter**: Dashboard de usage y costos
 
----
-
-## 🧪 Testing
-
-### Verificación Automática
-```bash
-./verify-deployment.sh https://tu-api.easypanel.app sk-xxxxx
-```
-
-### Tests Manuales
-Ver **[PLAN.md](./PLAN.md)** secciones de validación de cada fase.
-
----
-
-## 🔧 Configuración Avanzada
-
-### Habilitar File Monitor
-
-```bash
-# En EasyPanel Environment Variables
-FILE_MONITOR_ENABLED=true
-FILE_MONITOR_WATCH_DIR=/app/data/watch
-FILE_MONITOR_INTERVAL=30
-
-# Los archivos deben nombrarse: {client_id}_filename.txt
-# Ejemplo: a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11_report.pdf
-```
-
-### Habilitar Email Monitor
-
-```bash
-EMAIL_MONITOR_ENABLED=true
-EMAIL_IMAP_SERVER=imap.gmail.com
-EMAIL_IMAP_PORT=993
-EMAIL_ADDRESS=bot@tudominio.com
-EMAIL_PASSWORD=app-password-aqui
-EMAIL_MONITOR_INTERVAL=60
-
-# Los emails deben incluir client_id en subject:
-# Subject: [a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11] Monthly Report
-```
-
-### Ajustar TTL
-
-```bash
-DATA_TTL_DAYS=60  # Borrar datos > 60 días (default: 30)
-```
-
----
-
-## 🐛 Troubleshooting
-
-### Error: "Invalid API Key"
-- Verifica que el API Key existe en Supabase → `clients` table
-- Comprueba que `is_active = true`
-- Revisa el header: `X-API-Key: sk-xxxxx`
-
-### Error: "Vector store unavailable"
-- Verifica conectividad a Qdrant Cloud
-- Comprueba `QDRANT_URL` y `QDRANT_API_KEY`
-- Revisa logs: `docker logs semantika-api`
-
-### Scheduler no ejecuta tareas
-- Lista tareas: `python cli.py list-tasks`
-- Verifica `is_active = true` en Supabase
-- Revisa logs: `docker logs semantika-scheduler`
-- Reinicia scheduler en EasyPanel
-
-### OpenRouter timeout
-- Verifica créditos en [openrouter.ai](https://openrouter.ai)
-- Comprueba `OPENROUTER_API_KEY`
-- Revisa rate limits del modelo
+- **Supabase Dashboard**: Queries, storage, usuarios
+- **OpenRouter Dashboard**: Usage LLM + costos
+- **Groq Console**: Requests (gratis, sin coste)
 
 ---
 
 ## 💰 Costos Estimados
 
-- **Supabase**: Free tier (hasta 500MB, 2GB transferencia)
-- **Qdrant Cloud**: $25/mes (1GB cluster)
-- **OpenRouter**: Variable
-  - Claude 3.5 Sonnet: ~$3 por 1M tokens input
-  - GPT-4o-mini: ~$0.15 por 1M tokens input
-  - Estimado: $10-50/mes uso medio
-- **EasyPanel**: Según tu plan de hosting ($5-50/mes)
+- **Supabase**: $25/mes (Pro plan para producción)
+- **OpenRouter**: $10-30/mes (Claude 3.5 Sonnet uso medio)
+- **Groq**: $0 (gratis, rate limits generosos)
+- **FastEmbed**: $0 (local, sin API)
+- **VPS**: $10-50/mes (según recursos)
 
-**Total**: $40-125/mes para uso medio
+**Total**: $45-105/mes para uso medio (~1000 búsquedas/día)
+
+---
+
+## 🧪 Testing
+
+```bash
+# Unit tests
+./run_tests.sh
+
+# O manualmente
+python3 -m pytest tests/ -v
+
+# Con coverage
+python3 -m pytest tests/ --cov=utils --cov=sources --cov-report=html
+```
+
+---
+
+## 📝 Documentación
+
+- **[CLAUDE.md](./CLAUDE.md)** - Guía para Claude Code (desarrollo)
+- **[AUTO_DEPLOY_GUIDE.md](./AUTO_DEPLOY_GUIDE.md)** - Deploy automático GitHub Actions
+- **[CLI_USAGE.md](./CLI_USAGE.md)** - Comandos CLI
+- **[SECURITY.md](./SECURITY.md)** - Guía de seguridad
+- **[requirements.md](./requirements.md)** - Arquitectura técnica completa
 
 ---
 
 ## 🚧 Roadmap
 
-### Implementado (v1.0)
-- ✅ Ingesta manual (texto, URL)
-- ✅ Guardrails LLM (PII, copyright, dedup)
-- ✅ Búsqueda semántica
-- ✅ Agregación con LLM
-- ✅ Scheduler de tareas
-- ✅ TTL cleanup automático
-- ✅ Web scraping
-- ✅ File/Email monitoring
-- ✅ Audio transcription (Whisper)
+### ✅ Implementado (v1.0)
+- ✅ PostgreSQL + pgvector unificado
+- ✅ Búsqueda híbrida (semantic + keyword)
+- ✅ Query expansion con cache + Groq
+- ✅ FastEmbed local 768d
+- ✅ Pool compartido con discovery automático
+- ✅ Multi-tenancy con RLS
+- ✅ Web scraping + Perplexity
+- ✅ Micro-edit + redacción noticias
+- ✅ Auth JWT + onboarding
 
-### Pendiente (v2.0+)
-- [ ] Twitter scraping (scraper.tech)
+### 🔜 Próximamente (v2.0)
+- [ ] Frontend Dashboard (React/Vue)
+- [ ] Alertas personalizadas (email/webhooks)
+- [ ] Analytics y reportes
 - [ ] API connectors (EFE, Reuters, WordPress)
-- [ ] Dashboard web UI
-- [ ] Webhooks salientes
-- [ ] Métricas (Prometheus + Grafana)
-- [ ] Cache (Redis)
-- [ ] Rate limiting por cliente
-- [ ] Fine-tuning de embeddings
+- [ ] Cache Redis para búsquedas
+- [ ] Rate limiting por company
 
 ---
 
@@ -406,9 +437,9 @@ MIT License - ver [LICENSE](./LICENSE)
 ## 📞 Soporte
 
 - **Issues**: [github.com/igorlaburu/semantika/issues](https://github.com/igorlaburu/semantika/issues)
-- **Documentación**: Ver archivos `*.md` en este repo
-- **Logs**: Revisa Dozzle primero (`https://logs.tudominio.com`)
+- **Documentación**: Ver `*.md` en raíz
+- **Logs**: `docker logs -f ekimen_semantika-semantika-api-1`
 
 ---
 
-**Built with ❤️ using FastAPI, Qdrant, Supabase & Claude**
+**Built with ❤️  using FastAPI, PostgreSQL, pgvector, FastEmbed, Claude & Groq**
