@@ -1,15 +1,19 @@
 # Documento de Arquitectura: semantika
 
-**Versión:** 1.0
-**Fecha:** 24 de octubre de 2025
+**Versión:** 2.0
+**Fecha:** 9 de diciembre de 2024
 
 ---
 
 ## 1. Visión General del Proyecto
 
-`semantika` es un pipeline de datos semánticos *multi-cliente* (multi-tenant), diseñado para operar como un servicio de fondo (headless). Su propósito es agregar, procesar y unificar información de un conjunto diverso de fuentes en una base de datos vectorial (Qdrant) para permitir búsquedas semánticas avanzadas, alertas de novedades y agregación de información.
+`semantika` es un pipeline de datos semánticos *multi-tenant* diseñado para operar como servicio headless. Su propósito es agregar, procesar y unificar información de múltiples fuentes en bases de datos vectoriales para búsquedas semánticas híbridas, alertas y agregación.
 
-El sistema está diseñado para un despliegue de dependencias mínimas en un VPS, encapsulado en contenedores **Docker**. La gestión de clientes, tareas y credenciales se centraliza en **Supabase**, desacoplando la configuración de la lógica de negocio.
+**Arquitectura dual de bases de datos:**
+- **PostgreSQL + pgvector** (actual): BD única para config + vectores con RLS multi-tenant
+- **Qdrant** (futuro): Migración planificada para escala masiva y búsqueda híbrida avanzada
+
+El sistema se despliega en **EasyPanel** (VPS) con contenedores Docker. La gestión multi-tenant se implementa vía **Supabase** (PostgreSQL + Auth) con Row-Level Security.
 
 ---
 
@@ -28,17 +32,27 @@ El sistema es capaz de ingerir datos de las siguientes fuentes, asociando cada d
 
 ### 2.2. Procesamiento y Almacenamiento
 
-* **Unificación:** Toda la información se normaliza al formato `Document` de LangChain.
-* **Vectorización:** Utiliza `fastembed` (integrado con Qdrant) para generar embeddings *on-the-fly* durante la ingesta.
-* **Metadatos:** Cada documento vectorial en Qdrant se almacena con un *payload* que incluye:
-    * `client_id`: (Para separación de datos).
-    * `source`, `source_id`: (Para trazabilidad).
-    * `title`: (Para desduplicación).
-    * `event_time`: (Timestamp del evento, si se conoce).
-    * `loaded_at`: (Timestamp de la ingesta).
-    * `special_info`: (Booleano para gestionar el TTL).
-* **Desduplicación:** Antes de insertar un documento, el sistema calcula el embedding de su título/contenido y realiza una búsqueda de similitud. Si un documento con similitud > 0.98 (configurable) ya existe para ese `client_id`, se descarta.
-* **Búsqueda Híbrida:** Qdrant se configura para utilizar *sparse vectors* (BM25, keywords) y *dense vectors* (semántica), permitiendo búsquedas híbridas.
+**Sistema actual (PostgreSQL + pgvector):**
+* **Vectorización:** FastEmbed local (`paraphrase-multilingual-mpnet-base-v2`, 768d) genera embeddings sin coste API
+* **Almacenamiento:** Tabla `press_context_units` con columna `embedding vector(768)`
+* **Metadatos:**
+    * `company_id`: Separación multi-tenant (UUID)
+    * `source_id`: Trazabilidad de fuente
+    * `title`, `summary`, `raw_text`: Contenido procesado
+    * `category`, `tags`: Clasificación LLM
+    * `atomic_statements`: Hechos extraídos estructurados
+    * `created_at`: Timestamp de ingesta
+* **Desduplicación:** Búsqueda semántica pre-insert con threshold 0.98
+* **Búsqueda Híbrida:** 
+    * Semantic: pgvector cosine similarity (threshold 0.18)
+    * Keyword: PostgreSQL full-text search (Spanish config)
+    * Re-ranking: 0.7 * semantic + 0.3 * keyword
+
+**Sistema futuro (Qdrant):**
+* **Sparse vectors** (BM25) + **Dense vectors** (semántica) nativos
+* Mejor rendimiento en escala masiva (millones de vectores)
+* Búsqueda híbrida nativa optimizada
+* Migración planificada cuando volumen justifique infraestructura
 
 ### 2.3. Recuperación y Agregación (Retrieval)
 
@@ -66,26 +80,40 @@ El sistema es capaz de ingerir datos de las siguientes fuentes, asociando cada d
 
 ### 3.1. Pila Tecnológica (Stack)
 
+**Backend:**
 * **Lenguaje:** Python 3.10+
 * **Framework API:** FastAPI, Uvicorn
-* **Planificador (Cron):** APScheduler
-* **Base de Datos de Configuración:** Supabase (PostgreSQL Cloud)
-* **Cliente de Supabase:** `supabase-py`
-* **Base de Datos Vectorial:** Qdrant (Corriendo en Docker)
-* **Cliente Vectorial:** `qdrant-client`
-* **Modelo de Embeddings:** `fastembed` (Integrado en Qdrant)
-* **Motor LLM:** OpenRouter (Claude 3.5 Sonnet, GPT-4o-mini) 
-* **Librería de Flujo:** LangChain
-* **Transcripción:** `openai-whisper` (modelo local)
-* **Visor de Logs:** `dozzle`
-* **Entorno de Ejecución:** Docker, Docker Compose
+* **Planificador:** APScheduler (cron jobs)
+* **Deployment:** EasyPanel + Docker Compose
+* **CI/CD:** GitHub Actions (auto-deploy a VPS)
+
+**Bases de Datos:**
+* **PostgreSQL + pgvector:** Supabase (config + vectores 768d) - **ACTUAL**
+* **Qdrant:** Contenedor Docker local / Qdrant Cloud - **FUTURO**
+* **Cliente Supabase:** `supabase-py`
+* **Cliente Qdrant:** `qdrant-client` (preparado para migración)
+
+**Embeddings y LLM:**
+* **Embeddings:** FastEmbed local (`paraphrase-multilingual-mpnet-base-v2`, 768d)
+* **LLM Enriquecimiento:** OpenRouter (Claude 3.5 Sonnet)
+* **LLM Análisis Rápido:** Groq (Llama 3.3 70B - gratis)
+* **Librería:** LangChain
+
+**Otros:**
+* **Query Expansion:** Cache (1h) + diccionario local + Groq
+* **Transcripción:** `openai-whisper` (opcional, pesado)
 
 ### 3.2. Sistemas Externos y Dependencias
 
-* **Supabase Cloud:** (Crítico) Aloja la configuración de clientes, tareas y credenciales de APIs externas.
-* **Qdrant:** (Crítico) El núcleo del almacenamiento. Se ejecuta como un contenedor Docker local o se conecta a Qdrant Cloud.
-* **OpenRouter:** (Crítico) Servicio de LLMs para extracción web (`web_llm`) y resumen (`/aggregate`).
-* **APIs de Terceros:** `scraper.tech` (Twitter), `API EFE`, `API Reuters` (configuradas por cliente).
+**Críticos:**
+* **Supabase:** PostgreSQL + Auth + RLS policies (config + vectores)
+* **OpenRouter:** Claude 3.5 Sonnet para enriquecimiento LLM
+* **Groq:** Llama 3.3 70B para análisis rápido (gratis)
+
+**Opcionales:**
+* **Qdrant:** Futuro storage vectorial (migración planificada)
+* **GNews API:** Discovery automático de fuentes pool
+* **ScraperTech:** Twitter scraping (si configurado por cliente)
 
 ---
 
