@@ -325,7 +325,7 @@ class DiscoveryFlow:
                                 config_id=config.get("config_id"),
                                 index_url=final_url[:80],
                                 original_article_url=source_url[:80],
-                                source_name=source_data["source_name"],
+                                source_name=analysis.get("org_name", domain),
                                 confidence=confidence,
                                 quality=analysis.get("estimated_quality")
                             )
