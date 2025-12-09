@@ -304,6 +304,32 @@ async def ingest_context_unit(
         # Step 3: Normalize atomic_statements format
         atomic_statements = normalize_atomic_statements(atomic_statements)
 
+        # QUALITY GATE: Reject if insufficient content
+        statement_count = len(atomic_statements) if atomic_statements else 0
+        
+        # Check for "sin contenido noticioso" in title or summary
+        has_no_content_marker = (
+            (title and "sin contenido noticioso" in title.lower()) or
+            (summary and "sin contenido noticioso" in summary.lower())
+        )
+        
+        if statement_count < 2 or has_no_content_marker:
+            logger.info("context_unit_rejected_quality",
+                title=title[:50] if title else "No title",
+                statement_count=statement_count,
+                has_no_content_marker=has_no_content_marker,
+                reason="insufficient_statements" if statement_count < 2 else "no_news_content"
+            )
+            return {
+                "success": False,
+                "context_unit_id": None,
+                "duplicate": False,
+                "rejected": True,
+                "reason": "insufficient_statements" if statement_count < 2 else "no_news_content",
+                "statement_count": statement_count,
+                "error": f"Context unit rejected: {statement_count} statements (minimum 2 required)" if statement_count < 2 else "Content marked as 'sin contenido noticioso'"
+            }
+
         # Step 4: Generate embedding for duplicate detection and search
         embedding = None
         if generate_embedding_flag:
