@@ -469,35 +469,35 @@ async def schedule_sources(scheduler: AsyncIOScheduler):
                         frequency_min=frequency_min
                     )
 
-        # Schedule daily TTL cleanup at 3 AM
-        scheduler.add_job(
-            cleanup_old_data,
-            trigger=CronTrigger(hour=3, minute=0),
-            id="ttl_cleanup",
-            replace_existing=True
-        )
-
-        logger.info("ttl_cleanup_scheduled", time="03:00 UTC daily")
+        # Schedule daily TTL cleanup at 3 AM (only if not already scheduled)
+        if not scheduler.get_job("ttl_cleanup"):
+            scheduler.add_job(
+                cleanup_old_data,
+                trigger=CronTrigger(hour=3, minute=0),
+                id="ttl_cleanup",
+                replace_existing=False
+            )
+            logger.info("ttl_cleanup_scheduled", time="03:00 UTC daily")
         
         # Schedule Pool discovery job (every 3 days at 8:00 AM UTC = 9:00 CET in winter, 10:00 CEST in summer)
-        scheduler.add_job(
-            pool_discovery_job,
-            trigger=CronTrigger(hour=8, minute=0, day='*/3'),
-            id="pool_discovery",
-            replace_existing=True
-        )
-        
-        logger.info("pool_discovery_scheduled", time="08:00 UTC every 3 days")
+        if not scheduler.get_job("pool_discovery"):
+            scheduler.add_job(
+                pool_discovery_job,
+                trigger=CronTrigger(hour=8, minute=0, day='*/3'),
+                id="pool_discovery",
+                replace_existing=False
+            )
+            logger.info("pool_discovery_scheduled", time="08:00 UTC every 3 days")
         
         # Schedule Pool ingestion job (hourly)
-        scheduler.add_job(
-            pool_ingestion_job,
-            trigger=IntervalTrigger(hours=1),
-            id="pool_ingestion",
-            replace_existing=True
-        )
-        
-        logger.info("pool_ingestion_scheduled", interval="hourly")
+        if not scheduler.get_job("pool_ingestion"):
+            scheduler.add_job(
+                pool_ingestion_job,
+                trigger=IntervalTrigger(hours=1),
+                id="pool_ingestion",
+                replace_existing=False
+            )
+            logger.info("pool_ingestion_scheduled", interval="hourly")
 
     except Exception as e:
         logger.error("schedule_sources_error", error=str(e))
