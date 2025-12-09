@@ -4,86 +4,69 @@ Este documento contiene instrucciones específicas para Claude Code al trabajar 
 
 ## Contexto del Proyecto
 
-`semantika` es un pipeline de datos semánticos multi-tenant diseñado para operar como servicio headless. Agrega, procesa y unifica información de múltiples fuentes en Qdrant para búsquedas semánticas, alertas y agregación.
+`semantika` es un pipeline de datos semánticos multi-tenant diseñado para operar como servicio headless. Agrega, procesa y unifica información de múltiples fuentes en PostgreSQL/pgvector para búsquedas semánticas híbridas, alertas y agregación.
 
 ## Stack Tecnológico
 
 - **Backend**: Python 3.10+, FastAPI, APScheduler
-- **Base de Datos**: Supabase (config), Qdrant (vectores)
-- **LLM**: OpenRouter (Claude 3.5 Sonnet, GPT-4o-mini)
-- **Embeddings**: ⚠️ **OpenRouter/OpenAI** (temporal - ver migración pendiente)
+- **Base de Datos**: Supabase PostgreSQL + pgvector (embeddings 768d)
+- **LLM**: OpenRouter (Claude 3.5 Sonnet), Groq (Llama 3.3 70B - gratis)
+- **Embeddings**: ✅ **FastEmbed local** (`paraphrase-multilingual-mpnet-base-v2`, 768d)
+- **Búsqueda**: Híbrida (semantic pgvector + keyword full-text)
 - **Orquestación**: Docker Compose
 - **Deployment**: GitHub Actions (CI/CD automático)
 
-## ⚠️ MIGRACIÓN PENDIENTE: Embeddings Locales
+## Arquitectura de Datos
 
-### Estado Actual (Temporal)
-**Usando OpenRouter API para embeddings**:
-- Modelo: `openai/text-embedding-3-small` (1536d truncado a 384d)
-- Costo: ~$0.02 por 1M tokens (~$1-5/mes estimado)
-- Ubicación: `utils/embedding_generator.py` (fallback automático)
-- Razón: VPS modesto sin GPU, múltiples clientes concurrentes
+### Sistema Unificado PostgreSQL + pgvector
 
-### Plan de Migración (Cuando escales)
+**Estado actual**: ✅ Migración completa de Qdrant → PostgreSQL (dic 2024)
 
-**OBJETIVO**: Migrar a modelo local multilingual optimizado para español
+**Ventajas**:
+- ✅ Una sola BD (config + vectores) - simplicidad operacional
+- ✅ RLS policies para multi-tenancy seguro
+- ✅ Búsqueda híbrida (semantic + keyword en una query)
+- ✅ Joins nativos (context_units + sources + companies)
+- ✅ No necesita sincronización entre Qdrant y Supabase
 
-**Modelo recomendado**: `sentence-transformers/paraphrase-multilingual-mpnet-base-v2`
-- Dimensiones: 768 (vs 384 actual)
-- Idiomas: 50+ incluyendo español y euskera
-- Rendimiento: Excelente para contenido en español
+**Colecciones**:
+- `press_context_units`: Noticias de prensa (company-specific + pool)
+- `web_context_units`: Monitoring web (subvenciones, formularios)
 
-**Pasos de migración**:
+**Pool compartido**:
+- UUID: `99999999-9999-9999-9999-999999999999`
+- Contenido público accesible por todos los clientes
+- Discovery automático vía GNews + LLM (cada 3 días)
+- Ingesta horaria de fuentes descubiertas
 
-1. **Preparar modelo local**:
-   ```python
-   # En utils/embedding_generator.py
-   from fastembed import TextEmbedding
-   model = TextEmbedding(
-       model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
-   )
-   ```
+### Embeddings FastEmbed (Local)
 
-2. **Migrar base de datos**:
-   ```sql
-   -- Aumentar dimensiones de 384 a 768
-   ALTER TABLE press_context_units
-   ALTER COLUMN embedding TYPE vector(768);
+**Modelo**: `sentence-transformers/paraphrase-multilingual-mpnet-base-v2`
+- Dimensiones: 768
+- Idiomas: 50+ (español, euskera, catalán, gallego, inglés...)
+- Velocidad: ~100-200ms por embedding (CPU)
+- Ubicación: `utils/embedding_generator.py`
 
-   ALTER TABLE url_content_units
-   ALTER COLUMN embedding TYPE vector(768);
-   ```
+**Performance**:
+- Startup: Modelo precargado en `/app/startup` (~1-2 segundos)
+- Inferencia: ~150ms por query en VPS modesto
+- Costo: $0 (100% local)
 
-3. **Actualizar función de búsqueda**:
-   ```sql
-   -- En search_context_units_by_vector()
-   -- Cambiar parámetro: p_query_embedding vector(768)
-   ```
+### Búsqueda Híbrida (Semantic + Keyword)
 
-4. **Regenerar embeddings existentes**:
-   - Script para procesar todos los context units (~30+ unidades)
-   - Regenerar embedding con nuevo modelo
-   - Actualizar BD con nuevos vectores de 768d
+**Endpoint**: `POST /api/v1/context-units/search-vector`
 
-5. **Eliminar fallback de OpenRouter**:
-   - Remover código de fallback a OpenAI
-   - Usar solo modelo local
+**3 técnicas combinadas**:
+1. **Query expansion**: Cache (1h) + sinónimos locales + LLM Groq (gratis)
+2. **Semantic search**: pgvector cosine similarity (threshold 0.18)
+3. **Keyword search**: PostgreSQL full-text search (Spanish config)
 
-**Requisitos de recursos**:
-- Disco: +90-120MB (modelo)
-- RAM: +300MB (modelo cargado)
-- CPU: 100-200ms por embedding (sin GPU)
-- ⚠️ **Consideración**: Con múltiples clientes buscando simultáneamente, evaluar si VPS puede manejar la carga
+**Re-ranking**: `0.7 * semantic_score + 0.3 * keyword_score`
 
-**Cuándo migrar**:
-- ✅ Cuando tengas servidor con >4 cores o GPU
-- ✅ Cuando el costo de OpenRouter justifique infraestructura
-- ✅ Cuando necesites embeddings offline
-- ❌ NO migrar si el VPS actual se satura con búsquedas concurrentes
-
-**Ver también**:
-- `utils/embedding_generator.py` (TODO gigante línea ~183)
-- Issues de FastEmbed: https://github.com/qdrant/fastembed
+**Performance**:
+- Latencia: 150-200ms (con cache) / 300-400ms (sin cache)
+- Costo: $0 (Groq gratis para expansión)
+- Threshold: 0.18 (vs 0.25 anterior, +40% resultados)
 
 ## Arquitectura
 
