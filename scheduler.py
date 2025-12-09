@@ -479,25 +479,25 @@ async def schedule_sources(scheduler: AsyncIOScheduler):
             )
             logger.info("ttl_cleanup_scheduled", time="03:00 UTC daily")
         
-        # Schedule Pool discovery job (every 3 days at 8:00 AM UTC = 9:00 CET in winter, 10:00 CEST in summer)
+        # Schedule Pool discovery job (hourly at :30 for testing - TODO: reduce frequency later)
         if not scheduler.get_job("pool_discovery"):
             scheduler.add_job(
                 pool_discovery_job,
-                trigger=CronTrigger(hour=8, minute=0, day='*/3'),
+                trigger=CronTrigger(minute=30),
                 id="pool_discovery",
                 replace_existing=False
             )
-            logger.info("pool_discovery_scheduled", time="08:00 UTC every 3 days")
+            logger.info("pool_discovery_scheduled", time="every hour at :30")
         
-        # Schedule Pool ingestion job (hourly)
+        # Schedule Pool ingestion job (hourly at :00)
         if not scheduler.get_job("pool_ingestion"):
             scheduler.add_job(
                 pool_ingestion_job,
-                trigger=IntervalTrigger(hours=1),
+                trigger=CronTrigger(minute=0),
                 id="pool_ingestion",
                 replace_existing=False
             )
-            logger.info("pool_ingestion_scheduled", interval="hourly")
+            logger.info("pool_ingestion_scheduled", time="every hour at :00")
 
     except Exception as e:
         logger.error("schedule_sources_error", error=str(e))
