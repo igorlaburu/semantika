@@ -159,13 +159,13 @@ class QdrantClient:
                 if conditions:
                     qdrant_filter = Filter(must=conditions)
 
-            # Search
-            search_result = self.client.search(
+            # Search using query_points (qdrant-client 1.16+)
+            search_result = self.client.query_points(
                 collection_name=self.collection_name,
-                query_vector=query_vector,
+                query=query_vector,
                 limit=limit,
                 query_filter=qdrant_filter
-            )
+            ).points
 
             results = []
             for scored_point in search_result:

@@ -226,9 +226,9 @@ class PoolClient:
     async def _check_duplicate(self, embedding: List[float]) -> Optional[Dict]:
         """Check for duplicates by embedding similarity."""
         try:
-            results = self.client.search(
+            results = self.client.query_points(
                 collection_name=self.collection_name,
-                query_vector=embedding,
+                query=embedding,
                 limit=1,
                 query_filter=Filter(
                     must=[
@@ -238,7 +238,7 @@ class PoolClient:
                         )
                     ]
                 )
-            )
+            ).points
             
             if results and len(results) > 0:
                 top = results[0]
@@ -336,14 +336,14 @@ class PoolClient:
             
             query_filter = Filter(must=conditions) if conditions else None
             
-            # Search
-            results = self.client.search(
+            # Search using query_points (qdrant-client 1.16+)
+            results = self.client.query_points(
                 collection_name=self.collection_name,
-                query_vector=embedding,
+                query=embedding,
                 limit=limit,
                 query_filter=query_filter,
                 score_threshold=score_threshold
-            )
+            ).points
             
             # Format results
             formatted = []
