@@ -176,6 +176,20 @@ Implementar **antes** de la desduplicación:
 
 ## Tareas Pendientes
 
+### Pool Discovery & Ingestion
+- [ ] **TODO**: Mover schedules de pool discovery/ingestion a BD (tabla pool_discovery_config)
+  - Actualmente hardcoded en scheduler.py (discovery cada hora :30, ingestion cada hora :00)
+  - Debería leer schedule_config desde pool_discovery_config por geographic_area
+  - Permitir diferentes frecuencias por región (ej: Álava cada 2h, Bizkaia cada 6h)
+- [ ] **TODO**: Mejorar validación de URLs en discovery_flow.py
+  - Añadir post-validación después de extract_index_url()
+  - Detectar y rechazar URLs con IDs numéricos largos o slugs específicos
+  - Ejemplo rechazar: `/events/106714-titulo-largo` → Aceptar solo: `/events`
+- [ ] **TODO**: Limpiar contenido HTML antes de generar embeddings
+  - Actualmente el summary tiene mucho ruido (navegación, scripts, etc)
+  - Afecta la calidad de los embeddings y scores de búsqueda
+  - Mejorar extracción en web_scraper.py antes de enrichment
+
 ### Fase 1: Infraestructura
 - [x] .env.example
 - [x] .gitignore
