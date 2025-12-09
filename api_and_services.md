@@ -1,7 +1,7 @@
 # Documentación API y Servicios - Sistema Ekimen
 
-**Versión**: 0.2.1
-**Última actualización**: 2025-11-23
+**Versión**: 0.2.2
+**Última actualización**: 2024-12-09
 **Base URL**: `https://api.ekimen.ai`
 
 ---
@@ -18,6 +18,7 @@
 8. [Crear Workflows Personalizados](#crear-workflows-personalizados)
 9. [Configuración del Sistema](#configuración-del-sistema)
 10. [Uso y Facturación](#uso-y-facturación)
+11. [Sistema Pool (Discovery Automático)](#sistema-pool-discovery-automático)
 
 ---
 
@@ -2240,9 +2241,315 @@ curl https://cluster.cloud.qdrant.io:6333/health
 
 ---
 
+## Sistema Pool (Discovery Automático)
+
+El **Sistema Pool** es un componente que descubre automáticamente fuentes de contenido institucional (salas de prensa, comunicados de ayuntamientos, etc.) y las ingesta a una colección compartida en Qdrant.
+
+### Arquitectura Pool vs Company
+
+```
+┌────────────────────────────────────────────────────────────┐
+│ COMPANIES (Clientes periodistas - Privado)                 │
+├────────────────────────────────────────────────────────────┤
+│ sources (tabla) → scraper_workflow.py                      │
+│   ↓                                                         │
+│ monitored_urls (tracking URLs)                             │
+│   ↓                                                         │
+│ url_content_units (contenido scrapeado)                    │
+│   ↓                                                         │
+│ pgvector en Supabase (embeddings 768d)                     │
+│   - Búsquedas privadas por company_id                      │
+│   - RLS habilitado                                         │
+└────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────┐
+│ POOL (Sistema compartido - Público)                        │
+├────────────────────────────────────────────────────────────┤
+│ pool_discovery_config (tabla) → Filtros geográficos        │
+│   ↓                                                         │
+│ workflows/discovery_flow.py (cada 3 días)                  │
+│   - GNews API → Headlines geográficos                      │
+│   - Groq Compound → Búsqueda fuente original               │
+│   - extract_index_url() → Encuentra página índice          │
+│   - analyze_press_room() → Valida institutional source     │
+│   ↓                                                         │
+│ discovered_sources (tabla) → Fuentes encontradas           │
+│   ↓                                                         │
+│ workflows/ingestion_flow.py (cada hora)                    │
+│   - Scrape con WebScraper                                  │
+│   - Enrich con LLM (category, atomic facts, quality)       │
+│   - Quality gate: >= 0.4                                   │
+│   ↓                                                         │
+│ Qdrant Pool collection (company_id="pool")                 │
+│   - Embeddings 768d (FastEmbed multilingual)               │
+│   - Deduplicación automática (similarity > 0.98)           │
+│   - Todas las companies pueden consultar                   │
+└────────────────────────────────────────────────────────────┘
+```
+
+### Componentes del Sistema Pool
+
+#### 1. Discovery Flow (Cada 3 días)
+
+**Propósito**: Descubrir automáticamente nuevas fuentes institucionales.
+
+**Flujo**:
+1. Lee configuraciones activas de `pool_discovery_config` (filtros geográficos: Álava, Bizkaia, etc.)
+2. Por cada config:
+   - Busca noticias en GNews API (últimas 24h)
+   - Sample 5% de artículos
+   - Por cada headline:
+     - Busca fuente original con Groq Compound (web search)
+     - Extrae URL de índice (de artículo específico → página /news)
+     - Analiza si es sala de prensa institucional
+     - Guarda en `discovered_sources`
+
+**Scheduling**: Cada 3 días a las 8:00 UTC
+
+**Archivos**:
+- `workflows/discovery_flow.py`: Orquestador principal
+- `sources/discovery_connector.py`: Análisis LLM (extract_index_url, analyze_press_room)
+- `sources/gnews_client.py`: GNews API wrapper
+
+#### 2. Ingestion Flow (Cada hora)
+
+**Propósito**: Scrapear fuentes descubiertas e ingestar a Qdrant Pool.
+
+**Flujo**:
+1. Obtiene sources activas de `discovered_sources` (status='trial' o 'active')
+2. Por cada source:
+   - Scrape URL con WebScraper
+   - Enriquece contenido con LLM
+   - Quality gate: rechaza si quality_score < 0.4
+   - Ingesta a Qdrant Pool collection
+   - Actualiza stats de la source
+
+**Scheduling**: Cada hora
+
+**Archivos**:
+- `workflows/ingestion_flow.py`: Flow principal
+- `utils/pool_client.py`: Cliente Qdrant para Pool operations
+
+### Endpoints Pool
+
+#### `POST /pool/search`
+
+Búsqueda semántica en Pool collection.
+
+**Headers**: `X-API-Key`
+
+**Body**:
+```json
+{
+  "query": "Vitoria inversión industrial",
+  "limit": 10,
+  "filters": {
+    "category": "economía",
+    "date_from": "2024-01-01"
+  },
+  "score_threshold": 0.7
+}
+```
+
+**Respuesta**:
+```json
+{
+  "results": [
+    {
+      "id": "uuid-1",
+      "title": "Inversión en polígono industrial",
+      "content": "Contenido...",
+      "quality_score": 0.85,
+      "source_name": "Gobierno Vasco",
+      "category": "economía",
+      "published_at": "2024-12-01T10:00:00Z"
+    }
+  ],
+  "total": 5,
+  "query_time_ms": 89.9
+}
+```
+
+---
+
+#### `GET /pool/context/{context_id}`
+
+Obtener context unit del Pool por ID.
+
+**Headers**: `X-API-Key`
+
+**Respuesta**:
+```json
+{
+  "id": "uuid-1",
+  "title": "Título del contenido",
+  "content": "Contenido completo...",
+  "category": "política",
+  "tags": ["gobierno", "infraestructura"],
+  "quality_score": 0.75,
+  "atomic_statements": [
+    {
+      "text": "Statement 1",
+      "type": "fact",
+      "order": 1
+    }
+  ],
+  "source_name": "Gobierno Vasco",
+  "source_code": "www_irekia_euskadi_eus",
+  "published_at": "2024-12-08T10:00:00Z",
+  "ingested_at": "2024-12-08T11:00:00Z"
+}
+```
+
+---
+
+#### `GET /pool/sources`
+
+Listar fuentes descubiertas.
+
+**Headers**: `X-API-Key`
+
+**Query Params**:
+- `status`: Filtrar por status (trial, active, inactive, archived)
+- `limit`: Número de resultados (default: 20)
+
+**Respuesta**:
+```json
+{
+  "sources": [
+    {
+      "source_id": "uuid-1",
+      "source_name": "Gobierno Vasco",
+      "url": "https://irekia.euskadi.eus/es/events",
+      "status": "trial",
+      "relevance_score": 0.8,
+      "avg_quality_score": 0.7,
+      "content_count_7d": 5,
+      "discovered_at": "2024-12-08T10:00:00Z",
+      "last_scraped_at": "2024-12-09T09:00:00Z",
+      "config": {
+        "geographic_area": "Álava",
+        "discovery_config_id": "uuid-config"
+      }
+    }
+  ],
+  "total": 1
+}
+```
+
+---
+
+#### `POST /pool/adopt`
+
+Copiar content unit del Pool al espacio privado de la company.
+
+**Headers**: `Authorization: Bearer {JWT}` (user token)
+
+**Body**:
+```json
+{
+  "context_id": "uuid-pool-content",
+  "target_organization_id": "uuid-user-org"
+}
+```
+
+**Respuesta**:
+```json
+{
+  "success": true,
+  "context_unit_id": "uuid-new-copy",
+  "message": "Content adopted from pool"
+}
+```
+
+---
+
+#### `GET /pool/system/health`
+
+Health check del sistema Pool (solo admin).
+
+**Headers**: `X-System-Key`
+
+**Respuesta**:
+```json
+{
+  "status": "healthy",
+  "pool_stats": {
+    "total_context_units": 15,
+    "collection_name": "pool",
+    "total_sources": 1,
+    "sources_by_status": {
+      "trial": 1
+    }
+  }
+}
+```
+
+---
+
+#### `GET /pool/system/stats`
+
+Estadísticas del Pool (solo admin).
+
+**Headers**: `X-System-Key`
+
+**Respuesta**:
+```json
+{
+  "total_context_units": 15,
+  "collection_name": "pool",
+  "avg_source_relevance": 0.8,
+  "avg_source_quality": 0.7,
+  "total_sources": 1
+}
+```
+
+### Configuración Geographic Discovery
+
+La tabla `pool_discovery_config` permite configurar búsquedas por área geográfica:
+
+```sql
+-- Ejemplo: Añadir config para Bizkaia
+INSERT INTO pool_discovery_config (
+  geographic_area,
+  search_query,
+  sample_rate,
+  target_source_types,
+  created_by
+)
+VALUES (
+  'Bizkaia',
+  'Bilbao',
+  0.05,  -- 5% sampling
+  ARRAY['press_room', 'institutional'],
+  (SELECT id FROM organizations WHERE slug = 'system')
+);
+```
+
+### Características Técnicas
+
+- **Embeddings**: 768d multilingual (paraphrase-multilingual-mpnet-base-v2)
+- **Deduplicación**: Automática por similitud > 0.98
+- **Quality Threshold**: Solo ingesta content con quality_score >= 0.4
+- **Rate Limiting**: 5% sampling + discovery cada 3 días para evitar límites de Groq
+- **Company UUID Pool**: `00000000-0000-0000-0000-000000000999`
+
+### Documentación Completa
+
+Ver `POOL_SYSTEM_STATUS.md` para documentación detallada del estado actual del sistema Pool.
+
+---
+
 ## Changelog
 
-### v0.1.2 (2025-11-11)
+### v0.2.2 (2024-12-09)
+- ✅ Sistema Pool completo (discovery + ingestion)
+- ✅ Discovery flow con extract_index_url (LLM-based)
+- ✅ Pool endpoints: search, sources, adopt, system/health, system/stats
+- ✅ Geographic filtering via pool_discovery_config
+- ✅ Quality gates y deduplicación automática
+
+### v0.1.2 (2024-11-11)
 - ✅ Añadido servicio TTS con Piper (modelo x_low)
 - ✅ Workflow de scraping inteligente con Groq
 - ✅ Fix scheduler: no resetear timers innecesariamente
