@@ -200,8 +200,12 @@ class IngestionFlow:
             result = await ingest_context_unit(
                 company_id=pool_company_id,
                 source_id=source["source_id"],
-                content=raw_text,
-                enriched_data=enriched,
+                raw_text=raw_text,
+                title=enriched.get("title"),
+                summary=enriched.get("summary"),
+                category=enriched.get("category"),
+                tags=enriched.get("tags", []),
+                atomic_statements=enriched.get("atomic_statements", []),
                 source_type="scraping",
                 origin_url=url,
                 metadata={
