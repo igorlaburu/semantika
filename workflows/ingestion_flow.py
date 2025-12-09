@@ -201,14 +201,14 @@ class IngestionFlow:
                 company_id=pool_company_id,
                 source_id=source["source_id"],
                 raw_text=raw_text,
+                url=url,
                 title=enriched.get("title"),
                 summary=enriched.get("summary"),
                 category=enriched.get("category"),
                 tags=enriched.get("tags", []),
                 atomic_statements=enriched.get("atomic_statements", []),
                 source_type="scraping",
-                origin_url=url,
-                metadata={
+                source_metadata={
                     "source_name": source["source_name"],
                     "source_code": source["source_code"],
                     "quality_score": quality_score,
