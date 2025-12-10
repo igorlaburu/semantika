@@ -448,14 +448,60 @@ Extract and respond in JSON:
         headline: str,
         organization_id: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Search for original public source of a news headline using Groq Compound.
+        """Search for original public source of a news headline.
+        
+        Delegates to discovery_search module which routes between:
+        - groq_compound: Groq Compound model (free, rate limited)
+        - tavily_openai: Tavily Search + OpenAI o1-mini (paid, reliable)
+        
+        Provider configured via DISCOVERY_SEARCH_PROVIDER env var.
         
         Args:
             headline: News headline to search for
-            organization_id: Organization ID for tracking (default: SYSTEM org)
+            organization_id: Organization ID for tracking (legacy, kept for compatibility)
             
         Returns:
             Dict with sources: [{"url": "...", "type": "press_room"|"media", "title": "..."}, ...]
+        """
+        from utils.discovery_search import search_original_source as search_impl
+        
+        try:
+            logger.debug("search_original_source_start", headline=headline[:100])
+            
+            # Delegate to discovery_search module (handles provider routing)
+            source_url = await search_impl(headline, snippet="")
+            
+            if not source_url:
+                logger.debug("no_original_source_found", headline=headline[:100])
+                return {"sources": []}
+            
+            # Return in expected format (legacy compatibility)
+            return {
+                "sources": [{
+                    "url": source_url,
+                    "type": "institutional",
+                    "title": headline[:100],
+                    "organization": ""  # Could extract domain name if needed
+                }]
+            }
+            
+        except Exception as e:
+            logger.error("search_original_source_error",
+                headline=headline[:100],
+                error_type=type(e).__name__,
+                error=str(e)
+            )
+            return {"sources": []}
+    
+    async def search_original_source_legacy(
+        self,
+        headline: str,
+        organization_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """LEGACY: Old Groq Compound implementation (kept for reference).
+        
+        This method is no longer used but kept for backward compatibility.
+        Use search_original_source() instead which delegates to discovery_search module.
         """
         import json
         

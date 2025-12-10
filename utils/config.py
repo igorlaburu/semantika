@@ -80,6 +80,18 @@ class Settings(BaseSettings):
         description="GNews API key for discovering news sources"
     )
     
+    # Tavily Search API Configuration
+    tavily_api_key: str = Field(
+        default="",
+        description="Tavily API key for web search in discovery flow"
+    )
+    
+    # Discovery Search Configuration
+    discovery_search_provider: str = Field(
+        default="groq_compound",
+        description="Search provider for discovery: 'groq_compound' or 'tavily_openai'"
+    )
+    
     # Pool Configuration
     pool_api_key: str = Field(
         default="change_this_in_production",
