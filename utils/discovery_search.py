@@ -124,7 +124,7 @@ async def search_original_source_tavily(headline: str, snippet: str) -> Optional
             for r in results[:5]
         ])
         
-        analysis_prompt = f"""Analiza estos resultados de búsqueda y determina la fuente original de la noticia.
+        analysis_prompt = f"""Analiza estos resultados y encuentra el EMISOR ORIGINAL de la noticia (NO medios que redistribuyen).
 
 NOTICIA BUSCADA:
 Titular: {headline}
@@ -133,12 +133,27 @@ Resumen: {snippet}
 RESULTADOS DE BÚSQUEDA:
 {formatted_results}
 
-TAREA:
-Identifica el sitio web institucional o medio local que publicó originalmente esta noticia.
-Devuelve SOLO la URL del sitio raíz (ejemplo: https://ayuntamiento.vitoria.es).
-Si ningún resultado parece la fuente original, responde "NO_ENCONTRADO".
+EMISORES VÁLIDOS (aceptar):
+- Instituciones públicas: ayuntamientos, diputaciones, gobiernos, mancomunidades, ministerios
+- Empresas: notas de prensa corporativas (/prensa, /comunicados, /sala-prensa, /newsroom)
+- Institutos públicos: universidades, INE, SEPE, centros de investigación
+- Asociaciones, ONGs, fundaciones, sindicatos (UGT, CCOO, ELA)
+- Grupos ecologistas, partidos políticos
+- Cualquier entidad que EMITE contenido original para que otros lo redifundan
 
-Formato de respuesta: Solo la URL o "NO_ENCONTRADO", nada más."""
+RECHAZAR (NO válidos):
+- Medios de comunicación: periódicos, radios, TVs, portales de noticias
+- Agregadores de noticias (gasteizhoy, elcorreo, diariovasco, elpais, elmundo)
+- Cualquier sitio cuyo negocio es publicar/redistribuir noticias de terceros
+
+INSTRUCCIONES:
+1. Busca primero dominios institucionales: .gov, ayuntamiento.*, gobierno.*, diputacion.*
+2. Si no hay institucional, busca dominio corporativo con /prensa, /comunicados, /sala-prensa
+3. Si no hay emisor válido, busca asociaciones/sindicatos/ONGs
+4. Si SOLO hay medios de comunicación, responde "NO_ENCONTRADO"
+5. Devuelve SOLO la URL raíz del emisor (ej: https://ayuntamiento.vitoria.es)
+
+Respuesta: Solo URL del emisor original o "NO_ENCONTRADO"."""
 
         # Use fast model (gpt-4o-mini) from registry - automatically tracked
         response = await llm_client.llm_fast.ainvoke(analysis_prompt)
