@@ -407,6 +407,7 @@ async def ingest_context_unit(
 
             context_unit_data = {
                 "id": context_unit_id,
+                "base_id": context_unit_id,  # Self-reference: this is the base unit
                 "company_id": company_id,
                 "source_id": source_id,
                 "title": title,
