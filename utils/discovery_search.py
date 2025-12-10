@@ -62,7 +62,9 @@ Si no encuentras fuente, responde "NO_ENCONTRADO"."""
 
 
 async def search_original_source_tavily(headline: str, snippet: str) -> Optional[str]:
-    """Search for original news source using Tavily + OpenAI o1-mini.
+    """Search for original news source using Tavily + LLM analysis.
+    
+    Uses Tavily Search API + LLM from registry (tracked and billed).
     
     Args:
         headline: News headline
@@ -73,7 +75,6 @@ async def search_original_source_tavily(headline: str, snippet: str) -> Optional
     """
     import httpx
     import json
-    from openai import AsyncOpenAI
     
     # Step 1: Search with Tavily
     try:
@@ -111,10 +112,11 @@ async def search_original_source_tavily(headline: str, snippet: str) -> Optional
         )
         return None
     
-    # Step 2: Analyze with OpenAI o1-mini
+    # Step 2: Analyze with LLM from registry (tracked usage)
     try:
-        openai_client = AsyncOpenAI(api_key=settings.openrouter_api_key,
-                                     base_url="https://openrouter.ai/api/v1")
+        from utils.llm_client import get_llm_client
+        
+        llm_client = get_llm_client()
         
         # Format search results for LLM
         formatted_results = "\n\n".join([
@@ -138,22 +140,19 @@ Si ningún resultado parece la fuente original, responde "NO_ENCONTRADO".
 
 Formato de respuesta: Solo la URL o "NO_ENCONTRADO", nada más."""
 
-        response = await openai_client.chat.completions.create(
-            model="openai/o1-mini",
-            messages=[{"role": "user", "content": analysis_prompt}],
-            max_completion_tokens=200
-        )
+        # Use fast model (gpt-4o-mini) from registry - automatically tracked
+        response = await llm_client.llm_fast.ainvoke(analysis_prompt)
         
-        result = response.choices[0].message.content.strip()
+        result = response.content.strip() if hasattr(response, 'content') else str(response).strip()
         
         if "NO_ENCONTRADO" in result or not result.startswith("http"):
-            logger.debug("o1mini_no_source_found", headline=headline[:100])
+            logger.debug("llm_no_source_found", headline=headline[:100])
             return None
         
         # Extract first URL if there are multiple lines
         url = result.split("\n")[0].strip()
         
-        logger.info("tavily_openai_source_found",
+        logger.info("tavily_llm_source_found",
             headline=headline[:100],
             source_url=url
         )
@@ -161,7 +160,7 @@ Formato de respuesta: Solo la URL o "NO_ENCONTRADO", nada más."""
         return url
         
     except Exception as e:
-        logger.error("o1mini_analysis_error",
+        logger.error("llm_analysis_error",
             headline=headline[:100],
             error=str(e)
         )
