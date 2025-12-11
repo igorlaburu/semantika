@@ -17,7 +17,8 @@ def normalize_source_metadata(
     published_at: Optional[str] = None,
     scraped_at: Optional[str] = None,
     connector_type: Optional[str] = None,
-    connector_specific: Optional[Dict[str, Any]] = None
+    connector_specific: Optional[Dict[str, Any]] = None,
+    featured_image: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """Normalize source_metadata to standard format.
     
@@ -27,6 +28,12 @@ def normalize_source_metadata(
     - published_at: str - ISO 8601 publication date (e.g., "2025-12-11T17:22:50Z")
     - scraped_at: str - ISO 8601 capture timestamp (e.g., "2025-12-11T17:25:00Z")
     - connector_type: str - Connector identifier (e.g., "perplexity_news", "scraping", "email")
+    - featured_image: dict - Featured image metadata (optional)
+        - url: str - Image URL
+        - source: str - Extraction method ("og:image", "twitter:image", "jsonld", "content")
+        - width: int - Image width (optional)
+        - height: int - Image height (optional)
+        - alt: str - Alt text (optional)
     - connector_specific: dict - Connector-specific metadata
     
     Args:
@@ -99,6 +106,10 @@ def normalize_source_metadata(
         "connector_type": connector_type,
         "connector_specific": connector_specific or {}
     }
+    
+    # Add featured_image if provided
+    if featured_image:
+        metadata["featured_image"] = featured_image
     
     return metadata
 

@@ -123,6 +123,12 @@ metadata = {
 - `published_at`: Fecha de publicación (ISO 8601 con timezone)
 - `scraped_at`: Fecha de captura (ISO 8601, auto-generado)
 - `connector_type`: `perplexity_news`, `scraping`, `email`, etc.
+- `featured_image`: Dict con metadata de imagen destacada (opcional)
+  - `url`: URL de la imagen
+  - `source`: Método de extracción (`og:image`, `twitter:image`, `jsonld`, `content`)
+  - `width`: Ancho en pixels (opcional)
+  - `height`: Alto en pixels (opcional)
+  - `alt`: Texto alternativo (opcional)
 - `connector_specific`: Dict con datos específicos del conector
 
 **Migración de datos existentes**:
@@ -133,6 +139,87 @@ python migrations/migrate_source_metadata.py --dry-run --limit 10
 # Ejecutar migración
 python migrations/migrate_source_metadata.py --no-dry-run
 ```
+
+### 0.1. Featured Images (Imágenes Destacadas)
+
+**Implementación**: Extracción automática de imágenes representativas de fuentes web
+
+**Cuándo extraer**:
+- ✅ **SOLO después del quality gate** (atomic_statements >= 2)
+- ❌ NO extraer para contenido rechazado (evita overhead)
+
+**Cascada de extracción** (prioridad):
+1. **Open Graph** (`og:image`) - 90% de sitios, estándar social media
+2. **Twitter Card** (`twitter:image`) - 5% adicional
+3. **JSON-LD Schema.org** - Sitios técnicos/noticias
+4. **Primera imagen article** - Último recurso
+
+**Aspect ratio esperado**: **1.91:1** (1200×630px Open Graph estándar)
+
+**Endpoint de imagen**:
+```bash
+GET /api/v1/context-units/{id}/image
+Authorization: Bearer {api_key}
+
+# Responde:
+# - Imagen original (JPEG/PNG) si existe
+# - Placeholder SVG (600×314px) si no existe o falla
+# 
+# Headers:
+# - Cache-Control: public, max-age=86400 (24h)
+# - X-Image-Source: "original" | "placeholder"
+# - X-Image-Extraction: "og:image" | "twitter:image" | "jsonld" | "content"
+```
+
+**Display recomendado**:
+```css
+/* Thumbnail en detalle de noticia (NO en lista) */
+.thumbnail-container {
+  width: 100%;
+  max-width: 600px;
+  aspect-ratio: 1.91 / 1;
+  overflow: hidden;
+}
+
+.thumbnail-container img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+```
+
+**Integración en conectores**:
+```python
+from utils.image_extractor import extract_featured_image
+from utils.source_metadata_schema import normalize_source_metadata
+
+# Después del quality gate (statements >= 2)
+featured_image = None
+if len(atomic_statements) >= 2:
+    featured_image = extract_featured_image(soup, url)
+
+# Añadir a metadata
+metadata = normalize_source_metadata(
+    url=url,
+    source_name="RTVE",
+    published_at="2025-12-11T00:00:00Z",
+    connector_type="scraping",
+    featured_image=featured_image,  # Puede ser None
+    connector_specific={}
+)
+```
+
+**Performance**:
+- Extracción: ~50-100ms (parsing HTML)
+- Proxy: ~200-500ms (descarga de fuente remota)
+- Caching: Browser cache (Cache-Control: 24h)
+- Volumen: ~50-100 imágenes/mes
+
+**Ventajas del proxy**:
+- ✅ Oculta URL original
+- ✅ Evita hotlinking blocks (User-Agent + Referer)
+- ✅ Fallback a placeholder si falla
+- ✅ Headers de caching correctos
 
 ### 1. Logging
 - **SIEMPRE** usar JSON estructurado en stdout

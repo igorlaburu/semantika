@@ -32,6 +32,7 @@ from utils.embedding_generator import generate_embedding
 from utils.context_unit_saver import save_from_scraping
 from utils.supabase_client import get_supabase_client
 from utils.llm_client import get_llm_client
+from utils.image_extractor import extract_featured_image
 
 logger = get_logger("scraper_workflow")
 
@@ -309,14 +310,33 @@ async def parse_single_article(state: ScraperState, page_title: str, semantic_co
     state["title"] = title
     state["summary"] = result.get("summary", "")
     
+    # Extract featured image AFTER quality gate (statements >= 2)
+    featured_image = None
+    if len(atomic_statements) >= 2:
+        try:
+            soup = BeautifulSoup(state["html"], 'html.parser')
+            featured_image = extract_featured_image(soup, url)
+            if featured_image:
+                logger.debug("featured_image_extracted",
+                    url=url,
+                    image_url=featured_image.get("url", "")[:80],
+                    source=featured_image.get("source")
+                )
+        except Exception as e:
+            logger.warn("featured_image_extraction_failed",
+                url=url,
+                error=str(e)
+            )
+    
     state["content_items"] = [{
         "position": 1,
         "title": title,
         "summary": result.get("summary", ""),
-        "content": text_for_llm[:8000],  # Use full text, not normalized
+        "content": text_for_llm[:8000],
         "tags": result.get("tags", []),
         "category": result.get("category", "general"),
-        "atomic_statements": result.get("atomic_statements", [])
+        "atomic_statements": result.get("atomic_statements", []),
+        "featured_image": featured_image
     }]
     
     logger.info("article_parsed",
@@ -324,7 +344,8 @@ async def parse_single_article(state: ScraperState, page_title: str, semantic_co
         title=title[:50],
         category=result.get("category"),
         statements_count=len(result.get("atomic_statements", [])),
-        enrichment_model=result.get("enrichment_model", "unknown")
+        enrichment_model=result.get("enrichment_model", "unknown"),
+        has_featured_image=featured_image is not None
     )
 
 
@@ -388,6 +409,15 @@ async def parse_multi_noticia(state: ScraperState, news_blocks, soup: BeautifulS
             
             title = result.get("title", "")
             if title and title.lower() not in ["sin contenido noticioso", "no news content", ""]:
+                # Extract featured image after quality gate
+                featured_image = None
+                atomic_statements = result.get("atomic_statements", [])
+                if len(atomic_statements) >= 2:
+                    try:
+                        featured_image = extract_featured_image(block_soup, url)
+                    except Exception:
+                        pass
+                
                 content_items.append({
                     "position": len(content_items) + 1,
                     "title": title,
@@ -395,10 +425,11 @@ async def parse_multi_noticia(state: ScraperState, news_blocks, soup: BeautifulS
                     "content": block_text[:4000],
                     "tags": result.get("tags", []),
                     "category": result.get("category", "general"),
-                    "atomic_statements": result.get("atomic_statements", []),
+                    "atomic_statements": atomic_statements,
                     "published_at": published_at.isoformat() if published_at else None,
                     "date_source": date_source,
-                    "date_confidence": date_confidence
+                    "date_confidence": date_confidence,
+                    "featured_image": featured_image
                 })
                 
                 logger.debug("news_block_parsed",
@@ -612,6 +643,16 @@ async def scrape_articles_from_index(
                     atomic_count=len(result.get("atomic_statements", []))
                 )
                 
+                # Extract featured image after quality gate
+                featured_image = None
+                atomic_statements = result.get("atomic_statements", [])
+                if len(atomic_statements) >= 2:
+                    try:
+                        article_soup = BeautifulSoup(article_html, 'html.parser')
+                        featured_image = extract_featured_image(article_soup, article_url)
+                    except Exception:
+                        pass
+                
                 return {
                     "position": position,
                     "title": result.get("title", article.get("title", "Untitled")),
@@ -619,9 +660,10 @@ async def scrape_articles_from_index(
                     "content": semantic_content[:8000],
                     "tags": result.get("tags", []),
                     "category": result.get("category", "general"),
-                    "atomic_statements": result.get("atomic_statements", []),
+                    "atomic_statements": atomic_statements,
                     "source_url": article_url,
-                    "index_date": article.get("date")
+                    "index_date": article.get("date"),
+                    "featured_image": featured_image
                 }
                 
             except asyncio.TimeoutError:
@@ -1040,7 +1082,8 @@ async def ingest_to_context(state: ScraperState) -> ScraperState:
                     "category": item.get("category"),
                     "url": url,
                     "scraped_at": datetime.utcnow().isoformat(),
-                    "published_at": item.get("published_at") or state.get("published_at")
+                    "published_at": item.get("published_at") or state.get("published_at"),
+                    "featured_image": item.get("featured_image")
                 }
             )
             

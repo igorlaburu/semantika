@@ -17,6 +17,7 @@ import uuid
 from .supabase_client import get_supabase_client
 from .embedding_generator import generate_embedding, cosine_similarity
 from .logger import get_logger
+from .source_metadata_schema import normalize_source_metadata
 
 logger = get_logger("context_unit_saver")
 
@@ -536,6 +537,28 @@ async def save_from_scraping(
     Returns:
         Save result
     """
+    # Extract source_name from URL
+    source_name = None
+    url = scraping_data.get("url")
+    if url:
+        try:
+            from urllib.parse import urlparse
+            domain = urlparse(url).netloc
+            source_name = domain.replace("www.", "").split(".")[0].upper()
+        except:
+            pass
+    
+    # Normalize metadata to standard schema
+    metadata = normalize_source_metadata(
+        url=url,
+        source_name=source_name,
+        published_at=scraping_data.get("published_at"),
+        scraped_at=scraping_data.get("scraped_at"),
+        connector_type="scraping",
+        featured_image=scraping_data.get("featured_image"),
+        connector_specific={}
+    )
+    
     return await save_context_unit(
         company_id=company_id,
         source_id=source_id,
@@ -546,10 +569,6 @@ async def save_from_scraping(
         atomic_statements=scraping_data.get("atomic_statements"),
         category=scraping_data.get("category"),
         source_type="scraping",
-        source_metadata={
-            "url": scraping_data.get("url"),
-            "scraped_at": scraping_data.get("scraped_at"),
-            "published_at": scraping_data.get("published_at")
-        },
+        source_metadata=metadata,
         url_content_unit_id=url_content_unit_id
     )

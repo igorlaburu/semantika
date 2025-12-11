@@ -12,8 +12,9 @@ import io
 
 from fastapi import FastAPI, Request, Header, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, Response
 from pydantic import BaseModel, Field
+import aiohttp
 
 from utils.logger import get_logger
 from utils.config import settings
@@ -2499,6 +2500,188 @@ async def save_enriched_statements(
             error=str(e)
         )
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# FEATURED IMAGE PROXY
+# ============================================
+
+@app.get("/api/v1/context-units/{context_unit_id}/image")
+async def get_context_unit_image(
+    context_unit_id: str,
+    client: Dict = Depends(get_current_client)
+):
+    """Proxy featured image for context unit.
+    
+    Fetches the featured image URL from source_metadata and proxies it
+    to avoid hotlinking issues. Returns placeholder on failure.
+    
+    Args:
+        context_unit_id: Context unit UUID
+        client: Authenticated client from API key
+        
+    Returns:
+        Image bytes (JPEG/PNG) or placeholder
+        
+    Response Headers:
+        - Content-Type: image/jpeg or image/png
+        - Cache-Control: public, max-age=86400 (24 hours)
+        - X-Image-Source: "original" or "placeholder"
+        
+    Expected aspect ratio: 1.91:1 (1200×630 Open Graph standard)
+    
+    Raises:
+        HTTPException: 404 if context unit not found
+    """
+    try:
+        company_id = client["company_id"]
+        
+        logger.debug("fetching_context_unit_image",
+            context_unit_id=context_unit_id,
+            company_id=company_id
+        )
+        
+        # Fetch context unit from database
+        result = supabase_client.client.table("press_context_units").select(
+            "id, source_metadata, company_id"
+        ).eq("id", context_unit_id).eq("company_id", company_id).maybe_single().execute()
+        
+        if not result.data:
+            logger.warn("context_unit_not_found_for_image",
+                context_unit_id=context_unit_id,
+                company_id=company_id
+            )
+            raise HTTPException(status_code=404, detail="Context unit not found")
+        
+        context_unit = result.data
+        source_metadata = context_unit.get("source_metadata") or {}
+        featured_image = source_metadata.get("featured_image")
+        
+        # Check if featured_image exists
+        if not featured_image or not featured_image.get("url"):
+            logger.debug("no_featured_image_returning_placeholder",
+                context_unit_id=context_unit_id
+            )
+            # Return placeholder (1.91:1 aspect ratio, 600×314)
+            return Response(
+                content=generate_placeholder_image(),
+                media_type="image/svg+xml",
+                headers={
+                    "Cache-Control": "public, max-age=86400",
+                    "X-Image-Source": "placeholder"
+                }
+            )
+        
+        image_url = featured_image["url"]
+        image_source = featured_image.get("source", "unknown")
+        
+        logger.debug("proxying_featured_image",
+            context_unit_id=context_unit_id,
+            image_url=image_url[:80],
+            image_source=image_source
+        )
+        
+        # Proxy the image with proper User-Agent to avoid hotlinking blocks
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    image_url,
+                    headers={
+                        'User-Agent': 'Mozilla/5.0 (compatible; SemantikaScraper/1.0)',
+                        'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+                        'Referer': source_metadata.get("url", "https://ekimen.ai")
+                    },
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    
+                    if response.status != 200:
+                        logger.warn("image_fetch_failed",
+                            context_unit_id=context_unit_id,
+                            image_url=image_url[:80],
+                            status=response.status
+                        )
+                        # Return placeholder on fetch failure
+                        return Response(
+                            content=generate_placeholder_image(),
+                            media_type="image/svg+xml",
+                            headers={
+                                "Cache-Control": "public, max-age=3600",
+                                "X-Image-Source": "placeholder",
+                                "X-Original-Status": str(response.status)
+                            }
+                        )
+                    
+                    # Read image bytes
+                    image_bytes = await response.read()
+                    content_type = response.headers.get("Content-Type", "image/jpeg")
+                    
+                    logger.info("image_proxied_successfully",
+                        context_unit_id=context_unit_id,
+                        image_url=image_url[:80],
+                        size_kb=round(len(image_bytes) / 1024, 2),
+                        content_type=content_type
+                    )
+                    
+                    return Response(
+                        content=image_bytes,
+                        media_type=content_type,
+                        headers={
+                            "Cache-Control": "public, max-age=86400",
+                            "X-Image-Source": "original",
+                            "X-Image-Extraction": image_source
+                        }
+                    )
+                    
+        except aiohttp.ClientError as e:
+            logger.warn("image_proxy_client_error",
+                context_unit_id=context_unit_id,
+                image_url=image_url[:80],
+                error=str(e)
+            )
+            # Return placeholder on network error
+            return Response(
+                content=generate_placeholder_image(),
+                media_type="image/svg+xml",
+                headers={
+                    "Cache-Control": "public, max-age=3600",
+                    "X-Image-Source": "placeholder",
+                    "X-Error": "network_error"
+                }
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("image_proxy_error",
+            context_unit_id=context_unit_id,
+            error=str(e)
+        )
+        # Return placeholder on unexpected error
+        return Response(
+            content=generate_placeholder_image(),
+            media_type="image/svg+xml",
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "X-Image-Source": "placeholder",
+                "X-Error": "unexpected_error"
+            }
+        )
+
+
+def generate_placeholder_image() -> bytes:
+    """Generate SVG placeholder image with 1.91:1 aspect ratio.
+    
+    Returns:
+        SVG bytes for placeholder (600×314px, scales to any size)
+    """
+    svg = """<svg width="600" height="314" xmlns="http://www.w3.org/2000/svg">
+  <rect width="600" height="314" fill="#f0f0f0"/>
+  <text x="50%" y="50%" font-family="Arial, sans-serif" font-size="18" 
+        fill="#999" text-anchor="middle" dominant-baseline="middle">
+    Sin imagen
+  </text>
+</svg>"""
+    return svg.encode('utf-8')
 
 
 # ============================================
