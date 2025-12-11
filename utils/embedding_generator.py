@@ -68,12 +68,15 @@ def get_fastembed_model():
     if _fastembed_model is None:
         try:
             from fastembed import TextEmbedding
+            import os
 
             # Multilingual model for better Spanish/Basque support
             # sentence-transformers/paraphrase-multilingual-mpnet-base-v2
             # 768 dimensions - Optimized for 50+ languages
+            cache_dir = os.getenv("FASTEMBED_CACHE_PATH", None)
             _fastembed_model = TextEmbedding(
-                model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+                model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
+                cache_dir=cache_dir
             )
 
             logger.info("fastembed_initialized",

@@ -43,11 +43,21 @@ RUN mkdir -p /app/models && \
     wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/carlfm/x_low/es_ES-carlfm-x_low.onnx && \
     wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/carlfm/x_low/es_ES-carlfm-x_low.onnx.json
 
+# Pre-download ML models at build time (avoid runtime downloads)
+# 1. FastEmbed model for embeddings (768d multilingual)
+# 2. Whisper base model for audio transcription
+RUN python3 -c "from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/paraphrase-multilingual-mpnet-base-v2', cache_dir='/app/.cache/fastembed')" && \
+    python3 -c "import whisper; whisper.load_model('base', download_root='/app/.cache/whisper')"
+
 # Create non-root user for security
 RUN useradd -m -u 1000 semantika && \
     chown -R semantika:semantika /app
 
 USER semantika
+
+# Set cache directories (use pre-downloaded models)
+ENV FASTEMBED_CACHE_PATH=/app/.cache/fastembed \
+    WHISPER_CACHE_DIR=/app/.cache/whisper
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \

@@ -25,8 +25,10 @@ class AudioTranscriber:
             model_name: Whisper model size (tiny, base, small, medium, large)
         """
         try:
+            import os
             logger.info("loading_whisper_model", model=model_name)
-            self.model = whisper.load_model(model_name)
+            download_root = os.getenv("WHISPER_CACHE_DIR", None)
+            self.model = whisper.load_model(model_name, download_root=download_root)
             logger.info("whisper_model_loaded", model=model_name)
         except Exception as e:
             logger.error("whisper_model_load_failed", error=str(e))
