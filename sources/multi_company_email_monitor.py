@@ -22,6 +22,7 @@ from utils.logger import get_logger
 from utils.supabase_client import get_supabase_client
 from utils.unified_context_verifier import verify_novelty
 from utils.unified_context_ingester import ingest_context_unit
+from utils.source_metadata_schema import normalize_source_metadata
 from .audio_transcriber import AudioTranscriber
 
 logger = get_logger("multi_company_email_monitor")
@@ -584,6 +585,38 @@ class MultiCompanyEmailMonitor:
                 return
 
             # Phase 2: Ingest context unit with unified ingester
+            
+            # Normalize metadata to standard schema
+            email_from = source_metadata.get("from", "unknown")
+            email_date = source_metadata.get("date")
+            
+            # Convert email date to ISO 8601 if present
+            if email_date:
+                try:
+                    from email.utils import parsedate_to_datetime
+                    parsed_date = parsedate_to_datetime(email_date)
+                    email_date_iso = parsed_date.isoformat()
+                except:
+                    email_date_iso = None
+            else:
+                email_date_iso = None
+            
+            metadata = normalize_source_metadata(
+                url=None,  # Emails don't have URLs
+                source_name=email_from,
+                published_at=email_date_iso,
+                scraped_at=datetime.utcnow().isoformat() + "Z",
+                connector_type="email",
+                connector_specific={
+                    "message_id": message_id,
+                    "from": email_from,
+                    "subject": subject,
+                    "organization_id": str(organization["id"]),
+                    "combined_content": True,
+                    "has_attachments": len(content_parts) > 1
+                }
+            )
+            
             ingest_result = await ingest_context_unit(
                 # Pre-generated field from email
                 title=subject or "(Sin asunto)",
@@ -598,13 +631,7 @@ class MultiCompanyEmailMonitor:
                 source_id=source["source_id"],
 
                 # Optional metadata
-                source_metadata={
-                    **source_metadata,
-                    "organization_id": organization["id"],
-                    "message_id": message_id,
-                    "from": source_metadata.get("from"),
-                    "combined_content": True
-                },
+                source_metadata=metadata,
 
                 # Control flags
                 generate_embedding_flag=True,

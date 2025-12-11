@@ -14,6 +14,7 @@ from utils.config import settings
 from utils.supabase_client import get_supabase_client
 from utils.unified_context_verifier import verify_novelty
 from utils.unified_context_ingester import ingest_context_unit
+from utils.source_metadata_schema import normalize_source_metadata
 from workflows.workflow_factory import get_workflow
 from core.source_content import SourceContent
 
@@ -293,6 +294,35 @@ Sin markdown. Exactamente {news_count} noticias."""
                     
                     # Phase 3: Ingest context unit with unified ingester
                     try:
+                        # Extract source name from URL (if available)
+                        source_url = news_item.get("fuente")
+                        source_name = None
+                        if source_url:
+                            from urllib.parse import urlparse
+                            domain = urlparse(source_url).netloc
+                            # Simple domain to name mapping
+                            source_name = domain.replace("www.", "").split(".")[0].upper()
+                        
+                        # Normalize published_at to ISO 8601
+                        published_at = news_item.get("fecha")
+                        if published_at and len(published_at) == 10:  # YYYY-MM-DD
+                            published_at = published_at + "T00:00:00Z"
+                        
+                        # Build standard metadata
+                        metadata = normalize_source_metadata(
+                            url=source_url,
+                            source_name=source_name,
+                            published_at=published_at,
+                            scraped_at=datetime.utcnow().isoformat() + "Z",
+                            connector_type="perplexity_news",
+                            connector_specific={
+                                "perplexity_query": location,
+                                "perplexity_index": i + 1,
+                                "enrichment_model": enriched["enrichment_model"],
+                                "enrichment_cost_usd": enriched["enrichment_cost_usd"]
+                            }
+                        )
+                        
                         ingest_result = await ingest_context_unit(
                             title=enriched["title"],
                             summary=enriched["summary"],
@@ -305,15 +335,7 @@ Sin markdown. Exactamente {news_count} noticias."""
                             source_type="api",
                             source_id=source["source_id"],
 
-                            source_metadata={
-                                "connector_type": "perplexity_news",
-                                "perplexity_query": location,
-                                "perplexity_source": news_item.get("fuente"),
-                                "perplexity_date": news_item.get("fecha"),
-                                "perplexity_index": i + 1,
-                                "enrichment_cost_usd": enriched["enrichment_cost_usd"],
-                                "enrichment_model": enriched["enrichment_model"]
-                            },
+                            source_metadata=metadata,
 
                             generate_embedding_flag=True,
                             check_duplicates=True

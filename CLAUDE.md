@@ -88,6 +88,52 @@ Este documento contiene instrucciones específicas para Claude Code al trabajar 
 
 ## Reglas de Desarrollo
 
+### 0. source_metadata Schema Estándar
+
+**TODOS los conectores DEBEN usar el mismo formato de `source_metadata`**:
+
+```python
+from utils.source_metadata_schema import normalize_source_metadata
+
+# ✅ CORRECTO: Usar schema estándar
+metadata = normalize_source_metadata(
+    url="https://www.rtve.es/noticias/...",     # URL canónica (REQUIRED para web)
+    source_name="RTVE",                          # Nombre legible
+    published_at="2025-12-11T17:22:50Z",        # ISO 8601 (con timezone Z)
+    scraped_at="2025-12-11T17:25:00Z",          # ISO 8601 (auto-generado si None)
+    connector_type="perplexity_news",            # Identificador del conector
+    connector_specific={                         # Datos específicos del conector
+        "perplexity_query": "Bilbao, Bizkaia",
+        "perplexity_index": 5,
+        "enrichment_model": "gpt-4o-mini"
+    }
+)
+
+# ❌ INCORRECTO: Inventar campos propios
+metadata = {
+    "perplexity_source": "https://...",  # NO - usar 'url'
+    "perplexity_date": "2025-12-11",     # NO - usar 'published_at' en ISO 8601
+    "perplexity_query": "Bilbao"         # NO - va en 'connector_specific'
+}
+```
+
+**Campos estándar** (top-level):
+- `url`: URL canónica (None para emails)
+- `source_name`: Nombre legible de la fuente
+- `published_at`: Fecha de publicación (ISO 8601 con timezone)
+- `scraped_at`: Fecha de captura (ISO 8601, auto-generado)
+- `connector_type`: `perplexity_news`, `scraping`, `email`, etc.
+- `connector_specific`: Dict con datos específicos del conector
+
+**Migración de datos existentes**:
+```bash
+# Dry-run (ver cambios sin aplicar)
+python migrations/migrate_source_metadata.py --dry-run --limit 10
+
+# Ejecutar migración
+python migrations/migrate_source_metadata.py --no-dry-run
+```
+
 ### 1. Logging
 - **SIEMPRE** usar JSON estructurado en stdout
 - Formato: `{"level": "INFO", "timestamp": "...", "service": "...", "action": "...", "client_id": "...", ...}`
@@ -316,6 +362,68 @@ ssh semantika-vps "sudo docker restart ekimen_semantika-semantika-api-1"
 
 # Ejecutar CLI en VPS
 ssh semantika-vps "sudo docker exec ekimen_semantika-semantika-api-1 python cli.py list-clients"
+```
+
+### Operaciones de Base de Datos (Supabase)
+
+**IMPORTANTE**: **SIEMPRE** usar los tools MCP de Supabase (`mcp__supabase__*`) para operaciones de BD en lugar de SSH+Python:
+
+```python
+# ✅ CORRECTO: Usar MCP tools
+mcp__supabase__execute_sql(query="SELECT * FROM sources WHERE source_name = 'Medios Generalistas'")
+
+# ❌ INCORRECTO: Usar SSH + Python inline
+ssh semantika-vps "sudo docker exec ... python -c '...'"
+```
+
+**Razones**:
+1. **Más rápido**: Conexión directa a Supabase (no pasa por VPS)
+2. **Más seguro**: Usa credenciales Supabase nativas (no expone SSH)
+3. **Más simple**: No requiere escapar Python/JSON/SQL en bash
+4. **Mejor logging**: Errores más claros y trazables
+
+**Tools disponibles**:
+- `mcp__supabase__execute_sql`: Ejecutar queries SQL (SELECT, UPDATE, DELETE)
+- `mcp__supabase__apply_migration`: Aplicar migraciones DDL (CREATE, ALTER)
+- `mcp__supabase__list_tables`: Listar tablas y esquemas
+- `mcp__supabase__generate_typescript_types`: Generar tipos TypeScript
+- `mcp__supabase__get_logs`: Ver logs de servicios (api, postgres, auth, etc.)
+- `mcp__supabase__search_docs`: Buscar en documentación oficial de Supabase
+
+**Ejemplos comunes**:
+
+```python
+# Actualizar schedule de una fuente
+mcp__supabase__execute_sql(query="""
+    UPDATE sources 
+    SET schedule_config = jsonb_set(schedule_config, '{cron}', '"17:28"')
+    WHERE source_name = 'Medios Generalistas'
+    RETURNING source_name, schedule_config
+""")
+
+# Ver últimas ejecuciones
+mcp__supabase__execute_sql(query="""
+    SELECT execution_id, source_name, status, items_count, created_at
+    FROM source_execution_log
+    ORDER BY created_at DESC
+    LIMIT 10
+""")
+
+# Contar context units por company
+mcp__supabase__execute_sql(query="""
+    SELECT company_id, COUNT(*) as total
+    FROM press_context_units
+    GROUP BY company_id
+""")
+
+# Ver fuentes descubiertas en pool
+mcp__supabase__execute_sql(query="""
+    SELECT source_name, url, status, relevance_score, discovered_at
+    FROM discovered_sources
+    WHERE company_id = '99999999-9999-9999-9999-999999999999'
+    ORDER BY discovered_at DESC
+    LIMIT 20
+""")
 ```
 
 ### CLI Admin
