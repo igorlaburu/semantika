@@ -241,7 +241,7 @@ Respond in JSON:
         ])
         
         self.extract_links_chain = RunnableSequence(
-            extract_links_prompt | self.llm_groq_fast | JsonOutputParser()
+            extract_links_prompt | self.llm_fast | JsonOutputParser()  # Changed from groq_fast to fast (gpt-4o-mini) to avoid rate limits
         )
 
         # 7. Article Structure Analyzer Chain
