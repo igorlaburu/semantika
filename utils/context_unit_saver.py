@@ -181,6 +181,7 @@ async def save_context_unit(
         
         context_unit_data = {
             "id": context_unit_id,
+            "base_id": context_unit_id,  # Self-reference for base context units
             "company_id": company_id,
             "source_id": source_id,
             "title": title,
