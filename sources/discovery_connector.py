@@ -73,9 +73,10 @@ class DiscoveryConnector:
         """
         Extract press room index URL from a specific news article page.
         
-        Strategy: Give full HTML to LLM and let it find the index/listing page URL.
-        The LLM analyzes breadcrumbs, navigation, links, and URL structure to find
-        the parent index page (e.g., /news, /noticias, /sala-prensa).
+        Strategy: 
+        1. Heuristic URL pattern matching (fast, reliable)
+        2. HTML breadcrumb/nav parsing
+        3. LLM analysis (fallback)
         
         Args:
             url: Current article URL
@@ -85,44 +86,113 @@ class DiscoveryConnector:
             Dict with:
             - index_url: URL of the index/listing page
             - confidence: 0.0-1.0
-            - method: how it was found (breadcrumb_link, navigation_link, url_inference)
+            - method: how it was found (url_pattern, breadcrumb_link, navigation_link, llm_inference)
         """
         try:
+            from urllib.parse import urlparse, urljoin
+            import re
+            
+            parsed = urlparse(url)
+            path = parsed.path
+            
+            # STEP 1: Heuristic URL pattern matching
+            # Remove trailing article ID/slug from common patterns
+            index_patterns = [
+                (r'(/noticias?|/news|/actualidad|/comunicados?|/sala-prensa|/press|/eventos?|/events)/[^/]+$', r'\1'),
+                (r'(/\d{4}/\d{2}/\d{2}/.+)$', lambda m: '/'.join(m.group(1).split('/')[:4])),  # /2024/12/12/article -> /2024/12/12
+                (r'/[0-9]+-[a-z0-9-]+$', ''),  # /1721-ambulancias-100... -> remove
+                (r'/\d+$', ''),  # /12345 -> remove
+            ]
+            
+            for pattern, replacement in index_patterns:
+                if isinstance(replacement, str):
+                    match = re.search(pattern, path, re.IGNORECASE)
+                    if match:
+                        new_path = re.sub(pattern, replacement, path, flags=re.IGNORECASE)
+                        index_url = f"{parsed.scheme}://{parsed.netloc}{new_path}"
+                        
+                        logger.info("index_url_heuristic_match",
+                            original_url=url[:80],
+                            index_url=index_url[:80],
+                            pattern=pattern
+                        )
+                        
+                        return {
+                            "index_url": index_url,
+                            "confidence": 0.85,
+                            "method": "url_pattern"
+                        }
+            
+            # STEP 2: Parse HTML for breadcrumbs and navigation
             soup = BeautifulSoup(html_content, "lxml")
             
+            # Look for breadcrumb links
+            breadcrumbs = soup.find_all(['nav', 'ol', 'ul'], class_=re.compile(r'breadcrumb|miga', re.I))
+            for bc in breadcrumbs:
+                links = bc.find_all('a', href=True)
+                for link in reversed(links):  # Start from last breadcrumb (closest parent)
+                    href = link.get('href', '')
+                    text = link.get_text().strip().lower()
+                    
+                    # Skip homepage and generic links
+                    if text in ['inicio', 'home', 'portada'] or href in ['/', '#']:
+                        continue
+                    
+                    # Look for news/press keywords
+                    if any(kw in text or kw in href.lower() for kw in [
+                        'noticia', 'news', 'actualidad', 'comunicado', 'prensa', 'press', 'evento', 'event'
+                    ]):
+                        index_url = urljoin(url, href)
+                        
+                        logger.info("index_url_breadcrumb_found",
+                            original_url=url[:80],
+                            index_url=index_url[:80],
+                            breadcrumb_text=text[:30]
+                        )
+                        
+                        return {
+                            "index_url": index_url,
+                            "confidence": 0.9,
+                            "method": "breadcrumb_link"
+                        }
+            
+            # STEP 3: LLM fallback (only if heuristics failed)
             # Remove noise but keep navigation structure and links
             for element in soup(["script", "style", "svg", "img"]):
                 element.decompose()
             
-            # Get clean HTML (first 8000 chars to fit LLM context)
-            clean_html = str(soup)[:8000]
+            # Get clean HTML (first 12000 chars for better context)
+            clean_html = str(soup)[:12000]
             
-            prompt = f"""Analiza este HTML de una noticia específica y encuentra la URL del ÍNDICE/LISTADO de noticias.
+            prompt = f"""Analiza este HTML y encuentra la URL del ÍNDICE/LISTADO de noticias (no la homepage).
 
 URL actual: {url}
 
-HTML (con todos los links y navegación):
+HTML (navegación y links):
 {clean_html}
 
-TAREA:
-1. Busca en breadcrumbs, navigation, o links el que lleve al listado de noticias
-2. Ignora: homepage, contacto, about, aviso legal
-3. Busca patterns típicos: /news, /noticias, /sala-prensa, /comunicados, /events, /press
-4. Convierte href relativo a absoluto si es necesario
-5. Si NO encuentras link claro, infiere quitando el slug final de la URL actual
+CRITERIOS ESTRICTOS:
+1. DEBE ser un listado de noticias/eventos (no homepage, no contacto, no about)
+2. Busca en nav/breadcrumbs links con keywords: noticias, news, actualidad, comunicados, eventos, prensa
+3. Si encuentras link claro → úsalo (confidence 0.8+)
+4. Si NO hay link → infiere quitando slug final de URL (confidence 0.6)
 
-Ejemplos:
-- URL actual: https://irekia.eus/es/events/106714-algo → Index: https://irekia.eus/es/events
-- URL actual: https://empresa.com/sala-prensa/noticia-123 → Index: https://empresa.com/sala-prensa
+NUNCA devuelvas la homepage (/, /es, /inicio) como index_url.
 
-Responde en JSON:
+Ejemplos CORRECTOS:
+- URL: https://esk.eus/.../1721-ambulancias → Index: https://esk.eus/osakidetza/index.php/es/noticias-de-los-centros-de-trabajo
+- URL: https://ayala.eus/noticias/evento-123 → Index: https://ayala.eus/noticias
+
+Ejemplos INCORRECTOS:
+- ❌ index_url: https://ayala.eus/ (es homepage, no listado)
+- ❌ index_url: https://ayala.eus/contacto
+
+Responde SOLO JSON:
 {{
-    "index_url": "https://irekia.euskadi.eus/es/events",
-    "confidence": 0.9,
-    "method": "breadcrumb_link"
-}}
-
-Métodos posibles: "breadcrumb_link", "navigation_link", "url_inference"""
+    "index_url": "https://...",
+    "confidence": 0.8,
+    "method": "navigation_link"
+}}"""
             
             # Get SYSTEM organization ID for tracking
             from utils.llm_registry import get_llm_registry
@@ -173,6 +243,37 @@ Métodos posibles: "breadcrumb_link", "navigation_link", "url_inference"""
             
             content = content[json_start:json_end+1]
             result = json.loads(content)
+            
+            # Validate LLM result: reject homepage URLs
+            index_url = result.get("index_url", url)
+            index_parsed = urlparse(index_url)
+            
+            # Check if it's just a homepage
+            if index_parsed.path in ['/', '/es', '/eu', '/en', '/inicio', '/home', '']:
+                logger.warn("index_url_is_homepage_rejected",
+                    original_url=url[:80],
+                    llm_returned=index_url[:80],
+                    fallback_to="url_inference"
+                )
+                
+                # Fallback: smart URL trimming
+                path_parts = [p for p in parsed.path.split('/') if p]
+                if len(path_parts) >= 2:
+                    # Keep first meaningful segment (e.g., /noticias, /actualidad)
+                    trimmed_path = '/' + '/'.join(path_parts[:-1])
+                    index_url = f"{parsed.scheme}://{parsed.netloc}{trimmed_path}"
+                    result = {
+                        "index_url": index_url,
+                        "confidence": 0.5,
+                        "method": "url_inference_fallback"
+                    }
+                else:
+                    # Can't infer, return original
+                    result = {
+                        "index_url": url,
+                        "confidence": 0.3,
+                        "method": "no_index_found"
+                    }
             
             logger.info("index_url_extracted",
                 original_url=url[:80],

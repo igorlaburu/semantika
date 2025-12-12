@@ -249,6 +249,15 @@ class DiscoveryFlow:
                                 method=index_result.get("method")
                             )
                             
+                            # Skip if index extraction confidence too low
+                            if index_confidence < 0.5:
+                                logger.debug("index_extraction_low_confidence",
+                                    original_url=source_url[:80],
+                                    index_confidence=index_confidence,
+                                    method=index_result.get("method")
+                                )
+                                continue
+                            
                             # Use index URL from now on
                             final_url = index_url
                             
