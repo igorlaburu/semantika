@@ -328,8 +328,18 @@ async def schedule_sources(scheduler: AsyncIOScheduler):
 
         for source in sources:
             source_id = source["source_id"]
-            schedule_config = source.get("schedule_config", {})
+            schedule_config_raw = source.get("schedule_config", {})
             source_type = source["source_type"]
+            
+            if isinstance(schedule_config_raw, str):
+                try:
+                    import json
+                    schedule_config = json.loads(schedule_config_raw)
+                except json.JSONDecodeError as e:
+                    logger.error("schedule_config_parse_error", source_id=source_id, error=str(e))
+                    continue
+            else:
+                schedule_config = schedule_config_raw
             
             # Check for cron schedule (specific times like 9:00 AM daily)
             cron_schedule = schedule_config.get("cron")
