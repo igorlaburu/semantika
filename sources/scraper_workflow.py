@@ -92,9 +92,10 @@ async def fetch_url(state: ScraperState) -> ScraperState:
     
     try:
         import ssl
-        ssl_context = ssl.create_default_context()
+        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         ssl_context.check_hostname = False
         ssl_context.verify_mode = ssl.CERT_NONE
+        ssl_context.set_ciphers('DEFAULT@SECLEVEL=1')
         
         connector = aiohttp.TCPConnector(ssl=ssl_context, limit=100)
         async with aiohttp.ClientSession(connector=connector) as session:
