@@ -499,15 +499,33 @@ async def schedule_sources(scheduler: AsyncIOScheduler):
             )
             logger.info("pool_discovery_scheduled", time="daily at 8:00 UTC")
         
-        # Schedule Pool ingestion job (twice daily: 9:00 and 15:00 UTC)
-        if not scheduler.get_job("pool_ingestion"):
+        # Schedule Pool ingestion job at specific times
+        if not scheduler.get_job("pool_ingestion_morning"):
             scheduler.add_job(
                 pool_ingestion_job,
-                trigger=CronTrigger(hour="9,15", minute=0),
-                id="pool_ingestion",
+                trigger=CronTrigger(hour=9, minute=0),
+                id="pool_ingestion_morning",
                 replace_existing=False
             )
-            logger.info("pool_ingestion_scheduled", time="twice daily at 9:00 and 15:00 UTC")
+            logger.info("pool_ingestion_morning_scheduled", time="daily at 9:00 UTC")
+        
+        if not scheduler.get_job("pool_ingestion_afternoon"):
+            scheduler.add_job(
+                pool_ingestion_job,
+                trigger=CronTrigger(hour=15, minute=0),
+                id="pool_ingestion_afternoon",
+                replace_existing=False
+            )
+            logger.info("pool_ingestion_afternoon_scheduled", time="daily at 15:00 UTC")
+        
+        if not scheduler.get_job("pool_ingestion_test"):
+            scheduler.add_job(
+                pool_ingestion_job,
+                trigger=CronTrigger(hour=17, minute=55),
+                id="pool_ingestion_test",
+                replace_existing=False
+            )
+            logger.info("pool_ingestion_test_scheduled", time="daily at 17:55 UTC")
 
     except Exception as e:
         logger.error("schedule_sources_error", error=str(e))
