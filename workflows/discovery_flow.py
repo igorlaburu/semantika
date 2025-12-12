@@ -36,6 +36,7 @@ NEXT STEP:
 import random
 from typing import Dict, Any, List
 from datetime import datetime
+import gc
 
 from sources.gnews_client import get_gnews_client
 from sources.discovery_connector import get_discovery_connector
@@ -354,6 +355,9 @@ class DiscoveryFlow:
                     articles_sampled=len(sampled_articles),
                     sources_discovered=len(discovered_sources)
                 )
+                
+                # Force garbage collection after each config to free memory
+                gc.collect()
             
             logger.info("discovery_flow_completed",
                 configs_processed=len(configs_result.data),
@@ -361,6 +365,9 @@ class DiscoveryFlow:
                 total_sampled=total_sampled,
                 total_sources_discovered=len(all_discovered_sources)
             )
+            
+            # Final garbage collection
+            gc.collect()
             
             return {
                 "success": True,

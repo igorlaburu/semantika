@@ -40,6 +40,7 @@ CONSUMED BY:
 
 from typing import Dict, Any, List
 from datetime import datetime, timedelta
+import gc
 
 from utils.logger import get_logger
 from utils.supabase_client import get_supabase_client
@@ -393,6 +394,9 @@ class IngestionFlow:
                         items_found=len(items),
                         items_ingested=ingested_count
                     )
+                    
+                    # Force garbage collection after each source to free memory
+                    gc.collect()
                 
                 except Exception as e:
                     logger.error("source_processing_error",
@@ -405,6 +409,9 @@ class IngestionFlow:
                 sources_processed=sources_processed,
                 items_ingested=total_items_ingested
             )
+            
+            # Final garbage collection
+            gc.collect()
             
             return {
                 "success": True,
