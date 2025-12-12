@@ -2583,11 +2583,18 @@ async def get_context_unit_image(
         
         # Proxy the image with proper User-Agent to avoid hotlinking blocks
         try:
-            async with aiohttp.ClientSession() as session:
+            import ssl
+            ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            ssl_context.set_ciphers('DEFAULT@SECLEVEL=1')
+            
+            connector = aiohttp.TCPConnector(ssl=ssl_context, limit=100)
+            async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.get(
                     image_url,
                     headers={
-                        'User-Agent': 'Mozilla/5.0 (compatible; SemantikaScraper/1.0)',
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
                         'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
                         'Referer': source_metadata.get("url", "https://ekimen.ai")
                     },

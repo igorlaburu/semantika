@@ -27,12 +27,14 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY . .
+# Pre-download ML models BEFORE copying code (better layer caching)
+# 1. FastEmbed model for embeddings (768d multilingual)
+# 2. Whisper base model for audio transcription
+# 3. Piper TTS models
+RUN python3 -c "from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/paraphrase-multilingual-mpnet-base-v2', cache_dir='/app/.cache/fastembed')" && \
+    python3 -c "import whisper; whisper.load_model('base', download_root='/app/.cache/whisper')"
 
 # Download and install Piper TTS
-# Extract tar in /app (creates /app/piper/ directory automatically)
-# Use X_LOW quality model (carlfm) for maximum speed (28MB vs 50MB medium)
 RUN mkdir -p /app/models && \
     cd /app && \
     wget -q https://github.com/rhasspy/piper/releases/download/v1.2.0/piper_amd64.tar.gz && \
@@ -43,11 +45,8 @@ RUN mkdir -p /app/models && \
     wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/carlfm/x_low/es_ES-carlfm-x_low.onnx && \
     wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/carlfm/x_low/es_ES-carlfm-x_low.onnx.json
 
-# Pre-download ML models at build time (avoid runtime downloads)
-# 1. FastEmbed model for embeddings (768d multilingual)
-# 2. Whisper base model for audio transcription
-RUN python3 -c "from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/paraphrase-multilingual-mpnet-base-v2', cache_dir='/app/.cache/fastembed')" && \
-    python3 -c "import whisper; whisper.load_model('base', download_root='/app/.cache/whisper')"
+# Copy application code (after ML models to preserve cache)
+COPY . .
 
 # Create non-root user for security
 RUN useradd -m -u 1000 semantika && \
