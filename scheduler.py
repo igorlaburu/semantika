@@ -210,6 +210,31 @@ async def execute_source_task(source: Dict[str, Any]):
         elif source_type == "manual":
             logger.debug("manual_source_skip", source_id=source_id)
 
+        elif source_type == "system":
+            system_job = config.get("system_job")
+            
+            if not system_job:
+                logger.error("system_source_missing_job", source_id=source_id)
+                return
+            
+            logger.info("system_job_starting", 
+                source_id=source_id,
+                system_job=system_job
+            )
+            
+            # Execute system jobs async (fire-and-forget to avoid blocking scheduler)
+            if system_job == "pool_discovery":
+                asyncio.create_task(pool_discovery_job())
+            elif system_job == "pool_ingestion":
+                asyncio.create_task(pool_ingestion_job())
+            elif system_job == "ttl_cleanup":
+                asyncio.create_task(cleanup_old_data())
+            else:
+                logger.error("unknown_system_job",
+                    source_id=source_id,
+                    system_job=system_job
+                )
+
         else:
             logger.error("unknown_source_type", source_id=source_id, source_type=source_type)
 
@@ -479,53 +504,9 @@ async def schedule_sources(scheduler: AsyncIOScheduler):
                         frequency_min=frequency_min
                     )
 
-        # Schedule daily TTL cleanup at 3 AM (only if not already scheduled)
-        if not scheduler.get_job("ttl_cleanup"):
-            scheduler.add_job(
-                cleanup_old_data,
-                trigger=CronTrigger(hour=3, minute=0),
-                id="ttl_cleanup",
-                replace_existing=False
-            )
-            logger.info("ttl_cleanup_scheduled", time="03:00 UTC daily")
-        
-        # Schedule Pool discovery job (daily at 8:00 UTC)
-        if not scheduler.get_job("pool_discovery"):
-            scheduler.add_job(
-                pool_discovery_job,
-                trigger=CronTrigger(hour=8, minute=0),
-                id="pool_discovery",
-                replace_existing=False
-            )
-            logger.info("pool_discovery_scheduled", time="daily at 8:00 UTC")
-        
-        # Schedule Pool ingestion job at specific times
-        if not scheduler.get_job("pool_ingestion_morning"):
-            scheduler.add_job(
-                pool_ingestion_job,
-                trigger=CronTrigger(hour=9, minute=0),
-                id="pool_ingestion_morning",
-                replace_existing=False
-            )
-            logger.info("pool_ingestion_morning_scheduled", time="daily at 9:00 UTC")
-        
-        if not scheduler.get_job("pool_ingestion_afternoon"):
-            scheduler.add_job(
-                pool_ingestion_job,
-                trigger=CronTrigger(hour=15, minute=0),
-                id="pool_ingestion_afternoon",
-                replace_existing=False
-            )
-            logger.info("pool_ingestion_afternoon_scheduled", time="daily at 15:00 UTC")
-        
-        if not scheduler.get_job("pool_ingestion_test"):
-            scheduler.add_job(
-                pool_ingestion_job,
-                trigger=CronTrigger(hour=17, minute=55),
-                id="pool_ingestion_test",
-                replace_existing=False
-            )
-            logger.info("pool_ingestion_test_scheduled", time="daily at 17:55 UTC")
+        # System jobs (pool_discovery, pool_ingestion, ttl_cleanup) are now managed
+        # via sources table with source_type='system' and company_id='99999999-9999-9999-9999-999999999999'
+        # They are loaded and scheduled automatically by schedule_sources() every 5 minutes
 
     except Exception as e:
         logger.error("schedule_sources_error", error=str(e))
