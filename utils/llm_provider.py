@@ -200,7 +200,7 @@ class LLMProvider(ABC):
             provider=self.get_provider_name(),
             tokens=usage.total_tokens,
             cost_usd=usage.cost_usd,
-            organization_id=tracking_config['organization_id']
+            company_id=company_id
         )
     
     @abstractmethod
