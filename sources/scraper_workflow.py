@@ -96,7 +96,7 @@ async def fetch_url(state: ScraperState) -> ScraperState:
         ssl_context.check_hostname = False
         ssl_context.verify_mode = ssl.CERT_NONE
         
-        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        connector = aiohttp.TCPConnector(ssl=ssl_context, limit=100)
         async with aiohttp.ClientSession(connector=connector) as session:
             async with session.get(
                 url,
