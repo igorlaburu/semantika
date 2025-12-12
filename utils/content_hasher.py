@@ -16,7 +16,7 @@ from .logger import get_logger
 logger = get_logger("content_hasher")
 
 
-def normalize_html(html: str) -> str:
+def normalize_html(html: str, min_acceptable_length: int = 300) -> str:
     """Extract semantic content from HTML, removing noise.
     
     Removes:
@@ -24,8 +24,12 @@ def normalize_html(html: str) -> str:
     - Navigation, headers, footers
     - Comments, metadata
     
+    If normalized content is too short (< min_acceptable_length),
+    falls back to gentler extraction (preserving article/main content).
+    
     Args:
         html: Raw HTML content
+        min_acceptable_length: Minimum acceptable normalized length (default 300)
         
     Returns:
         Normalized plain text content
@@ -51,6 +55,47 @@ def normalize_html(html: str) -> str:
         # Normalize whitespace
         text = re.sub(r'\s+', ' ', text)
         text = text.strip()
+        
+        # If normalized content is too short, try gentler extraction
+        if len(text) < min_acceptable_length:
+            logger.warn("html_normalization_too_aggressive",
+                original_length=len(html),
+                normalized_length=len(text),
+                threshold=min_acceptable_length,
+                message="Normalized content too short, trying fallback extraction"
+            )
+            
+            # Fallback: Try to extract main content only
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # Look for article or main content containers
+            content_containers = (
+                soup.find('article') or
+                soup.find('main') or
+                soup.find(class_=re.compile(r'(content|article|post|entry)', re.I)) or
+                soup.find(id=re.compile(r'(content|article|post|entry)', re.I))
+            )
+            
+            if content_containers:
+                # Remove noise from container
+                for tag in content_containers(['script', 'style', 'nav', 'aside', 'iframe']):
+                    tag.decompose()
+                
+                text = content_containers.get_text(separator=' ', strip=True)
+                text = re.sub(r'\s+', ' ', text).strip()
+                
+                logger.info("html_normalization_fallback_success",
+                    original_length=len(html),
+                    normalized_length=len(text),
+                    container_found=content_containers.name
+                )
+            else:
+                # Last resort: simple tag removal
+                logger.warn("html_normalization_fallback_failed",
+                    message="No content container found, using simple tag removal"
+                )
+                text = re.sub(r'<[^>]+>', ' ', html)
+                text = re.sub(r'\s+', ' ', text).strip()
         
         logger.debug("html_normalized", 
             original_length=len(html),
