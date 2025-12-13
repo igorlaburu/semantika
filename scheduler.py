@@ -337,9 +337,9 @@ async def pool_checker_job():
     logger.info("starting_pool_checker_job")
     
     try:
-        from sources.pool_checker_v2 import check_next_source
+        from sources.pool_checker_v2 import check_next_sources
         
-        await check_next_source()
+        await check_next_sources()
         
         logger.info("pool_checker_job_completed")
     

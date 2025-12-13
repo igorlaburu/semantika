@@ -624,6 +624,52 @@ async def scrape_articles_from_index(
     """
     import asyncio
     import aiohttp
+    from datetime import datetime, timedelta
+    from dateutil import parser as date_parser
+    
+    # Filter articles older than 48h
+    cutoff_date = datetime.utcnow() - timedelta(hours=48)
+    articles_filtered = []
+    
+    for article in articles:
+        article_date_str = article.get("date")
+        if not article_date_str:
+            # No date - include (could be very recent)
+            articles_filtered.append(article)
+            continue
+        
+        try:
+            article_date = date_parser.parse(article_date_str)
+            if article_date.tzinfo is None:
+                # Assume UTC if no timezone
+                article_date = article_date.replace(tzinfo=datetime.now().astimezone().tzinfo)
+            
+            if article_date.replace(tzinfo=None) >= cutoff_date:
+                articles_filtered.append(article)
+            else:
+                logger.debug("article_filtered_too_old",
+                    url=article.get("url"),
+                    title=article.get("title", "")[:50],
+                    date=article_date_str,
+                    age_hours=int((datetime.utcnow() - article_date.replace(tzinfo=None)).total_seconds() / 3600)
+                )
+        except Exception as e:
+            # Date parsing failed - include article (conservative)
+            logger.warn("article_date_parse_failed",
+                url=article.get("url"),
+                date_str=article_date_str,
+                error=str(e)
+            )
+            articles_filtered.append(article)
+    
+    if len(articles_filtered) < len(articles):
+        logger.info("articles_filtered_by_date",
+            total=len(articles),
+            kept=len(articles_filtered),
+            filtered_out=len(articles) - len(articles_filtered)
+        )
+    
+    articles = articles_filtered
     
     semaphore = asyncio.Semaphore(max_concurrent)
     

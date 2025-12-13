@@ -60,34 +60,33 @@ async def get_next_healthy_source() -> Optional[Dict[str, Any]]:
         if reset_result.data:
             logger.info("circuit_breakers_auto_reset", count=len(reset_result.data))
         
-        # Get next healthy source
+        # Get next 2 healthy sources
         result = supabase.client.table("discovered_sources")\
             .select("*")\
             .eq("company_id", POOL_COMPANY_ID)\
             .eq("is_active", True)\
             .eq("circuit_breaker_open", False)\
             .order("last_scraped_at", desc=False, nullsfirst=True)\
-            .limit(1)\
+            .limit(2)\
             .execute()
         
         if not result.data:
             logger.warn("no_healthy_sources", 
                 message="All sources have circuit breaker open or are inactive")
-            return None
+            return []
         
-        source = result.data[0]
+        sources = result.data
         
-        logger.info("next_source_selected",
-            source_id=source["source_id"],
-            source_name=source["source_name"],
-            url=source["url"],
-            last_scraped_at=source.get("last_scraped_at"),
-            consecutive_failures=source.get("consecutive_failures", 0),
-            total_successes=source.get("total_successes", 0),
-            total_failures=source.get("total_failures", 0)
+        logger.info("next_sources_selected",
+            count=len(sources),
+            sources=[{
+                "source_id": s["source_id"],
+                "source_name": s["source_name"],
+                "last_scraped_at": s.get("last_scraped_at")
+            } for s in sources]
         )
         
-        return source
+        return sources
     
     except Exception as e:
         logger.error("get_next_source_error", error=str(e))
@@ -297,38 +296,55 @@ async def check_source_robust(source: Dict[str, Any]) -> Dict[str, Any]:
         return {"success": False, "reason": "exception", "error": error_msg}
 
 
-async def check_next_source():
-    """Main function: Check next healthy source and exit.
+async def check_next_sources():
+    """Main function: Check next 2 healthy sources in parallel.
     
-    Called by scheduler every 5 minutes.
+    Called by scheduler every 10 minutes.
     """
     logger.info("pool_checker_v2_start")
     
     try:
-        # Get next healthy source
-        source = await get_next_healthy_source()
+        # Get next 2 healthy sources
+        sources = await get_next_healthy_source()
         
-        if not source:
+        if not sources:
             logger.warn("pool_checker_no_healthy_sources")
             return
         
-        # Check source
-        result = await check_source_robust(source)
+        # Check sources in parallel
+        tasks = [check_source_robust(source) for source in sources]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
         
         # Log summary
-        if result.get("success"):
-            logger.info("pool_checker_v2_completed_success",
-                source_id=source["source_id"],
-                source_name=result.get("source_name"),
-                change_type=result.get("change_type"),
-                context_units_created=result.get("context_units_created", 0)
-            )
-        else:
-            logger.warn("pool_checker_v2_completed_failure",
-                source_id=source["source_id"],
-                reason=result.get("reason"),
-                error=result.get("error")
-            )
+        success_count = 0
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error("pool_checker_task_exception",
+                    source_id=sources[i]["source_id"],
+                    error=str(result)
+                )
+                continue
+            
+            if result.get("success"):
+                success_count += 1
+                logger.info("pool_checker_v2_completed_success",
+                    source_id=sources[i]["source_id"],
+                    source_name=result.get("source_name"),
+                    change_type=result.get("change_type"),
+                    context_units_created=result.get("context_units_created", 0)
+                )
+            else:
+                logger.warn("pool_checker_v2_completed_failure",
+                    source_id=sources[i]["source_id"],
+                    reason=result.get("reason"),
+                    error=result.get("error")
+                )
+        
+        logger.info("pool_checker_v2_batch_completed",
+            sources_checked=len(sources),
+            successful=success_count,
+            failed=len(sources) - success_count
+        )
     
     except Exception as e:
         logger.error("pool_checker_v2_error", error=str(e))
