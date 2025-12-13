@@ -160,58 +160,24 @@ Respond in JSON:
 
         # 6. Analyze Atomic Chain (title + summary + tags + atomic facts + category)
         analyze_atomic_prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are a news content analyst specializing in extracting rich, structured facts from content."),
-            ("user", """Analyze this content and extract ALL relevant information as structured atomic facts.
+            ("system", "Extractor de hechos atómicos."),
+            ("user", """Extrae hechos del texto. IGNORA: menús, footers, descripciones genéricas.
 
-EXTRACTION GUIDELINES:
-- Extract EVERY piece of factual information (who, what, when, where, why, how)
-- Include: events, announcements, data, quotes, partnerships, products, locations, dates, numbers, names
-- Be comprehensive: aim for 10-20+ facts for substantial content
-- Each fact should be atomic (one fact per statement)
-- Include context facts that help understand the main story
+Si NO hay contenido noticioso:
+{{"title": "Sin contenido noticioso", "summary": "Sin información novedosa", "tags": [], "atomic_facts": [], "category": "general"}}
 
-IGNORE:
-- Generic institutional descriptions (e.g., "X is an organization that...")
-- Static navigation menus, headers, footers
+Si HAY contenido, extrae:
+1. Título
+2. Resumen (3 frases)
+3. 5-10 tags
+4. 10-20 hechos: {{"order": N, "type": "fact"/"quote"/"context", "speaker": null/"Name", "text": "..."}}
+5. Categoría (UNA): política, economía, sociedad, cultura, deportes, tecnología, medio_ambiente, infraestructuras, seguridad, salud, turismo, internacional, general
 
-IF the page contains NO newsworthy content (only generic/static information), respond with:
-{{"title": "Sin contenido noticioso", "summary": "La página no contiene información novedosa o de actualidad", "tags": [], "atomic_facts": [], "category": "general"}}
-
-IF there IS content to extract, provide:
-1. A clear, specific title
-2. A rich summary (3-4 sentences) covering key points
-3. 5-10 relevant tags (including entities, topics, locations)
-4. Atomic facts: Extract ALL factual statements, each structured as:
-   - order: sequential number (1, 2, 3...)
-   - type: "fact" (objective information), "quote" (direct quote), or "context" (background info)
-   - speaker: person/entity speaking (for quotes) or null for facts
-   - text: the atomic fact in Spanish
-5. Category (choose ONE most relevant):
-   - política: Government, legislation, councils, elections, institutions
-   - economía: Business, employment, finance, commerce, industry, companies
-   - sociedad: Social services, education, housing, citizenship
-   - cultura: Cultural events, art, heritage, festivals, museums
-   - deportes: Sports competitions, teams, facilities
-   - tecnología: Innovation, digital, science, R&D, startups
-   - medio_ambiente: Sustainability, climate, energy, waste, natural spaces
-   - infraestructuras: Urbanism, transport, public works, mobility
-   - seguridad: Police, emergencies, civil protection, firefighters
-   - salud: Healthcare, medicine, hospitals, wellness, prevention
-   - turismo: Tourism promotion, hospitality, visitors
-   - internacional: Foreign relations, cooperation, partnerships
-   - general: Miscellaneous, not clearly classifiable
-
-CRITICAL:
-- Respond in Spanish. ALL text fields MUST be in Spanish.
-- Extract 10-20+ facts for substantial content (don't be sparse!)
-- Each fact should be complete and self-contained
-- Maintain chronological/logical order in numbering
-
-Text:
+Texto:
 {text}
 
-Respond in JSON:
-{{"title": "...", "summary": "...", "tags": [...], "atomic_facts": [{{"order": 1, "type": "fact", "speaker": null, "timestamp": null, "text": "..."}}, {{"order": 2, "type": "quote", "speaker": "Name", "timestamp": null, "text": "..."}}], "category": "economía"}}""")
+JSON:
+{{"title": "...", "summary": "...", "tags": [...], "atomic_facts": [...], "category": "..."}}""")
         ])
 
         self.analyze_atomic_chain = RunnableSequence(
