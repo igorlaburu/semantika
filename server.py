@@ -228,18 +228,33 @@ async def shutdown_event():
 
 
 @app.get("/health")
-async def health_check() -> Dict[str, str]:
+async def health_check() -> Dict[str, Any]:
     """
-    Health check endpoint.
+    Health check endpoint with memory stats.
 
     Returns:
-        Status and timestamp
+        Status, timestamp, and memory usage
     """
+    import gc
+    import psutil
+    import os
+    
+    # Force garbage collection to free memory
+    gc.collect()
+    
+    # Get memory stats
+    process = psutil.Process(os.getpid())
+    memory_info = process.memory_info()
+    
     return {
         "status": "ok",
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "service": "semantika-api",
-        "version": "0.1.0"
+        "version": "0.1.0",
+        "memory": {
+            "rss_mb": round(memory_info.rss / 1024 / 1024, 2),
+            "vms_mb": round(memory_info.vms / 1024 / 1024, 2)
+        }
     }
 
 

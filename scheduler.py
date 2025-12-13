@@ -545,6 +545,30 @@ async def reload_sources_periodically(scheduler: AsyncIOScheduler):
     logger.info("sources_reload_scheduled", interval_minutes=5)
 
 
+async def force_garbage_collection():
+    """Force Python garbage collection to prevent memory leaks."""
+    import gc
+    
+    logger.info("garbage_collection_starting")
+    collected = gc.collect()
+    logger.info("garbage_collection_completed", objects_collected=collected)
+
+
+async def schedule_garbage_collection(scheduler):
+    """Schedule periodic garbage collection every 30 minutes."""
+    logger.info("scheduling_garbage_collection", interval_minutes=30)
+    
+    scheduler.add_job(
+        force_garbage_collection,
+        trigger=IntervalTrigger(minutes=30),
+        id="garbage_collection",
+        replace_existing=True,
+        max_instances=1
+    )
+    
+    logger.info("garbage_collection_scheduled", interval_minutes=30)
+
+
 async def main():
     """Main scheduler entry point."""
     logger.info("scheduler_starting")
@@ -571,6 +595,9 @@ async def main():
         
         # Schedule periodic reload of sources (every 5 minutes)
         await reload_sources_periodically(scheduler)
+        
+        # Schedule periodic garbage collection (every 30 minutes)
+        await schedule_garbage_collection(scheduler)
 
         # Create tasks for monitors
         monitor_tasks = []
