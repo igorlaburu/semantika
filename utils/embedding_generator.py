@@ -51,6 +51,7 @@ embedding = await generate_embedding(
 from typing import List, Optional, Dict, Any
 import asyncio
 from functools import lru_cache
+from concurrent.futures import ThreadPoolExecutor
 
 from .config import settings
 from .logger import get_logger
@@ -59,6 +60,9 @@ logger = get_logger("embedding_generator")
 
 # Global FastEmbed model instance
 _fastembed_model = None
+
+# Global thread pool for FastEmbed (limit to 2 workers max to save memory)
+_embedding_executor = None
 
 
 def get_fastembed_model():
@@ -91,6 +95,19 @@ def get_fastembed_model():
     return _fastembed_model
 
 
+def get_embedding_executor():
+    """Get or initialize thread pool executor for FastEmbed."""
+    global _embedding_executor
+
+    if _embedding_executor is None:
+        # Limit to 2 workers to save memory (FastEmbed model is ~500 MB)
+        # Default would be min(32, cpu_count + 4) = 10+ workers
+        _embedding_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="fastembed")
+        logger.info("embedding_executor_initialized", max_workers=2)
+
+    return _embedding_executor
+
+
 async def generate_embedding_fastembed(text: str) -> List[float]:
     """Generate embedding using local FastEmbed.
 
@@ -105,11 +122,12 @@ async def generate_embedding_fastembed(text: str) -> List[float]:
     """
     try:
         model = get_fastembed_model()
+        executor = get_embedding_executor()
         
-        # FastEmbed is sync, run in thread pool
+        # FastEmbed is sync, run in dedicated thread pool (max_workers=2)
         loop = asyncio.get_event_loop()
         embeddings = await loop.run_in_executor(
-            None,
+            executor,  # Use our limited executor instead of default
             lambda: list(model.embed([text[:512]]))  # Limit to 512 chars
         )
         
