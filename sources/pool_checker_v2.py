@@ -203,7 +203,8 @@ async def check_source_robust(source: Dict[str, Any]) -> Dict[str, Any]:
     )
     
     try:
-        # Scrape with timeout (90s max for index pages with multiple articles)
+        # Scrape with timeout (120s max for index pages with 10+ articles)
+        # Breakdown: extract_links (13s) + 10 articles × 7s (70s) + save/geocode (20s) = ~103s
         result = await asyncio.wait_for(
             scrape_url(
                 company_id=company_id,
@@ -211,7 +212,7 @@ async def check_source_robust(source: Dict[str, Any]) -> Dict[str, Any]:
                 url=url,
                 url_type="index"
             ),
-            timeout=90.0
+            timeout=120.0
         )
         
         # Handle None result (shouldn't happen with new code, but defensive)
@@ -276,12 +277,12 @@ async def check_source_robust(source: Dict[str, Any]) -> Dict[str, Any]:
         }
     
     except asyncio.TimeoutError:
-        error_msg = "Timeout after 90s"
+        error_msg = "Timeout after 120s"
         await update_source_metrics(source_id, success=False, error=error_msg)
         logger.error("source_check_timeout",
             source_id=source_id,
             source_name=source_name,
-            timeout_seconds=90
+            timeout_seconds=120
         )
         return {"success": False, "reason": "timeout"}
     
