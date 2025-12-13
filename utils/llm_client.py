@@ -172,11 +172,20 @@ Si HAY contenido, extrae:
 3. 5-10 tags
 4. 10-20 hechos: {{"order": N, "type": "fact"/"quote"/"context", "speaker": null/"Name", "text": "..."}}
 5. Categoría (UNA): política, economía, sociedad, cultura, deportes, tecnología, medio_ambiente, infraestructuras, seguridad, salud, turismo, internacional, general
-6. Ubicaciones (con jerarquía):
-   - level: "primary" (ciudad principal del evento) o "context" (provincia/región/país)
+6. Ubicaciones (DONDE OCURRE EL EVENTO, NO quien participa):
+   - level: "primary" → Ciudad DONDE ocurre el evento (NO la ciudad del visitante)
+   - level: "context" → Provincia/región/país
    - type: "city", "province", "region", "country"
-   Ejemplo: [{{"name": "Vitoria-Gasteiz", "type": "city", "level": "primary"}}, {{"name": "Álava", "type": "province", "level": "context"}}, {{"name": "España", "type": "country", "level": "context"}}]
-   Si NO hay ubicaciones específicas: "locations": []
+   
+   IMPORTANTE - Ejemplos:
+   ✅ "Athletic vs Real Madrid en San Mamés" → primary: Bilbao (donde está San Mamés)
+   ❌ NO uses "Madrid" como primary (es el visitante, no la ubicación)
+   ✅ "Reunión del lehendakari en Ajuria Enea" → primary: Vitoria-Gasteiz (donde está Ajuria Enea)
+   ✅ "Concierto en Bilbao Arena" → primary: Bilbao
+   ✅ "Pleno de las Juntas de Álava" → primary: Vitoria-Gasteiz (capital de Álava)
+   
+   Formato: [{{"name": "Vitoria-Gasteiz", "type": "city", "level": "primary"}}, {{"name": "Álava", "type": "province", "level": "context"}}, {{"name": "España", "type": "country", "level": "context"}}]
+   Si NO hay ubicación específica: "locations": []
 
 Texto:
 {text}
