@@ -597,10 +597,10 @@ async def execute_redact_news_rich(
                 if isinstance(stmt, dict) and stmt.get("url"):
                     enrichments.append({"url": stmt["url"]})
         
-        # Append references to content
-        if "content" in result:
-            result["content"] = append_references_to_content(
-                content=result["content"],
+        # Append references to article content (field is "article" not "content")
+        if "article" in result:
+            result["article"] = append_references_to_content(
+                content=result["article"],
                 context_units=context_units,
                 enrichments=enrichments if enrichments else None
             )
