@@ -24,21 +24,22 @@ logger = get_logger("pool_checker")
 
 
 async def get_next_source_to_check() -> Optional[Dict[str, Any]]:
-    """Get next source to check (rotation by last_checked_at).
+    """Get next source to check (rotation by last_scraped_at).
     
     Returns:
-        Source dict or None if no sources available
+        Source dict from discovered_sources or None if no sources available
     """
     try:
         supabase = get_supabase_client()
         
-        # Get next source to check (oldest last_checked_at or never checked)
-        # Only scraping sources (system jobs don't have URLs)
-        result = supabase.client.table("sources")\
+        # Pool sources are in discovered_sources table (not sources table)
+        POOL_COMPANY_ID = "99999999-9999-9999-9999-999999999999"
+        
+        result = supabase.client.table("discovered_sources")\
             .select("*")\
+            .eq("company_id", POOL_COMPANY_ID)\
             .eq("is_active", True)\
-            .eq("source_type", "scraping")\
-            .order("last_checked_at", desc=False, nullsfirst=True)\
+            .order("last_scraped_at", desc=False, nullsfirst=True)\
             .limit(1)\
             .execute()
         
@@ -51,7 +52,8 @@ async def get_next_source_to_check() -> Optional[Dict[str, Any]]:
         logger.info("next_source_selected",
             source_id=source["source_id"],
             source_name=source["source_name"],
-            last_checked_at=source.get("last_checked_at")
+            url=source["url"],
+            last_scraped_at=source.get("last_scraped_at")
         )
         
         return source
@@ -67,7 +69,7 @@ async def check_source_for_changes(source: Dict[str, Any]) -> Dict[str, Any]:
     Lightweight hash check first, heavy LLM processing only if changed.
     
     Args:
-        source: Source from database
+        source: Source from discovered_sources table
         
     Returns:
         Result dict with status and stats
@@ -75,8 +77,7 @@ async def check_source_for_changes(source: Dict[str, Any]) -> Dict[str, Any]:
     source_id = source["source_id"]
     source_name = source["source_name"]
     company_id = source["company_id"]
-    config = source.get("config", {})
-    url = config.get("url")
+    url = source.get("url")
     
     if not url:
         logger.error("source_missing_url", source_id=source_id)
@@ -95,7 +96,8 @@ async def check_source_for_changes(source: Dict[str, Any]) -> Dict[str, Any]:
     try:
         # STEP 1: Lightweight scrape (just fetch + hash)
         # Use scraper_workflow which already has change detection
-        url_type = config.get("url_type", "article")
+        # discovered_sources are typically index pages
+        url_type = "index"
         
         result = await scrape_url(
             company_id=company_id,
@@ -140,7 +142,7 @@ async def check_source_for_changes(source: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def update_last_checked(source_id: str):
-    """Update last_checked_at timestamp for source.
+    """Update last_scraped_at timestamp for discovered source.
     
     Args:
         source_id: Source UUID
@@ -148,15 +150,15 @@ async def update_last_checked(source_id: str):
     try:
         supabase = get_supabase_client()
         
-        supabase.client.table("sources")\
-            .update({"last_checked_at": datetime.utcnow().isoformat()})\
+        supabase.client.table("discovered_sources")\
+            .update({"last_scraped_at": datetime.utcnow().isoformat()})\
             .eq("source_id", source_id)\
             .execute()
         
-        logger.debug("last_checked_updated", source_id=source_id)
+        logger.debug("last_scraped_updated", source_id=source_id)
     
     except Exception as e:
-        logger.error("update_last_checked_error",
+        logger.error("update_last_scraped_error",
             source_id=source_id,
             error=str(e)
         )
