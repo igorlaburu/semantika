@@ -255,7 +255,7 @@ async def query_nominatim(location: str, country_hint: Optional[str] = None) -> 
             params["countrycodes"] = country_hint.lower()
         
         headers = {
-            "User-Agent": "Semantika/1.0 (contact@ekimen.ai)"  # Required by Nominatim
+            "User-Agent": "Semantika/1.0 (info@ekimen.ai)"  # Required by Nominatim
         }
         
         async with aiohttp.ClientSession() as session:
