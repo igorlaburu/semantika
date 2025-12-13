@@ -2565,10 +2565,12 @@ async def get_context_unit_image(
             company_id=company_id
         )
         
-        # Fetch context unit from database
+        # Fetch context unit from database (allow access to pool content)
+        pool_company_id = "99999999-9999-9999-9999-999999999999"
+        
         result = supabase_client.client.table("press_context_units").select(
             "id, source_metadata, company_id"
-        ).eq("id", context_unit_id).eq("company_id", company_id).maybe_single().execute()
+        ).eq("id", context_unit_id).in_("company_id", [company_id, pool_company_id]).maybe_single().execute()
         
         if not result.data:
             logger.warn("context_unit_not_found_for_image",
