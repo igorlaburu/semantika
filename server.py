@@ -2568,18 +2568,10 @@ async def get_context_unit_image(
         
         # Check if featured_image exists
         if not featured_image or not featured_image.get("url"):
-            logger.debug("no_featured_image_returning_placeholder",
+            logger.debug("no_featured_image_found",
                 context_unit_id=context_unit_id
             )
-            # Return placeholder (1.91:1 aspect ratio, 600×314)
-            return Response(
-                content=generate_placeholder_image(),
-                media_type="image/svg+xml",
-                headers={
-                    "Cache-Control": "public, max-age=86400",
-                    "X-Image-Source": "placeholder"
-                }
-            )
+            raise HTTPException(status_code=404, detail="No featured image available for this context unit")
         
         image_url = featured_image["url"]
         image_source = featured_image.get("source", "unknown")
@@ -2616,15 +2608,9 @@ async def get_context_unit_image(
                             image_url=image_url[:80],
                             status=response.status
                         )
-                        # Return placeholder on fetch failure
-                        return Response(
-                            content=generate_placeholder_image(),
-                            media_type="image/svg+xml",
-                            headers={
-                                "Cache-Control": "public, max-age=3600",
-                                "X-Image-Source": "placeholder",
-                                "X-Original-Status": str(response.status)
-                            }
+                        raise HTTPException(
+                            status_code=404, 
+                            detail=f"Failed to fetch image from source (HTTP {response.status})"
                         )
                     
                     # Read image bytes
@@ -2654,15 +2640,9 @@ async def get_context_unit_image(
                 image_url=image_url[:80],
                 error=str(e)
             )
-            # Return placeholder on network error
-            return Response(
-                content=generate_placeholder_image(),
-                media_type="image/svg+xml",
-                headers={
-                    "Cache-Control": "public, max-age=3600",
-                    "X-Image-Source": "placeholder",
-                    "X-Error": "network_error"
-                }
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Failed to fetch image: {str(e)}"
             )
             
     except HTTPException:
@@ -2672,15 +2652,9 @@ async def get_context_unit_image(
             context_unit_id=context_unit_id,
             error=str(e)
         )
-        # Return placeholder on unexpected error
-        return Response(
-            content=generate_placeholder_image(),
-            media_type="image/svg+xml",
-            headers={
-                "Cache-Control": "public, max-age=3600",
-                "X-Image-Source": "placeholder",
-                "X-Error": "unexpected_error"
-            }
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Internal error processing image: {str(e)}"
         )
 
 
