@@ -227,6 +227,8 @@ async def execute_source_task(source: Dict[str, Any]):
                 asyncio.create_task(pool_discovery_job())
             elif system_job == "pool_ingestion":
                 asyncio.create_task(pool_ingestion_job())
+            elif system_job == "pool_checker":
+                asyncio.create_task(pool_checker_job())
             elif system_job == "ttl_cleanup":
                 asyncio.create_task(cleanup_old_data())
             else:
@@ -328,6 +330,21 @@ async def pool_ingestion_job():
     
     except Exception as e:
         logger.error("pool_ingestion_job_error", error=str(e))
+
+
+async def pool_checker_job():
+    """Pool checker job - checks one source in rotation."""
+    logger.info("starting_pool_checker_job")
+    
+    try:
+        from sources.pool_checker import check_next_source
+        
+        await check_next_source()
+        
+        logger.info("pool_checker_job_completed")
+    
+    except Exception as e:
+        logger.error("pool_checker_job_error", error=str(e))
 
 
 async def schedule_sources(scheduler: AsyncIOScheduler):
