@@ -586,6 +586,25 @@ async def execute_redact_news_rich(
 
         result["category"] = category
 
+        # Add references section to article content
+        from utils.article_references import append_references_to_content
+        
+        # Get enrichment references if any
+        enrichments = []
+        for cu in context_units:
+            enriched_statements = cu.get("enriched_statements") or []
+            for stmt in enriched_statements:
+                if isinstance(stmt, dict) and stmt.get("url"):
+                    enrichments.append({"url": stmt["url"]})
+        
+        # Append references to content
+        if "content" in result:
+            result["content"] = append_references_to_content(
+                content=result["content"],
+                context_units=context_units,
+                enrichments=enrichments if enrichments else None
+            )
+
         return result
         
     except Exception as e:
