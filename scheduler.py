@@ -333,11 +333,11 @@ async def pool_ingestion_job():
 
 
 async def pool_checker_job():
-    """Pool checker job - checks one source in rotation."""
+    """Pool checker job - checks one source in rotation (v2 with circuit breaker)."""
     logger.info("starting_pool_checker_job")
     
     try:
-        from sources.pool_checker import check_next_source
+        from sources.pool_checker_v2 import check_next_source
         
         await check_next_source()
         
