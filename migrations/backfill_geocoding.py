@@ -57,8 +57,8 @@ async def backfill_geocoding(dry_run: bool = True, limit: int = None):
     # Filter out units that already have geo_location
     units_to_process = []
     for unit in result.data:
-        source_metadata = unit.get("source_metadata", {})
-        connector_specific = source_metadata.get("connector_specific", {})
+        source_metadata = unit.get("source_metadata") or {}
+        connector_specific = source_metadata.get("connector_specific") or {}
         
         if not connector_specific.get("geo_location"):
             units_to_process.append(unit)
@@ -129,8 +129,10 @@ async def backfill_geocoding(dry_run: bool = True, limit: int = None):
                 updated += 1
             else:
                 # Update source_metadata
-                source_metadata = unit.get("source_metadata", {})
+                source_metadata = unit.get("source_metadata") or {}
                 if "connector_specific" not in source_metadata:
+                    source_metadata["connector_specific"] = {}
+                elif source_metadata["connector_specific"] is None:
                     source_metadata["connector_specific"] = {}
                 
                 source_metadata["connector_specific"]["geo_location"] = geo_location
