@@ -45,12 +45,12 @@ RUN mkdir -p /app/models && \
     wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/carlfm/x_low/es_ES-carlfm-x_low.onnx && \
     wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/carlfm/x_low/es_ES-carlfm-x_low.onnx.json
 
-# Copy application code (after ML models to preserve cache)
-COPY . .
-
-# Create non-root user for security
+# Create non-root user BEFORE copying code (avoids duplicating layers)
 RUN useradd -m -u 1000 semantika && \
     chown -R semantika:semantika /app
+
+# Copy application code with correct ownership (after ML models to preserve cache)
+COPY --chown=semantika:semantika . .
 
 USER semantika
 
