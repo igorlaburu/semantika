@@ -164,7 +164,7 @@ Respond in JSON:
             ("user", """Extrae hechos del texto. IGNORA: menús, footers, descripciones genéricas.
 
 Si NO hay contenido noticioso:
-{{"title": "Sin contenido noticioso", "summary": "Sin información novedosa", "tags": [], "atomic_facts": [], "category": "general", "locations": []}}
+{{"title": "Sin contenido noticioso", "summary": "Sin información novedosa", "tags": [], "atomic_statements": [], "category": "general", "locations": []}}
 
 Si HAY contenido, extrae:
 1. Título
@@ -191,7 +191,7 @@ Texto:
 {text}
 
 JSON:
-{{"title": "...", "summary": "...", "tags": [...], "atomic_facts": [...], "category": "...", "locations": [...]}}""")
+{{"title": "...", "summary": "...", "tags": [...], "atomic_statements": [...], "category": "...", "locations": [...]}}""")
         ])
 
         self.analyze_atomic_chain = RunnableSequence(
@@ -404,7 +404,7 @@ Extract and respond in JSON:
             result = json.loads(content)
 
             logger.info("analyze_atomic_completed",
-                atomic_facts=len(result.get("atomic_facts", [])),
+                atomic_statements=len(result.get("atomic_statements", [])),
                 has_title=bool(result.get("title")),
                 has_summary=bool(result.get("summary")),
                 provider="fast"
@@ -415,13 +415,13 @@ Extract and respond in JSON:
                 error=str(e),
                 content_preview=content[:300] if 'content' in locals() else 'N/A'
             )
-            return {"title": "", "summary": "", "tags": [], "atomic_facts": []}
+            return {"title": "", "summary": "", "tags": [], "atomic_statements": []}
         except Exception as e:
             logger.error("analyze_atomic_error",
                 error=str(e),
                 error_type=type(e).__name__
             )
-            return {"title": "", "summary": "", "tags": [], "atomic_facts": []}
+            return {"title": "", "summary": "", "tags": [], "atomic_statements": []}
     
     async def search_original_source(
         self,
