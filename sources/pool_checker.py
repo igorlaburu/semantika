@@ -33,9 +33,11 @@ async def get_next_source_to_check() -> Optional[Dict[str, Any]]:
         supabase = get_supabase_client()
         
         # Get next source to check (oldest last_checked_at or never checked)
+        # Only scraping sources (system jobs don't have URLs)
         result = supabase.client.table("sources")\
             .select("*")\
             .eq("is_active", True)\
+            .eq("source_type", "scraping")\
             .order("last_checked_at", desc=False, nullsfirst=True)\
             .limit(1)\
             .execute()
