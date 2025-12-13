@@ -27,12 +27,9 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pre-download ML models BEFORE copying code (better layer caching)
-# 1. FastEmbed model for embeddings (768d multilingual)
-# 2. Whisper base model for audio transcription
-# 3. Piper TTS models
-RUN python3 -c "from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/paraphrase-multilingual-mpnet-base-v2', cache_dir='/app/.cache/fastembed')" && \
-    python3 -c "import whisper; whisper.load_model('base', download_root='/app/.cache/whisper')"
+# NOTE: ML models (FastEmbed, Whisper) are downloaded at runtime
+# and stored in /app/.cache volume (shared between containers)
+# This keeps image size small (~2-3 GB instead of 12 GB)
 
 # Download and install Piper TTS
 RUN mkdir -p /app/models && \
@@ -53,10 +50,6 @@ RUN useradd -m -u 1000 semantika && \
 COPY --chown=semantika:semantika . .
 
 USER semantika
-
-# Set cache directories (use pre-downloaded models)
-ENV FASTEMBED_CACHE_PATH=/app/.cache/fastembed \
-    WHISPER_CACHE_DIR=/app/.cache/whisper
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
