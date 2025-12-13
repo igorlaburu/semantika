@@ -2538,27 +2538,76 @@ async def get_context_unit_image(
     """Proxy featured image for context unit.
     
     Fetches the featured image URL from source_metadata and proxies it
-    to avoid hotlinking issues. Returns placeholder on failure.
+    to avoid hotlinking issues. Uses local filesystem cache.
     
     Args:
         context_unit_id: Context unit UUID
         client: Authenticated client from API key
         
     Returns:
-        Image bytes (JPEG/PNG) or placeholder
+        Image bytes (JPEG/PNG) from cache or remote
         
     Response Headers:
         - Content-Type: image/jpeg or image/png
         - Cache-Control: public, max-age=86400 (24 hours)
         - X-Image-Source: "original" or "placeholder"
+        - X-Image-Cache: "hit" or "miss"
         
     Expected aspect ratio: 1.91:1 (1200×630 Open Graph standard)
     
     Raises:
         HTTPException: 404 if context unit not found
     """
+    import os
+    from pathlib import Path
+    
     try:
         company_id = client["company_id"]
+        
+        # Check local cache first
+        cache_dir = Path("/app/cache/images")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Try both .jpg and .png extensions
+        cache_file_jpg = cache_dir / f"{context_unit_id}.jpg"
+        cache_file_png = cache_dir / f"{context_unit_id}.png"
+        
+        if cache_file_jpg.exists():
+            logger.debug("image_cache_hit",
+                context_unit_id=context_unit_id,
+                cache_file=str(cache_file_jpg)
+            )
+            
+            return Response(
+                content=cache_file_jpg.read_bytes(),
+                media_type="image/jpeg",
+                headers={
+                    "Cache-Control": "public, max-age=86400",
+                    "X-Image-Source": "original",
+                    "X-Image-Cache": "hit"
+                }
+            )
+        
+        if cache_file_png.exists():
+            logger.debug("image_cache_hit",
+                context_unit_id=context_unit_id,
+                cache_file=str(cache_file_png)
+            )
+            
+            return Response(
+                content=cache_file_png.read_bytes(),
+                media_type="image/png",
+                headers={
+                    "Cache-Control": "public, max-age=86400",
+                    "X-Image-Source": "original",
+                    "X-Image-Cache": "hit"
+                }
+            )
+        
+        # Cache miss - fetch from database
+        logger.debug("image_cache_miss",
+            context_unit_id=context_unit_id
+        )
         
         logger.debug("fetching_context_unit_image",
             context_unit_id=context_unit_id,
@@ -2634,6 +2683,23 @@ async def get_context_unit_image(
                     image_bytes = await response.read()
                     content_type = response.headers.get("Content-Type", "image/jpeg")
                     
+                    # Save to cache
+                    extension = "png" if "png" in content_type else "jpg"
+                    cache_file = cache_dir / f"{context_unit_id}.{extension}"
+                    
+                    try:
+                        cache_file.write_bytes(image_bytes)
+                        logger.info("image_cached",
+                            context_unit_id=context_unit_id,
+                            cache_file=str(cache_file),
+                            size_kb=round(len(image_bytes) / 1024, 2)
+                        )
+                    except Exception as cache_error:
+                        logger.warn("image_cache_write_failed",
+                            context_unit_id=context_unit_id,
+                            error=str(cache_error)
+                        )
+                    
                     logger.info("image_proxied_successfully",
                         context_unit_id=context_unit_id,
                         image_url=image_url[:80],
@@ -2647,7 +2713,8 @@ async def get_context_unit_image(
                         headers={
                             "Cache-Control": "public, max-age=86400",
                             "X-Image-Source": "original",
-                            "X-Image-Extraction": image_source
+                            "X-Image-Extraction": image_source,
+                            "X-Image-Cache": "miss"
                         }
                     )
                     

@@ -16,6 +16,7 @@ ENV/
 qdrant_storage/
 *.db
 *.sqlite
+cache/
 
 # IDE
 .vscode/
