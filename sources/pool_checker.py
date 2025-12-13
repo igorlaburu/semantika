@@ -114,8 +114,9 @@ async def check_source_for_changes(source: Dict[str, Any]) -> Dict[str, Any]:
                 "source_id": source_id
             }
         
-        change_type = result.get("change_info", {}).get("change_type", "unknown")
-        context_units_created = len(result.get("context_unit_ids", []))
+        change_info = result.get("change_info") or {}
+        change_type = change_info.get("change_type", "unknown")
+        context_units_created = len(result.get("context_unit_ids") or [])
         workflow_error = result.get("error")
         
         logger.info("source_check_completed",
