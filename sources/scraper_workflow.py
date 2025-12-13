@@ -439,10 +439,12 @@ async def parse_multi_noticia(state: ScraperState, news_blocks, soup: BeautifulS
             )
             
             title = result.get("title", "")
-            if title and title.lower() not in ["sin contenido noticioso", "no news content", ""]:
+            atomic_statements = result.get("atomic_statements", [])
+            
+            # Quality gate: require valid title AND at least 2 atomic statements
+            if title and title.lower() not in ["sin contenido noticioso", "no news content", ""] and len(atomic_statements) >= 2:
                 # Extract featured image after quality gate
                 featured_image = None
-                atomic_statements = result.get("atomic_statements", [])
                 if len(atomic_statements) >= 2:
                     try:
                         featured_image = extract_featured_image(block_soup, url)
@@ -472,10 +474,12 @@ async def parse_multi_noticia(state: ScraperState, news_blocks, soup: BeautifulS
                     published_at=published_at.isoformat() if published_at else "unknown"
                 )
             else:
-                logger.debug("news_block_skipped_no_content",
+                logger.debug("news_block_skipped_quality_gate",
                     url=url,
                     block_index=i,
-                    title=title
+                    title=title[:50] if title else "no_title",
+                    statements_count=len(atomic_statements),
+                    reason="insufficient_statements" if atomic_statements is not None and len(atomic_statements) < 2 else "no_content_marker"
                 )
         except Exception as e:
             logger.error("news_block_parse_error", 
@@ -663,20 +667,32 @@ async def scrape_articles_from_index(
                     pre_filled={}
                 )
                 
-                if not result.get("title"):
+                title = result.get("title", "")
+                atomic_statements = result.get("atomic_statements", [])
+                
+                # Quality gate: require valid title AND at least 2 atomic statements
+                if not title:
                     logger.warn("article_parse_failed_no_title", url=article_url)
+                    return None
+                
+                if len(atomic_statements) < 2:
+                    logger.info("article_skipped_quality_gate",
+                        url=article_url,
+                        title=title[:50],
+                        statements_count=len(atomic_statements),
+                        reason="insufficient_statements"
+                    )
                     return None
                 
                 logger.debug("article_scraped_from_index",
                     url=article_url,
-                    title=result.get("title", "")[:50],
+                    title=title[:50],
                     category=result.get("category"),
-                    atomic_count=len(result.get("atomic_statements", []))
+                    atomic_count=len(atomic_statements)
                 )
                 
                 # Extract featured image after quality gate
                 featured_image = None
-                atomic_statements = result.get("atomic_statements", [])
                 if len(atomic_statements) >= 2:
                     try:
                         article_soup = BeautifulSoup(article_html, 'html.parser')
