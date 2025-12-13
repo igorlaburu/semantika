@@ -106,6 +106,14 @@ async def check_source_for_changes(source: Dict[str, Any]) -> Dict[str, Any]:
             url_type=url_type
         )
         
+        if not result:
+            logger.error("scrape_url_returned_none", source_id=source_id, url=url)
+            return {
+                "success": False,
+                "reason": "scrape_url_failed",
+                "source_id": source_id
+            }
+        
         change_type = result.get("change_info", {}).get("change_type", "unknown")
         context_units_created = len(result.get("context_unit_ids", []))
         workflow_error = result.get("error")
