@@ -471,8 +471,8 @@ async def schedule_sources(scheduler: AsyncIOScheduler):
                         )
                     continue
             
-            # Fallback to interval scheduling for scraping and API sources
-            if source_type in ["scraping", "api"] and frequency_min > 0:
+            # Fallback to interval scheduling for scraping, API, and system sources
+            if source_type in ["scraping", "api", "system"] and frequency_min > 0:
                 job_id = f"source_{source_id}"
                 existing_job = scheduler.get_job(job_id)
 
