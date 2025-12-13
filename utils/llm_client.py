@@ -360,8 +360,8 @@ Extract and respond in JSON:
         import json
 
         try:
-            # Use Groq for fast, free processing (ideal for scraping)
-            provider = self.registry.get('groq_fast')
+            # Use fast model (gpt-4o-mini on OpenRouter) to avoid Groq rate limits
+            provider = self.registry.get('fast')
             config = {}
             if company_id:
                 config['tracking'] = {
@@ -407,7 +407,7 @@ Extract and respond in JSON:
                 atomic_facts=len(result.get("atomic_facts", [])),
                 has_title=bool(result.get("title")),
                 has_summary=bool(result.get("summary")),
-                provider="groq_fast"
+                provider="fast"
             )
             return result
         except json.JSONDecodeError as e:
@@ -606,7 +606,8 @@ Si NO encuentras fuente pública original, devuelve: {{"sources": []}}"""
             Dict with articles: [{"title": "...", "url": "...", "date": "..."}, ...]
         """
         try:
-            provider = self.registry.get('groq_fast')
+            # Use fast model (gpt-4o-mini on OpenRouter) to avoid Groq rate limits
+            provider = self.registry.get('fast')
             config = {}
             if organization_id:
                 config['tracking'] = {
@@ -693,7 +694,7 @@ Si NO encuentras fuente pública original, devuelve: {{"sources": []}}"""
             result = json.loads(content)
             logger.info("extract_news_links_completed",
                 articles_found=len(result.get("articles", [])),
-                provider="groq_fast"
+                provider="fast"
             )
             return result
         except json.JSONDecodeError as e:
@@ -1158,7 +1159,7 @@ Formato exacto:
                 ("user", user_prompt)
             ])
 
-            # Use Groq ultrafast model for micro-edits
+            # Use Groq fast for micro-edits (best for quick transformations)
             provider = self.registry.get('groq_fast') if settings.groq_api_key else self.registry.get('fast')
             
             config = {}

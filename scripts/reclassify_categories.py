@@ -58,7 +58,7 @@ async def classify_content(title: str, summary: str, registry) -> str:
         Category name
     """
     try:
-        provider = registry.get('groq_fast')
+        provider = registry.get('fast')  # Use gpt-4o-mini to avoid Groq rate limits
 
         prompt = CLASSIFICATION_PROMPT.format(
             title=title or "Sin título",

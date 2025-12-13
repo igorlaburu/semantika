@@ -208,7 +208,7 @@ Responde SOLO JSON:
             organization_id = system_org.data[0]['id'] if system_org.data else None
             
             registry = get_llm_registry()
-            provider = registry.get('groq_fast')
+            provider = registry.get('groq_compound')  # Use compound for deep reasoning in discovery
             
             config = {}
             if organization_id:
@@ -387,7 +387,7 @@ Responde en JSON:
                 logger.warn("system_org_not_found", message="SYSTEM org not found, skipping tracking")
             
             registry = get_llm_registry()
-            provider = registry.get('groq_fast')
+            provider = registry.get('groq_compound')  # Use compound for deep reasoning in discovery
             
             config = {}
             if organization_id:

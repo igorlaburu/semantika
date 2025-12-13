@@ -8,7 +8,7 @@ ESTRATEGIA:
 
 CONTABILIZACIÓN:
 - Usa registry.track_usage() automáticamente via analyze_atomic()
-- Modelo: groq_fast (llama-3.3-70b) - gratis y ultra-rápido
+- Modelo: fast (gpt-4o-mini on OpenRouter) - evita rate limits de Groq
 - Se reutiliza analyze_atomic() para aprovechar logging existente
 
 BENEFICIOS:
