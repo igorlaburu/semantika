@@ -33,6 +33,7 @@ from utils.context_unit_saver import save_from_scraping
 from utils.supabase_client import get_supabase_client
 from utils.llm_client import get_llm_client
 from utils.image_extractor import extract_featured_image
+from utils.geocoder import geocode_with_context
 
 logger = get_logger("scraper_workflow")
 
@@ -317,9 +318,12 @@ async def parse_single_article(state: ScraperState, page_title: str, semantic_co
     state["title"] = title
     state["summary"] = result.get("summary", "")
     
-    # Extract featured image AFTER quality gate (statements >= 2)
+    # Extract featured image AND geocode AFTER quality gate (statements >= 2)
     featured_image = None
+    geo_location = None
+    
     if len(atomic_statements) >= 2:
+        # Extract featured image
         try:
             soup = BeautifulSoup(state["html"], 'html.parser')
             featured_image = extract_featured_image(soup, url)
@@ -334,6 +338,25 @@ async def parse_single_article(state: ScraperState, page_title: str, semantic_co
                 url=url,
                 error=str(e)
             )
+        
+        # Geocode locations (if LLM extracted any)
+        locations = result.get("locations", [])
+        if locations:
+            try:
+                geo_location = await geocode_with_context(locations)
+                if geo_location:
+                    logger.info("location_geocoded",
+                        url=url,
+                        primary=geo_location.get("primary_name"),
+                        lat=geo_location.get("lat"),
+                        lon=geo_location.get("lon")
+                    )
+            except Exception as e:
+                logger.warn("geocoding_failed",
+                    url=url,
+                    locations=locations,
+                    error=str(e)
+                )
     
     state["content_items"] = [{
         "position": 1,
@@ -343,7 +366,8 @@ async def parse_single_article(state: ScraperState, page_title: str, semantic_co
         "tags": result.get("tags", []),
         "category": result.get("category", "general"),
         "atomic_statements": result.get("atomic_statements", []),
-        "featured_image": featured_image
+        "featured_image": featured_image,
+        "geo_location": geo_location
     }]
     
     logger.info("article_parsed",
@@ -1090,7 +1114,8 @@ async def ingest_to_context(state: ScraperState) -> ScraperState:
                     "url": url,
                     "scraped_at": datetime.utcnow().isoformat(),
                     "published_at": item.get("published_at") or state.get("published_at"),
-                    "featured_image": item.get("featured_image")
+                    "featured_image": item.get("featured_image"),
+                    "geo_location": item.get("geo_location")
                 }
             )
             

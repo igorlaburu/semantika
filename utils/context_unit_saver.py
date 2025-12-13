@@ -557,7 +557,9 @@ async def save_from_scraping(
         scraped_at=scraping_data.get("scraped_at"),
         connector_type="scraping",
         featured_image=scraping_data.get("featured_image"),
-        connector_specific={}
+        connector_specific={
+            "geo_location": scraping_data.get("geo_location")
+        }
     )
     
     return await save_context_unit(

@@ -52,7 +52,7 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize FastEmbed model on startup to avoid first-request timeout."""
+    """Initialize FastEmbed model and geocoding cache on startup."""
     try:
         from utils.embedding_generator import get_fastembed_model
         logger.info("preloading_fastembed_model")
@@ -64,6 +64,15 @@ async def startup_event():
     except Exception as e:
         logger.error("fastembed_preload_failed", error=str(e))
         # Don't fail startup, let it try lazy-loading later
+    
+    try:
+        from utils.geocoder import load_cache_from_db
+        logger.info("loading_geocoding_cache")
+        await load_cache_from_db()
+        logger.info("geocoding_cache_loaded")
+    except Exception as e:
+        logger.error("geocoding_cache_load_failed", error=str(e))
+        # Don't fail startup, geocoding will work without cache
 
 
 @app.middleware("http")

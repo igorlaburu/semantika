@@ -164,7 +164,7 @@ Respond in JSON:
             ("user", """Extrae hechos del texto. IGNORA: menús, footers, descripciones genéricas.
 
 Si NO hay contenido noticioso:
-{{"title": "Sin contenido noticioso", "summary": "Sin información novedosa", "tags": [], "atomic_facts": [], "category": "general"}}
+{{"title": "Sin contenido noticioso", "summary": "Sin información novedosa", "tags": [], "atomic_facts": [], "category": "general", "locations": []}}
 
 Si HAY contenido, extrae:
 1. Título
@@ -172,12 +172,17 @@ Si HAY contenido, extrae:
 3. 5-10 tags
 4. 10-20 hechos: {{"order": N, "type": "fact"/"quote"/"context", "speaker": null/"Name", "text": "..."}}
 5. Categoría (UNA): política, economía, sociedad, cultura, deportes, tecnología, medio_ambiente, infraestructuras, seguridad, salud, turismo, internacional, general
+6. Ubicaciones (con jerarquía):
+   - level: "primary" (ciudad principal del evento) o "context" (provincia/región/país)
+   - type: "city", "province", "region", "country"
+   Ejemplo: [{{"name": "Vitoria-Gasteiz", "type": "city", "level": "primary"}}, {{"name": "Álava", "type": "province", "level": "context"}}, {{"name": "España", "type": "country", "level": "context"}}]
+   Si NO hay ubicaciones específicas: "locations": []
 
 Texto:
 {text}
 
 JSON:
-{{"title": "...", "summary": "...", "tags": [...], "atomic_facts": [...], "category": "..."}}""")
+{{"title": "...", "summary": "...", "tags": [...], "atomic_facts": [...], "category": "...", "locations": [...]}}""")
         ])
 
         self.analyze_atomic_chain = RunnableSequence(

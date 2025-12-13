@@ -550,6 +550,15 @@ async def main():
     logger.info("scheduler_starting")
 
     try:
+        # Load geocoding cache
+        try:
+            from utils.geocoder import load_cache_from_db
+            logger.info("loading_geocoding_cache")
+            await load_cache_from_db()
+            logger.info("geocoding_cache_loaded")
+        except Exception as e:
+            logger.warn("geocoding_cache_load_failed", error=str(e))
+        
         # Initialize APScheduler
         scheduler = AsyncIOScheduler()
         scheduler.start()
