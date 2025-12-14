@@ -318,45 +318,56 @@ async def parse_single_article(state: ScraperState, page_title: str, semantic_co
     state["title"] = title
     state["summary"] = result.get("summary", "")
     
-    # Extract featured image AND geocode AFTER quality gate (statements >= 2)
+    # Quality gate: require at least 2 atomic statements
+    if len(atomic_statements) < 2:
+        logger.info("article_skipped_quality_gate",
+            url=url,
+            title=title[:50],
+            statements_count=len(atomic_statements),
+            reason="insufficient_statements"
+        )
+        state["should_process"] = False
+        state["content_items"] = []
+        return
+    
+    # Extract featured image AND geocode (quality gate passed: statements >= 2)
     featured_image = None
     geo_location = None
     
-    if len(atomic_statements) >= 2:
-        # Extract featured image
+    # Extract featured image
+    try:
+        soup = BeautifulSoup(state["html"], 'html.parser')
+        featured_image = extract_featured_image(soup, url)
+        if featured_image:
+            logger.debug("featured_image_extracted",
+                url=url,
+                image_url=featured_image.get("url", "")[:80],
+                source=featured_image.get("source")
+            )
+    except Exception as e:
+        logger.warn("featured_image_extraction_failed",
+            url=url,
+            error=str(e)
+        )
+    
+    # Geocode locations (if LLM extracted any)
+    locations = result.get("locations", [])
+    if locations:
         try:
-            soup = BeautifulSoup(state["html"], 'html.parser')
-            featured_image = extract_featured_image(soup, url)
-            if featured_image:
-                logger.debug("featured_image_extracted",
+            geo_location = await geocode_with_context(locations)
+            if geo_location:
+                logger.info("location_geocoded",
                     url=url,
-                    image_url=featured_image.get("url", "")[:80],
-                    source=featured_image.get("source")
+                    primary=geo_location.get("primary_name"),
+                    lat=geo_location.get("lat"),
+                    lon=geo_location.get("lon")
                 )
         except Exception as e:
-            logger.warn("featured_image_extraction_failed",
+            logger.warn("geocoding_failed",
                 url=url,
+                locations=locations,
                 error=str(e)
             )
-        
-        # Geocode locations (if LLM extracted any)
-        locations = result.get("locations", [])
-        if locations:
-            try:
-                geo_location = await geocode_with_context(locations)
-                if geo_location:
-                    logger.info("location_geocoded",
-                        url=url,
-                        primary=geo_location.get("primary_name"),
-                        lat=geo_location.get("lat"),
-                        lon=geo_location.get("lon")
-                    )
-            except Exception as e:
-                logger.warn("geocoding_failed",
-                    url=url,
-                    locations=locations,
-                    error=str(e)
-                )
     
     state["content_items"] = [{
         "position": 1,
