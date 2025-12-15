@@ -729,23 +729,31 @@ async def scrape_articles_from_index(
                 
                 # Quality gate: require valid title AND at least 2 atomic statements
                 if not title:
-                    logger.warn("article_parse_failed_no_title", url=article_url)
+                    logger.warn("article_parse_failed_no_title", 
+                        url=article_url,
+                        position=position,
+                        semantic_content_length=len(semantic_content)
+                    )
                     return None
                 
                 if len(atomic_statements) < 2:
                     logger.info("article_skipped_quality_gate",
                         url=article_url,
+                        position=position,
                         title=title[:50],
                         statements_count=len(atomic_statements),
-                        reason="insufficient_statements"
+                        reason="insufficient_statements",
+                        semantic_content_length=len(semantic_content)
                     )
                     return None
                 
-                logger.debug("article_scraped_from_index",
+                logger.info("article_scraped_from_index_success",
                     url=article_url,
+                    position=position,
                     title=title[:50],
                     category=result.get("category"),
-                    atomic_count=len(atomic_statements)
+                    atomic_count=len(atomic_statements),
+                    has_featured_image=False
                 )
                 
                 # Extract featured image after quality gate
@@ -771,12 +779,19 @@ async def scrape_articles_from_index(
                 }
                 
             except asyncio.TimeoutError:
-                logger.error("article_scrape_timeout", url=article.get("url"))
+                logger.error("article_scrape_timeout", 
+                    url=article.get("url"),
+                    position=position
+                )
                 return None
             except Exception as e:
+                import traceback
                 logger.error("article_scrape_error",
                     url=article.get("url"),
-                    error=str(e)
+                    position=position,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    traceback=traceback.format_exc()[:500]
                 )
                 return None
     
@@ -787,9 +802,12 @@ async def scrape_articles_from_index(
     # Filter out None (failed scrapes)
     content_items = [item for item in results if item is not None]
     
-    logger.info("articles_scraped_from_index",
+    failed_count = len(articles) - len(content_items)
+    logger.info("articles_scraped_from_index_summary",
         total_articles=len(articles),
-        successful_scrapes=len(content_items)
+        successful_scrapes=len(content_items),
+        failed_scrapes=failed_count,
+        success_rate=f"{(len(content_items)/len(articles)*100):.1f}%" if articles else "0%"
     )
     
     return content_items
