@@ -292,7 +292,30 @@ Sin markdown. Exactamente {news_count} noticias."""
                         }
                     )
                     
-                    # Phase 3: Ingest context unit with unified ingester
+                    # Phase 3: Geocode locations (if extracted by LLM)
+                    geo_location = None
+                    locations = enriched.get("locations", [])
+                    
+                    if locations:
+                        try:
+                            from utils.geocoder import geocode_with_context
+                            geo_location = await geocode_with_context(locations)
+                            
+                            if geo_location:
+                                logger.info("perplexity_news_geocoded",
+                                    title=news_item.get("titulo", "")[:50],
+                                    primary_location=geo_location.get("primary_name"),
+                                    lat=geo_location.get("lat"),
+                                    lon=geo_location.get("lon")
+                                )
+                        except Exception as geo_error:
+                            logger.warn("perplexity_news_geocoding_failed",
+                                title=news_item.get("titulo", "")[:50],
+                                locations=locations,
+                                error=str(geo_error)
+                            )
+                    
+                    # Phase 4: Ingest context unit with unified ingester
                     try:
                         # Extract source name from URL (if available)
                         source_url = news_item.get("fuente")
@@ -308,7 +331,7 @@ Sin markdown. Exactamente {news_count} noticias."""
                         if published_at and len(published_at) == 10:  # YYYY-MM-DD
                             published_at = published_at + "T00:00:00Z"
                         
-                        # Build standard metadata
+                        # Build standard metadata with geo_location
                         metadata = normalize_source_metadata(
                             url=source_url,
                             source_name=source_name,
@@ -322,6 +345,12 @@ Sin markdown. Exactamente {news_count} noticias."""
                                 "enrichment_cost_usd": enriched["enrichment_cost_usd"]
                             }
                         )
+                        
+                        # Add geo_location and locations to metadata
+                        if geo_location:
+                            metadata["geo_location"] = geo_location
+                        if locations:
+                            metadata["locations"] = locations
                         
                         ingest_result = await ingest_context_unit(
                             title=enriched["title"],
