@@ -55,6 +55,7 @@ pydantic-settings>=2.1.0
 # Utilities
 tiktoken>=0.7,<1.0
 psutil>=5.9.0
+python-dateutil>=2.8.2
 
 # PDF processing
 PyPDF2==3.0.1
