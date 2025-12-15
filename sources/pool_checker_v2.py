@@ -60,14 +60,14 @@ async def get_next_healthy_source() -> Optional[Dict[str, Any]]:
         if reset_result.data:
             logger.info("circuit_breakers_auto_reset", count=len(reset_result.data))
         
-        # Get next 2 healthy sources
+        # Get next 1 healthy source (reduced from 2 to save API costs)
         result = supabase.client.table("discovered_sources")\
             .select("*")\
             .eq("company_id", POOL_COMPANY_ID)\
             .eq("is_active", True)\
             .eq("circuit_breaker_open", False)\
             .order("last_scraped_at", desc=False, nullsfirst=True)\
-            .limit(2)\
+            .limit(1)\
             .execute()
         
         if not result.data:
