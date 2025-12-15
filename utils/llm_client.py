@@ -161,12 +161,12 @@ Respond in JSON:
         # 6. Analyze Atomic Chain (title + summary + tags + atomic facts + category)
         analyze_atomic_prompt = ChatPromptTemplate.from_messages([
             ("system", "Extractor de hechos atómicos."),
-            ("user", """Extrae hechos del texto. IGNORA: menús, footers, descripciones genéricas.
+            ("user", """Extrae hechos del texto. IGNORA: menús, footers, barras laterales, errores 404.
 
-Si NO hay contenido noticioso:
-{{"title": "Sin contenido noticioso", "summary": "Sin información novedosa", "tags": [], "atomic_statements": [], "category": "general", "locations": []}}
+Si NO hay contenido útil (solo navegación, footers, páginas vacías):
+{{"title": "Sin contenido", "summary": "Página sin información", "tags": [], "atomic_statements": [], "category": "general", "locations": []}}
 
-Si HAY contenido, extrae:
+Si HAY contenido útil (noticias, eventos, anuncios, convocatorias, comunicados), extrae:
 1. Título
 2. Resumen (3 frases)
 3. 5-10 tags
