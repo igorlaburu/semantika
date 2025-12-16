@@ -849,10 +849,16 @@ async def detect_changes(state: ScraperState) -> ScraperState:
         
         state["old_monitored_url"] = old_monitored_url
         
-        # Multi-noticia pages: Check individual items instead of full page
+        # Index pages: Check individual scraped articles instead of index HTML
+        # Use url_type to detect index pages (not len(content_items) which may be 0-1 after quality gate)
         content_items = state.get("content_items", [])
-        if len(content_items) > 1:
-            # Multi-noticia page: Check if we have new items
+        
+        if url_type == "index":
+            # Index page: Check individual scraped articles instead of index HTML
+            # Compute hash of index HTML for monitored_urls tracking
+            from utils.content_hasher import compute_content_hashes
+            new_hash, new_simhash = compute_content_hashes(html=state["html"])
+            
             if old_monitored_url:
                 # Get existing url_content_units for this monitored_url
                 existing_units = supabase.client.table("url_content_units").select(
@@ -862,9 +868,9 @@ async def detect_changes(state: ScraperState) -> ScraperState:
                 existing_titles = {u["title"] for u in (existing_units.data or [])}
                 new_items = [item for item in content_items if item.get("title") not in existing_titles]
                 
-                logger.info("multi_noticia_change_detection",
+                logger.info("index_page_change_detection",
                     url=url,
-                    total_items=len(content_items),
+                    total_items_scraped=len(content_items),
                     existing_items=len(existing_titles),
                     new_items=len(new_items)
                 )
@@ -875,7 +881,9 @@ async def detect_changes(state: ScraperState) -> ScraperState:
                     state["change_info"] = {
                         "change_type": "new_items",
                         "requires_processing": True,
-                        "detection_tier": 1
+                        "detection_tier": 1,
+                        "new_hash": new_hash,
+                        "new_simhash": new_simhash
                     }
                     state["should_process"] = True
                 else:
@@ -883,15 +891,19 @@ async def detect_changes(state: ScraperState) -> ScraperState:
                     state["change_info"] = {
                         "change_type": "no_new_items",
                         "requires_processing": False,
-                        "detection_tier": 1
+                        "detection_tier": 1,
+                        "new_hash": new_hash,
+                        "new_simhash": new_simhash
                     }
                     state["should_process"] = False
             else:
-                # New URL, process all items
+                # New index URL, process all items
                 state["change_info"] = {
                     "change_type": "new",
                     "requires_processing": True,
-                    "detection_tier": 1
+                    "detection_tier": 1,
+                    "new_hash": new_hash,
+                    "new_simhash": new_simhash
                 }
                 state["should_process"] = True
         else:
