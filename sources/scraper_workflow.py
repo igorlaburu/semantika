@@ -638,7 +638,7 @@ async def scrape_articles_from_index(
     from datetime import datetime, timedelta
     from dateutil import parser as date_parser
     
-    # Filter articles older than 30 days (generous buffer for pool discovery + occasional delays)
+    # Filter articles older than 30 days (generous buffer for pool discovery)
     cutoff_date = datetime.utcnow() - timedelta(days=30)
     articles_filtered = []
     
