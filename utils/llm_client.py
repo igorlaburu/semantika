@@ -200,7 +200,7 @@ JSON:
         
         # 6b. Extract News Links from Index (for index pages)
         extract_links_prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are a news link extractor. Today is 2024-12-16. Identify real news articles from HTML."),
+            ("system", "You are a news link extractor. Today is {today}. Identify real news articles from HTML."),
             ("user", """Analyze this HTML from a news index page.
 Extract ONLY links to actual news articles (ignore menus, footers, navigation, etc.).
 
@@ -209,7 +209,7 @@ For each news article, extract:
 - url: Full article URL (make absolute if relative)
 - date: Publication date if visible (ISO format YYYY-MM-DD, or null if not found)
 
-IMPORTANT: Today is December 16, 2024. If you see dates like "Jun 23", that means June 23, 2024 (NOT 2025).
+IMPORTANT: Today is {today}. If you see dates without year (like "Jun 23"), assume current year {current_year}.
 
 Return the 10 MOST RECENT news articles.
 
@@ -219,7 +219,7 @@ HTML:
 Base URL (for making relative URLs absolute): {base_url}
 
 Respond in JSON:
-{{"articles": [{{"title": "...", "url": "...", "date": "2024-12-16"}}, {{"title": "...", "url": "...", "date": null}}, ...]}}""")
+{{"articles": [{{"title": "...", "url": "...", "date": "{today}"}}, {{"title": "...", "url": "...", "date": null}}, ...]}}""")
         ])
         
         self.extract_links_chain = RunnableSequence(
@@ -619,11 +619,17 @@ Si NO encuentras fuente pública original, devuelve: {{"sources": []}}"""
             
             # Clean HTML: remove scripts, styles to maximize useful content
             from bs4 import BeautifulSoup
+            from datetime import datetime
             import json
+            
+            # Get current date for dynamic prompt
+            today = datetime.utcnow().strftime("%Y-%m-%d")
+            current_year = datetime.utcnow().year
 
             logger.info("extract_news_links_html_cleaning_start",
                 html_original_length=len(html),
-                base_url=base_url
+                base_url=base_url,
+                today=today
             )
 
             soup = BeautifulSoup(html, 'html.parser')
@@ -666,7 +672,9 @@ Si NO encuentras fuente pública original, devuelve: {{"sources": []}}"""
             response = await provider.ainvoke(
                 self.extract_links_chain.first.format_messages(
                     html=html_slice,
-                    base_url=base_url
+                    base_url=base_url,
+                    today=today,
+                    current_year=current_year
                 ),
                 config=config
             )
