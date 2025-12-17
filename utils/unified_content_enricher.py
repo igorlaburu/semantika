@@ -136,7 +136,7 @@ async def enrich_content(
             "summary": pre_filled.get("summary") or llm_result.get("summary") or "",
             "tags": pre_filled.get("tags") or llm_result.get("tags") or [],
             "category": pre_filled.get("category") or llm_result.get("category") or "general",
-            "atomic_statements": pre_filled.get("atomic_statements") or llm_result.get("atomic_facts") or [],
+            "atomic_statements": pre_filled.get("atomic_statements") or llm_result.get("atomic_statements") or [],
             "locations": pre_filled.get("locations") or llm_result.get("locations") or [],
             "enrichment_cost_usd": llm_result.get("cost_usd", 0.0),
             "enrichment_model": llm_result.get("model", "gpt-4o-mini")
