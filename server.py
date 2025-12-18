@@ -2759,6 +2759,125 @@ async def get_article_image(
         )
 
 
+@app.get("/api/v1/context-units/{context_unit_id}/image")
+async def get_context_unit_image(
+    context_unit_id: str,
+    company_id: str = Depends(get_company_id_from_auth)
+):
+    """Get featured image for context unit (scraped from source).
+    
+    Returns the featured_image from source_metadata or placeholder.
+    """
+    from pathlib import Path
+    
+    try:
+        # Fetch context unit (allow pool access)
+        pool_company_id = "99999999-9999-9999-9999-999999999999"
+        
+        result = supabase_client.client.table("press_context_units").select(
+            "id, source_metadata, company_id"
+        ).eq("id", context_unit_id).in_("company_id", [company_id, pool_company_id]).maybe_single().execute()
+        
+        if not result.data:
+            logger.debug("context_unit_not_found_for_image", context_unit_id=context_unit_id)
+            placeholder = generate_placeholder_image()
+            return Response(
+                content=placeholder,
+                media_type="image/svg+xml",
+                headers={
+                    "Cache-Control": "public, max-age=86400",
+                    "X-Image-Source": "placeholder"
+                }
+            )
+        
+        context_unit = result.data
+        source_metadata = context_unit.get("source_metadata") or {}
+        featured_image = source_metadata.get("featured_image")
+        
+        if not featured_image or not featured_image.get("url"):
+            logger.debug("no_featured_image", context_unit_id=context_unit_id)
+            placeholder = generate_placeholder_image()
+            return Response(
+                content=placeholder,
+                media_type="image/svg+xml",
+                headers={
+                    "Cache-Control": "public, max-age=86400",
+                    "X-Image-Source": "placeholder"
+                }
+            )
+        
+        image_url = featured_image["url"]
+        
+        # Proxy the image
+        try:
+            import ssl
+            ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.get(
+                    image_url,
+                    headers={
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                        'Accept': 'image/*',
+                        'Referer': source_metadata.get("url", "https://ekimen.ai")
+                    },
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    
+                    if response.status == 200:
+                        image_bytes = await response.read()
+                        content_type = response.headers.get("Content-Type", "image/jpeg")
+                        
+                        return Response(
+                            content=image_bytes,
+                            media_type=content_type,
+                            headers={
+                                "Cache-Control": "public, max-age=86400",
+                                "X-Image-Source": "original"
+                            }
+                        )
+                    else:
+                        logger.warn("image_fetch_failed", 
+                            context_unit_id=context_unit_id,
+                            status=response.status
+                        )
+                        placeholder = generate_placeholder_image()
+                        return Response(
+                            content=placeholder,
+                            media_type="image/svg+xml",
+                            headers={
+                                "Cache-Control": "public, max-age=3600",
+                                "X-Image-Source": "placeholder"
+                            }
+                        )
+        except Exception as e:
+            logger.warn("image_proxy_error", context_unit_id=context_unit_id, error=str(e))
+            placeholder = generate_placeholder_image()
+            return Response(
+                content=placeholder,
+                media_type="image/svg+xml",
+                headers={
+                    "Cache-Control": "public, max-age=3600",
+                    "X-Image-Source": "placeholder"
+                }
+            )
+            
+    except Exception as e:
+        logger.error("get_context_unit_image_error", context_unit_id=context_unit_id, error=str(e))
+        placeholder = generate_placeholder_image()
+        return Response(
+            content=placeholder,
+            media_type="image/svg+xml",
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "X-Image-Source": "placeholder"
+            }
+        )
+
+
 def generate_placeholder_image() -> bytes:
     """Generate SVG placeholder image with 1.91:1 aspect ratio.
     
