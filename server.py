@@ -2530,16 +2530,21 @@ async def save_enriched_statements(
 # IMAGE GENERATION AND RETRIEVAL
 # ============================================
 
+class GenerateImageRequest(BaseModel):
+    image_prompt: str = Field(..., description="Image generation prompt in English")
+    force_regenerate: bool = Field(default=False, description="Force regeneration even if cached")
+
+
 @app.post("/api/v1/articles/{article_id}/generate-image")
 async def generate_image_for_article(
     article_id: str,
-    force_regenerate: bool = False,
+    request: GenerateImageRequest,
     company_id: str = Depends(get_company_id_from_auth)
 ):
-    """Generate photorealistic AI image for article.
+    """Generate photorealistic AI image for article from prompt.
     
     Uses Fal.ai FLUX.1 [schnell] model to generate conceptual, photorealistic
-    images from the article's image_prompt (generated during article creation).
+    images from a prompt provided by the frontend.
     
     Model specs:
     - Cost: $0.003/image
@@ -2555,7 +2560,8 @@ async def generate_image_for_article(
     
     Args:
         article_id: Article UUID
-        force_regenerate: Force regeneration even if cached
+        request.image_prompt: Image generation prompt (from frontend)
+        request.force_regenerate: Force regeneration even if cached
         company_id: Company ID from auth
         
     Returns:
@@ -2563,9 +2569,12 @@ async def generate_image_for_article(
         
     Example:
         POST /api/v1/articles/uuid-123/generate-image
+        Body: {
+            "image_prompt": "A sleek medical device on sterile table...",
+            "force_regenerate": false
+        }
         Response: {
             "article_id": "uuid-123",
-            "titulo": "Empresas impulsan innovación...",
             "image_prompt": "A sleek medical device on sterile table...",
             "image_url": "/api/v1/articles/uuid-123/image",
             "status": "generated",
@@ -2575,19 +2584,20 @@ async def generate_image_for_article(
     
     Raises:
         HTTPException: 404 if article not found
-        HTTPException: 400 if article has no image_prompt
+        HTTPException: 400 if image_prompt is empty
         HTTPException: 500 if image generation fails
     """
     try:
         logger.info("generate_image_request",
             article_id=article_id,
             company_id=company_id,
-            force_regenerate=force_regenerate
+            force_regenerate=request.force_regenerate,
+            prompt_preview=request.image_prompt[:100]
         )
         
-        # Fetch article from database
+        # Verify article exists and belongs to company
         result = supabase_client.client.table("press_articles").select(
-            "id, company_id, image_prompt, titulo"
+            "id, company_id"
         ).eq("id", article_id).eq("company_id", company_id).maybe_single().execute()
         
         if not result.data:
@@ -2597,21 +2607,13 @@ async def generate_image_for_article(
             )
             raise HTTPException(status_code=404, detail="Article not found")
         
-        article = result.data
-        
-        # Check if image_prompt exists
-        image_prompt = article.get("image_prompt")
-        if not image_prompt or image_prompt.strip() == "":
-            logger.warn("no_image_prompt_for_generation",
-                article_id=article_id,
-                titulo=article.get("titulo", "")[:50]
+        # Validate image_prompt
+        image_prompt = request.image_prompt.strip()
+        if not image_prompt:
+            logger.warn("empty_image_prompt",
+                article_id=article_id
             )
-            return {
-                "article_id": article_id,
-                "titulo": article.get("titulo"),
-                "status": "no_prompt",
-                "error": "Article has no image_prompt. Generate article with POST /process/redact-news-rich to get image_prompt."
-            }
+            raise HTTPException(status_code=400, detail="image_prompt cannot be empty")
         
         # Generate image using Fal.ai
         from utils.image_generator import generate_image_from_prompt
@@ -2619,7 +2621,7 @@ async def generate_image_for_article(
         gen_result = await generate_image_from_prompt(
             context_unit_id=article_id,  # Use article_id as cache key
             image_prompt=image_prompt,
-            force_regenerate=force_regenerate
+            force_regenerate=request.force_regenerate
         )
         
         if gen_result["success"]:
@@ -2650,7 +2652,6 @@ async def generate_image_for_article(
             
             return {
                 "article_id": article_id,
-                "titulo": article.get("titulo"),
                 "image_prompt": image_prompt,
                 "image_url": image_url,
                 "status": "cached" if gen_result["cached"] else "generated",
