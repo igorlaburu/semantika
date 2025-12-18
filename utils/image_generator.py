@@ -18,6 +18,10 @@ FAL_API_KEY = os.getenv("FAL_AI_API_KEY")
 CACHE_DIR = Path("/app/cache/images/generated")
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
+# Configure fal_client with API key
+if FAL_API_KEY:
+    os.environ["FAL_KEY"] = FAL_API_KEY
+
 
 async def generate_image_from_prompt(
     context_unit_id: str,
