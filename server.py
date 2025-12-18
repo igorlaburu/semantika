@@ -2530,16 +2530,16 @@ async def save_enriched_statements(
 # IMAGE GENERATION AND RETRIEVAL
 # ============================================
 
-@app.post("/api/v1/context-units/{context_unit_id}/generate-image")
-async def generate_image_for_context_unit(
-    context_unit_id: str,
+@app.post("/api/v1/articles/{article_id}/generate-image")
+async def generate_image_for_article(
+    article_id: str,
     force_regenerate: bool = False,
-    client: Dict = Depends(get_current_client)
+    company_id: str = Depends(get_company_id_from_auth)
 ):
-    """Generate photorealistic AI image for context unit.
+    """Generate photorealistic AI image for article.
     
     Uses Fal.ai FLUX.1 [schnell] model to generate conceptual, photorealistic
-    images from the context unit's image_prompt (generated during enrichment).
+    images from the article's image_prompt (generated during article creation).
     
     Model specs:
     - Cost: $0.003/image
@@ -2549,103 +2549,98 @@ async def generate_image_for_context_unit(
     
     Generated images are:
     - Cached permanently in /app/cache/images/generated/
-    - Served via GET /api/v1/context-units/{id}/image
-    - Prioritized over scraped images
+    - Served via GET /api/v1/articles/{id}/image
     
-    **Authentication**: Requires API Key (X-API-Key header)
+    **Authentication**: Accepts JWT or API Key
     
     Args:
-        context_unit_id: Context unit UUID
+        article_id: Article UUID
         force_regenerate: Force regeneration even if cached
-        client: Authenticated client from API key
+        company_id: Company ID from auth
         
     Returns:
         Image generation result with URL and metadata
         
     Example:
-        POST /api/v1/context-units/uuid-123/generate-image
+        POST /api/v1/articles/uuid-123/generate-image
         Response: {
-            "context_unit_id": "uuid-123",
-            "title": "Michelin anuncia...",
-            "image_prompt": "A tire on wet asphalt...",
-            "image_url": "/api/v1/context-units/uuid-123/image",
+            "article_id": "uuid-123",
+            "titulo": "Empresas impulsan innovación...",
+            "image_prompt": "A sleek medical device on sterile table...",
+            "image_url": "/api/v1/articles/uuid-123/image",
             "status": "generated",
             "generated_at": "2025-12-18T14:30:00Z",
             "generation_time_ms": 1234.56
         }
     
     Raises:
-        HTTPException: 404 if context unit not found
-        HTTPException: 400 if context unit has no image_prompt
+        HTTPException: 404 if article not found
+        HTTPException: 400 if article has no image_prompt
         HTTPException: 500 if image generation fails
     """
     try:
-        company_id = client["company_id"]
-        
         logger.info("generate_image_request",
-            context_unit_id=context_unit_id,
+            article_id=article_id,
             company_id=company_id,
             force_regenerate=force_regenerate
         )
         
-        # Fetch context unit from database (allow access to pool content)
-        pool_company_id = "99999999-9999-9999-9999-999999999999"
-        
-        result = supabase_client.client.table("press_context_units").select(
-            "id, company_id, image_prompt, title"
-        ).eq("id", context_unit_id).in_("company_id", [company_id, pool_company_id]).maybe_single().execute()
+        # Fetch article from database
+        result = supabase_client.client.table("press_articles").select(
+            "id, company_id, image_prompt, titulo"
+        ).eq("id", article_id).eq("company_id", company_id).maybe_single().execute()
         
         if not result.data:
-            logger.warn("context_unit_not_found_for_image_generation",
-                context_unit_id=context_unit_id,
+            logger.warn("article_not_found_for_image_generation",
+                article_id=article_id,
                 company_id=company_id
             )
-            raise HTTPException(status_code=404, detail="Context unit not found")
+            raise HTTPException(status_code=404, detail="Article not found")
         
-        context_unit = result.data
+        article = result.data
         
         # Check if image_prompt exists
-        image_prompt = context_unit.get("image_prompt")
+        image_prompt = article.get("image_prompt")
         if not image_prompt or image_prompt.strip() == "":
             logger.warn("no_image_prompt_for_generation",
-                context_unit_id=context_unit_id,
-                title=context_unit.get("title", "")[:50]
+                article_id=article_id,
+                titulo=article.get("titulo", "")[:50]
             )
             return {
-                "context_unit_id": context_unit_id,
-                "title": context_unit.get("title"),
+                "article_id": article_id,
+                "titulo": article.get("titulo"),
                 "status": "no_prompt",
-                "error": "Context unit has no image_prompt. This is generated during content enrichment. Re-scrape the source or manually add an image_prompt."
+                "error": "Article has no image_prompt. Generate article with POST /process/redact-news-rich to get image_prompt."
             }
         
         # Generate image using Fal.ai
         from utils.image_generator import generate_image_from_prompt
         
         gen_result = await generate_image_from_prompt(
-            context_unit_id=context_unit_id,
+            context_unit_id=article_id,  # Use article_id as cache key
             image_prompt=image_prompt,
             force_regenerate=force_regenerate
         )
         
         if gen_result["success"]:
             logger.info("image_generation_success_endpoint",
-                context_unit_id=context_unit_id,
+                article_id=article_id,
                 cached=gen_result["cached"],
                 generation_time_ms=gen_result["generation_time_ms"]
             )
             
             return {
-                "context_unit_id": context_unit_id,
-                "title": context_unit.get("title"),
+                "article_id": article_id,
+                "titulo": article.get("titulo"),
                 "image_prompt": image_prompt,
-                "image_url": gen_result["image_url"],
+                "image_url": f"/api/v1/articles/{article_id}/image",
                 "status": "cached" if gen_result["cached"] else "generated",
                 "generated_at": datetime.utcnow().isoformat(),
                 "generation_time_ms": gen_result["generation_time_ms"]
             }
         else:
             logger.error("image_generation_failed_endpoint",
-                context_unit_id=context_unit_id,
+                article_id=article_id,
                 error=gen_result.get("error")
             )
             raise HTTPException(
@@ -2657,58 +2652,52 @@ async def generate_image_for_context_unit(
         raise
     except Exception as e:
         logger.error("generate_image_error",
-            context_unit_id=context_unit_id,
+            article_id=article_id,
             error=str(e)
         )
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/context-units/{context_unit_id}/image")
-async def get_context_unit_image(
-    context_unit_id: str,
-    client: Dict = Depends(get_current_client)
+@app.get("/api/v1/articles/{article_id}/image")
+async def get_article_image(
+    article_id: str,
+    company_id: str = Depends(get_company_id_from_auth)
 ):
-    """Get image for context unit with priority fallback.
+    """Get image for article with fallback to placeholder.
     
-    Image priority (highest to lowest):
+    Image priority:
     1. Generated AI image (from POST /generate-image) - X-Image-Source: "generated"
-    2. Scraped featured image (from source_metadata) - X-Image-Source: "original"
-    3. Placeholder SVG - X-Image-Source: "placeholder"
+    2. Placeholder SVG - X-Image-Source: "placeholder"
     
     Generated images are cached permanently in /app/cache/images/generated/
-    Scraped images are cached temporarily in /app/cache/images/
     
     Args:
-        context_unit_id: Context unit UUID
-        client: Authenticated client from API key
+        article_id: Article UUID
+        company_id: Company ID from auth
         
     Returns:
-        Image bytes (JPEG/PNG/SVG)
+        Image bytes (JPEG or SVG placeholder)
         
     Response Headers:
-        - Content-Type: image/jpeg, image/png, or image/svg+xml
+        - Content-Type: image/jpeg or image/svg+xml
         - Cache-Control: public, max-age=86400 (24 hours)
-        - X-Image-Source: "generated" | "original" | "placeholder"
-        - X-Image-Cache: "hit" | "miss"
+        - X-Image-Source: "generated" | "placeholder"
         
-    Expected aspect ratio: 1.91:1 for scraped, 16:9 (1024x576) for generated
+    Expected aspect ratio: 16:9 (1024x576) for generated
     
     Raises:
-        HTTPException: 404 if context unit not found
+        HTTPException: 404 if article not found
     """
-    import os
     from pathlib import Path
     
     try:
-        company_id = client["company_id"]
-        
-        # Priority 1: Check for GENERATED image (AI-generated via /generate-image)
+        # Check for GENERATED image
         generated_dir = Path("/app/cache/images/generated")
-        generated_file = generated_dir / f"{context_unit_id}.jpg"
+        generated_file = generated_dir / f"{article_id}.jpg"
         
         if generated_file.exists():
             logger.debug("image_generated_hit",
-                context_unit_id=context_unit_id,
+                article_id=article_id,
                 cache_file=str(generated_file)
             )
             
@@ -2722,181 +2711,32 @@ async def get_context_unit_image(
                 }
             )
         
-        # Priority 2: Check local cache (scraped images)
-        cache_dir = Path("/app/cache/images")
-        cache_dir.mkdir(parents=True, exist_ok=True)
+        # Fallback: Return placeholder
+        logger.debug("image_cache_miss", article_id=article_id)
         
-        # Try both .jpg and .png extensions
-        cache_file_jpg = cache_dir / f"{context_unit_id}.jpg"
-        cache_file_png = cache_dir / f"{context_unit_id}.png"
-        
-        if cache_file_jpg.exists():
-            logger.debug("image_cache_hit",
-                context_unit_id=context_unit_id,
-                cache_file=str(cache_file_jpg)
-            )
-            
-            return Response(
-                content=cache_file_jpg.read_bytes(),
-                media_type="image/jpeg",
-                headers={
-                    "Cache-Control": "public, max-age=86400",
-                    "X-Image-Source": "original",
-                    "X-Image-Cache": "hit"
-                }
-            )
-        
-        if cache_file_png.exists():
-            logger.debug("image_cache_hit",
-                context_unit_id=context_unit_id,
-                cache_file=str(cache_file_png)
-            )
-            
-            return Response(
-                content=cache_file_png.read_bytes(),
-                media_type="image/png",
-                headers={
-                    "Cache-Control": "public, max-age=86400",
-                    "X-Image-Source": "original",
-                    "X-Image-Cache": "hit"
-                }
-            )
-        
-        # Cache miss - fetch from database
-        logger.debug("image_cache_miss",
-            context_unit_id=context_unit_id
+        placeholder = generate_placeholder_image()
+        return Response(
+            content=placeholder,
+            media_type="image/svg+xml",
+            headers={
+                "Cache-Control": "public, max-age=86400",
+                "X-Image-Source": "placeholder"
+            }
         )
-        
-        logger.debug("fetching_context_unit_image",
-            context_unit_id=context_unit_id,
-            company_id=company_id
-        )
-        
-        # Fetch context unit from database (allow access to pool content)
-        pool_company_id = "99999999-9999-9999-9999-999999999999"
-        
-        result = supabase_client.client.table("press_context_units").select(
-            "id, source_metadata, company_id"
-        ).eq("id", context_unit_id).in_("company_id", [company_id, pool_company_id]).maybe_single().execute()
-        
-        if not result.data:
-            logger.warn("context_unit_not_found_for_image",
-                context_unit_id=context_unit_id,
-                company_id=company_id
-            )
-            raise HTTPException(status_code=404, detail="Context unit not found")
-        
-        context_unit = result.data
-        source_metadata = context_unit.get("source_metadata") or {}
-        featured_image = source_metadata.get("featured_image")
-        
-        # Check if featured_image exists
-        if not featured_image or not featured_image.get("url"):
-            logger.debug("no_featured_image_found",
-                context_unit_id=context_unit_id
-            )
-            raise HTTPException(status_code=404, detail="No featured image available for this context unit")
-        
-        image_url = featured_image["url"]
-        image_source = featured_image.get("source", "unknown")
-        
-        logger.debug("proxying_featured_image",
-            context_unit_id=context_unit_id,
-            image_url=image_url[:80],
-            image_source=image_source
-        )
-        
-        # Proxy the image with proper User-Agent to avoid hotlinking blocks
-        try:
-            import ssl
-            ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-            ssl_context.set_ciphers('DEFAULT@SECLEVEL=1')
-            
-            connector = aiohttp.TCPConnector(ssl=ssl_context, limit=100)
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.get(
-                    image_url,
-                    headers={
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-                        'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
-                        'Referer': source_metadata.get("url", "https://ekimen.ai")
-                    },
-                    timeout=aiohttp.ClientTimeout(total=10)
-                ) as response:
-                    
-                    if response.status != 200:
-                        logger.warn("image_fetch_failed",
-                            context_unit_id=context_unit_id,
-                            image_url=image_url[:80],
-                            status=response.status
-                        )
-                        raise HTTPException(
-                            status_code=404, 
-                            detail=f"Failed to fetch image from source (HTTP {response.status})"
-                        )
-                    
-                    # Read image bytes
-                    image_bytes = await response.read()
-                    content_type = response.headers.get("Content-Type", "image/jpeg")
-                    
-                    # Save to cache
-                    extension = "png" if "png" in content_type else "jpg"
-                    cache_file = cache_dir / f"{context_unit_id}.{extension}"
-                    
-                    try:
-                        cache_file.write_bytes(image_bytes)
-                        logger.info("image_cached",
-                            context_unit_id=context_unit_id,
-                            cache_file=str(cache_file),
-                            size_kb=round(len(image_bytes) / 1024, 2)
-                        )
-                    except Exception as cache_error:
-                        logger.warn("image_cache_write_failed",
-                            context_unit_id=context_unit_id,
-                            error=str(cache_error)
-                        )
-                    
-                    logger.info("image_proxied_successfully",
-                        context_unit_id=context_unit_id,
-                        image_url=image_url[:80],
-                        size_kb=round(len(image_bytes) / 1024, 2),
-                        content_type=content_type
-                    )
-                    
-                    return Response(
-                        content=image_bytes,
-                        media_type=content_type,
-                        headers={
-                            "Cache-Control": "public, max-age=86400",
-                            "X-Image-Source": "original",
-                            "X-Image-Extraction": image_source,
-                            "X-Image-Cache": "miss"
-                        }
-                    )
-                    
-        except aiohttp.ClientError as e:
-            logger.warn("image_proxy_client_error",
-                context_unit_id=context_unit_id,
-                image_url=image_url[:80],
-                error=str(e)
-            )
-            raise HTTPException(
-                status_code=404, 
-                detail=f"Failed to fetch image: {str(e)}"
-            )
             
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("image_proxy_error",
-            context_unit_id=context_unit_id,
-            error=str(e)
-        )
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Internal error processing image: {str(e)}"
+        logger.error("image_proxy_error", article_id=article_id, error=str(e))
+        # Return placeholder on any error
+        placeholder = generate_placeholder_image()
+        return Response(
+            content=placeholder,
+            media_type="image/svg+xml",
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "X-Image-Source": "placeholder"
+            }
         )
 
 
