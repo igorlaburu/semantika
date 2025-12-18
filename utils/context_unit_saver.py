@@ -94,6 +94,7 @@ async def save_context_unit(
     source_metadata: Optional[Dict[str, Any]] = None,
     url_content_unit_id: Optional[str] = None,
     category: Optional[str] = None,
+    image_prompt: Optional[str] = None,
     special_info: bool = False,
     force_save: bool = False,
     check_duplicates: bool = True,
@@ -195,6 +196,10 @@ async def save_context_unit(
             "status": "pending",
             "created_at": now
         }
+        
+        # Add image_prompt if provided
+        if image_prompt:
+            context_unit_data["image_prompt"] = image_prompt
         
         # Add embedding if generated
         if embedding:
@@ -571,6 +576,7 @@ async def save_from_scraping(
         tags=scraping_data.get("tags"),
         atomic_statements=scraping_data.get("atomic_statements"),
         category=scraping_data.get("category"),
+        image_prompt=scraping_data.get("image_prompt"),
         source_type="scraping",
         source_metadata=metadata,
         url_content_unit_id=url_content_unit_id

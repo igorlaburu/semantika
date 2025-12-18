@@ -74,6 +74,8 @@ async def enrich_content(
                              medio_ambiente, infraestructuras, seguridad, salud, turismo,
                              internacional, general)
             - atomic_statements: List[Dict] (each with 'statement' and 'confidence')
+            - locations: List[Dict] (geographic locations where event occurs)
+            - image_prompt: str (photorealistic, conceptual image prompt in English)
             - enrichment_cost_usd: float
             - enrichment_model: str
     
@@ -138,6 +140,7 @@ async def enrich_content(
             "category": pre_filled.get("category") or llm_result.get("category") or "general",
             "atomic_statements": pre_filled.get("atomic_statements") or llm_result.get("atomic_statements") or [],
             "locations": pre_filled.get("locations") or llm_result.get("locations") or [],
+            "image_prompt": pre_filled.get("image_prompt") or llm_result.get("image_prompt") or "",
             "enrichment_cost_usd": llm_result.get("cost_usd", 0.0),
             "enrichment_model": llm_result.get("model", "gpt-4o-mini")
         }

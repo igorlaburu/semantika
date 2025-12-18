@@ -158,13 +158,13 @@ Respond in JSON:
             analyze_prompt | self.llm_sonnet | JsonOutputParser()
         )
 
-        # 6. Analyze Atomic Chain (title + summary + tags + atomic facts + category)
+        # 6. Analyze Atomic Chain (title + summary + tags + atomic facts + category + image_prompt)
         analyze_atomic_prompt = ChatPromptTemplate.from_messages([
             ("system", "Extractor de hechos atómicos."),
             ("user", """Extrae hechos del texto. IGNORA: menús, footers, barras laterales, errores 404.
 
 Si NO hay contenido útil (solo navegación, footers, páginas vacías):
-{{"title": "Sin contenido", "summary": "Página sin información", "tags": [], "atomic_statements": [], "category": "general", "locations": []}}
+{{"title": "Sin contenido", "summary": "Página sin información", "tags": [], "atomic_statements": [], "category": "general", "locations": [], "image_prompt": ""}}
 
 Si HAY contenido útil (noticias, eventos, anuncios, convocatorias, comunicados), extrae:
 1. Título
@@ -187,11 +187,25 @@ Si HAY contenido útil (noticias, eventos, anuncios, convocatorias, comunicados)
    Formato: [{{"name": "Vitoria-Gasteiz", "type": "city", "level": "primary"}}, {{"name": "Álava", "type": "province", "level": "context"}}, {{"name": "España", "type": "country", "level": "context"}}]
    Si NO hay ubicación específica: "locations": []
 
+7. Prompt para imagen (image_prompt):
+   - Genera un prompt EN INGLÉS para imagen fotorealista que evoque CONCEPTUALMENTE la noticia
+   - DEBE SER: Simple, fotorealista, neutro, bien iluminado, un solo objeto/escena
+   - NO DEBE: Incluir personas (salvo siluetas lejanas), lugares reconocibles, edificios específicos, marcas comerciales
+   - Formato: "A [simple object/scene] in [context], [lighting], photorealistic, sharp focus"
+   
+   Ejemplos:
+   - Noticia sobre presupuestos → "A calculator and documents on a wooden desk, natural daylight, photorealistic, sharp focus"
+   - Noticia sobre accidente → "A wet road with tire tracks, overcast sky, photorealistic, sharp focus"
+   - Noticia sobre educación → "An open book on a table near a window, morning light, photorealistic, sharp focus"
+   - Noticia sobre medio ambiente → "A single green leaf with water droplets, soft natural light, photorealistic, macro photography"
+   - Noticia sobre tecnología → "A computer keyboard backlit in blue light, minimalist setup, photorealistic, sharp focus"
+   - Noticia sobre cultura → "A violin resting on sheet music, warm indoor lighting, photorealistic, shallow depth of field"
+
 Texto:
 {text}
 
 JSON:
-{{"title": "...", "summary": "...", "tags": [...], "atomic_statements": [...], "category": "...", "locations": [...]}}""")
+{{"title": "...", "summary": "...", "tags": [...], "atomic_statements": [...], "category": "...", "locations": [...], "image_prompt": "..."}}""")
         ])
 
         self.analyze_atomic_chain = RunnableSequence(
