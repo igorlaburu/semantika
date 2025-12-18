@@ -795,8 +795,7 @@ async def scrape_articles_from_index(
                     "source_url": article_url,
                     "index_date": article.get("date"),
                     "featured_image": featured_image,
-                    "geo_location": geo_location,
-                    "image_prompt": result.get("image_prompt", "")
+                    "geo_location": geo_location
                 }
                 
             except asyncio.TimeoutError:
@@ -1239,8 +1238,7 @@ async def ingest_to_context(state: ScraperState) -> ScraperState:
                     "scraped_at": datetime.utcnow().isoformat(),
                     "published_at": item.get("published_at") or item.get("index_date") or state.get("published_at"),
                     "featured_image": item.get("featured_image"),
-                    "geo_location": item.get("geo_location"),
-                    "image_prompt": item.get("image_prompt")
+                    "geo_location": item.get("geo_location")
                 }
             )
             

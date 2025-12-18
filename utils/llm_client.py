@@ -187,25 +187,11 @@ Si HAY contenido útil (noticias, eventos, anuncios, convocatorias, comunicados)
    Formato: [{{"name": "Vitoria-Gasteiz", "type": "city", "level": "primary"}}, {{"name": "Álava", "type": "province", "level": "context"}}, {{"name": "España", "type": "country", "level": "context"}}]
    Si NO hay ubicación específica: "locations": []
 
-7. Prompt para imagen (image_prompt):
-   - Genera un prompt EN INGLÉS para imagen fotorealista que evoque CONCEPTUALMENTE la noticia
-   - DEBE SER: Simple, fotorealista, neutro, bien iluminado, un solo objeto/escena
-   - NO DEBE: Incluir personas (salvo siluetas lejanas), lugares reconocibles, edificios específicos, marcas comerciales
-   - Formato: "A [simple object/scene] in [context], [lighting], photorealistic, sharp focus"
-   
-   Ejemplos:
-   - Noticia sobre presupuestos → "A calculator and documents on a wooden desk, natural daylight, photorealistic, sharp focus"
-   - Noticia sobre accidente → "A wet road with tire tracks, overcast sky, photorealistic, sharp focus"
-   - Noticia sobre educación → "An open book on a table near a window, morning light, photorealistic, sharp focus"
-   - Noticia sobre medio ambiente → "A single green leaf with water droplets, soft natural light, photorealistic, macro photography"
-   - Noticia sobre tecnología → "A computer keyboard backlit in blue light, minimalist setup, photorealistic, sharp focus"
-   - Noticia sobre cultura → "A violin resting on sheet music, warm indoor lighting, photorealistic, shallow depth of field"
-
 Texto:
 {text}
 
 JSON:
-{{"title": "...", "summary": "...", "tags": [...], "atomic_statements": [...], "category": "...", "locations": [...], "image_prompt": "..."}}""")
+{{"title": "...", "summary": "...", "tags": [...], "atomic_statements": [...], "category": "...", "locations": [...]}}""")
         ])
 
         self.analyze_atomic_chain = RunnableSequence(
@@ -946,6 +932,66 @@ Response format:
         except Exception as e:
             _log_llm_error("redact_news_rich", e)
             return {"article": "", "title": "", "summary": "", "tags": [], "error": str(e)}
+
+    async def generate_image_prompt(
+        self,
+        title: str,
+        content: str,
+        organization_id: Optional[str] = None,
+        client_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Generate photorealistic image prompt from article content."""
+        try:
+            image_prompt_template = ChatPromptTemplate.from_messages([
+                ("system", "You are an AI that generates photorealistic image prompts."),
+                ("user", """Based on this article, generate a photorealistic image prompt in English.
+
+Title: {title}
+
+Content: {content}
+
+Generate a prompt for a CONCEPTUAL, photorealistic image that evokes the article's theme.
+
+REQUIREMENTS:
+- Simple, photorealistic, neutral, well-lit, single object/scene
+- NO people (except distant silhouettes), NO recognizable landmarks, NO specific buildings, NO commercial brands
+- Format: "A [simple object/scene] in [context], [lighting], photorealistic, sharp focus"
+
+Examples:
+- Budget news → "A calculator and documents on a wooden desk, natural daylight, photorealistic, sharp focus"
+- Accident news → "A wet road with tire tracks, overcast sky, photorealistic, sharp focus"
+- Education news → "An open book on a table near a window, morning light, photorealistic, sharp focus"
+- Environment news → "A single green leaf with water droplets, soft natural light, photorealistic, macro photography"
+- Technology news → "A computer keyboard backlit in blue light, minimalist setup, photorealistic, sharp focus"
+- Culture news → "A violin resting on sheet music, warm indoor lighting, photorealistic, shallow depth of field"
+
+Respond with ONLY the prompt text (no JSON, no markdown, no explanation).""")
+            ])
+
+            image_prompt_chain = RunnableSequence(
+                image_prompt_template | self.llm_fast | StrOutputParser()
+            )
+
+            # Truncate content to avoid token overflow
+            content_preview = content[:2000] if len(content) > 2000 else content
+
+            prompt_text = await image_prompt_chain.ainvoke({
+                "title": title,
+                "content": content_preview
+            })
+
+            # Clean up any formatting artifacts
+            prompt_text = prompt_text.strip().strip('"').strip("'")
+
+            logger.info("image_prompt_generated", 
+                       title=title[:50], 
+                       prompt_length=len(prompt_text))
+
+            return {"image_prompt": prompt_text}
+
+        except Exception as e:
+            _log_llm_error("generate_image_prompt", e)
+            return {"image_prompt": "", "error": str(e)}
 
     async def generate_style_guide(
         self,

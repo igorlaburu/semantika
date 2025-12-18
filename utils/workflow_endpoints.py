@@ -586,6 +586,26 @@ async def execute_redact_news_rich(
 
         result["category"] = category
 
+        # Generate image_prompt from article content
+        try:
+            article_content = result.get("article", "")
+            article_title = result.get("title", "")
+            
+            if article_content:
+                image_prompt_result = await openrouter.generate_image_prompt(
+                    title=article_title,
+                    content=article_content,
+                    organization_id=organization_id,
+                    client_id=client["client_id"]
+                )
+                result["image_prompt"] = image_prompt_result.get("image_prompt", "")
+                logger.info("image_prompt_generated", prompt_preview=result["image_prompt"][:100])
+            else:
+                result["image_prompt"] = ""
+        except Exception as e:
+            logger.error("image_prompt_generation_failed", error=str(e))
+            result["image_prompt"] = ""
+
         # Add references section to article content
         from utils.article_references import append_references_to_content
         
