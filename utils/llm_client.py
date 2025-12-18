@@ -923,6 +923,16 @@ Response format:
             # Parse the response
             result = JsonOutputParser().parse(raw_response.content if hasattr(raw_response, 'content') else str(raw_response))
 
+            # Decode HTML entities in all text fields (fix &#39; → ')
+            import html
+            for field in ["article", "title", "summary", "excerpt"]:
+                if field in result and isinstance(result[field], str):
+                    result[field] = html.unescape(result[field])
+            
+            # Decode HTML entities in tags (list of strings)
+            if "tags" in result and isinstance(result["tags"], list):
+                result["tags"] = [html.unescape(tag) if isinstance(tag, str) else tag for tag in result["tags"]]
+
             logger.debug("redact_news_rich_completed",
                         article_length=len(result.get("article", "")),
                         result_keys=list(result.keys()),
