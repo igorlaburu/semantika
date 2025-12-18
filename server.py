@@ -684,7 +684,7 @@ class SemanticSearchRequest(BaseModel):
     """Request model for semantic search."""
     query: str = Field(..., description="Search query to vectorize and match")
     limit: int = Field(default=10, ge=1, le=100, description="Maximum number of results")
-    threshold: float = Field(default=0.35, ge=0.0, le=1.0, description="Minimum similarity score (0.0-1.0, default 0.35 for balanced precision/recall)")
+    threshold: float = Field(default=0.18, ge=0.0, le=1.0, description="Minimum similarity score (0.0-1.0, default 0.18 for high recall)")
     max_days: Optional[int] = Field(default=None, ge=1, description="Maximum age of context units in days (e.g., 30 = last 30 days)")
     filters: Optional[Dict[str, Any]] = Field(default=None, description="Optional filters (category, source_type, etc.)")
     include_pool: bool = Field(default=False, description="Include pool content (company_id = 99999999-9999-9999-9999-999999999999)")
