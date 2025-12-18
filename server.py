@@ -2527,33 +2527,171 @@ async def save_enriched_statements(
 
 
 # ============================================
-# FEATURED IMAGE PROXY
+# IMAGE GENERATION AND RETRIEVAL
 # ============================================
+
+@app.post("/api/v1/context-units/{context_unit_id}/generate-image")
+async def generate_image_for_context_unit(
+    context_unit_id: str,
+    force_regenerate: bool = False,
+    client: Dict = Depends(get_current_client)
+):
+    """Generate photorealistic AI image for context unit.
+    
+    Uses Fal.ai FLUX.1 [schnell] model to generate conceptual, photorealistic
+    images from the context unit's image_prompt (generated during enrichment).
+    
+    Model specs:
+    - Cost: $0.003/image
+    - Speed: 1-2 seconds
+    - Resolution: 1024x576 (landscape 16:9)
+    - Quality: Excellent for simple photorealistic objects
+    
+    Generated images are:
+    - Cached permanently in /app/cache/images/generated/
+    - Served via GET /api/v1/context-units/{id}/image
+    - Prioritized over scraped images
+    
+    **Authentication**: Requires API Key (X-API-Key header)
+    
+    Args:
+        context_unit_id: Context unit UUID
+        force_regenerate: Force regeneration even if cached
+        client: Authenticated client from API key
+        
+    Returns:
+        Image generation result with URL and metadata
+        
+    Example:
+        POST /api/v1/context-units/uuid-123/generate-image
+        Response: {
+            "context_unit_id": "uuid-123",
+            "title": "Michelin anuncia...",
+            "image_prompt": "A tire on wet asphalt...",
+            "image_url": "/api/v1/context-units/uuid-123/image",
+            "status": "generated",
+            "generated_at": "2025-12-18T14:30:00Z",
+            "generation_time_ms": 1234.56
+        }
+    
+    Raises:
+        HTTPException: 404 if context unit not found
+        HTTPException: 400 if context unit has no image_prompt
+        HTTPException: 500 if image generation fails
+    """
+    try:
+        company_id = client["company_id"]
+        
+        logger.info("generate_image_request",
+            context_unit_id=context_unit_id,
+            company_id=company_id,
+            force_regenerate=force_regenerate
+        )
+        
+        # Fetch context unit from database (allow access to pool content)
+        pool_company_id = "99999999-9999-9999-9999-999999999999"
+        
+        result = supabase_client.client.table("press_context_units").select(
+            "id, company_id, image_prompt, title"
+        ).eq("id", context_unit_id).in_("company_id", [company_id, pool_company_id]).maybe_single().execute()
+        
+        if not result.data:
+            logger.warn("context_unit_not_found_for_image_generation",
+                context_unit_id=context_unit_id,
+                company_id=company_id
+            )
+            raise HTTPException(status_code=404, detail="Context unit not found")
+        
+        context_unit = result.data
+        
+        # Check if image_prompt exists
+        image_prompt = context_unit.get("image_prompt")
+        if not image_prompt or image_prompt.strip() == "":
+            logger.warn("no_image_prompt_for_generation",
+                context_unit_id=context_unit_id,
+                title=context_unit.get("title", "")[:50]
+            )
+            return {
+                "context_unit_id": context_unit_id,
+                "title": context_unit.get("title"),
+                "status": "no_prompt",
+                "error": "Context unit has no image_prompt. This is generated during content enrichment. Re-scrape the source or manually add an image_prompt."
+            }
+        
+        # Generate image using Fal.ai
+        from utils.image_generator import generate_image_from_prompt
+        
+        gen_result = await generate_image_from_prompt(
+            context_unit_id=context_unit_id,
+            image_prompt=image_prompt,
+            force_regenerate=force_regenerate
+        )
+        
+        if gen_result["success"]:
+            logger.info("image_generation_success_endpoint",
+                context_unit_id=context_unit_id,
+                cached=gen_result["cached"],
+                generation_time_ms=gen_result["generation_time_ms"]
+            )
+            
+            return {
+                "context_unit_id": context_unit_id,
+                "title": context_unit.get("title"),
+                "image_prompt": image_prompt,
+                "image_url": gen_result["image_url"],
+                "status": "cached" if gen_result["cached"] else "generated",
+                "generated_at": datetime.utcnow().isoformat(),
+                "generation_time_ms": gen_result["generation_time_ms"]
+            }
+        else:
+            logger.error("image_generation_failed_endpoint",
+                context_unit_id=context_unit_id,
+                error=gen_result.get("error")
+            )
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Image generation failed: {gen_result.get('error', 'Unknown error')}"
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("generate_image_error",
+            context_unit_id=context_unit_id,
+            error=str(e)
+        )
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/v1/context-units/{context_unit_id}/image")
 async def get_context_unit_image(
     context_unit_id: str,
     client: Dict = Depends(get_current_client)
 ):
-    """Proxy featured image for context unit.
+    """Get image for context unit with priority fallback.
     
-    Fetches the featured image URL from source_metadata and proxies it
-    to avoid hotlinking issues. Uses local filesystem cache.
+    Image priority (highest to lowest):
+    1. Generated AI image (from POST /generate-image) - X-Image-Source: "generated"
+    2. Scraped featured image (from source_metadata) - X-Image-Source: "original"
+    3. Placeholder SVG - X-Image-Source: "placeholder"
+    
+    Generated images are cached permanently in /app/cache/images/generated/
+    Scraped images are cached temporarily in /app/cache/images/
     
     Args:
         context_unit_id: Context unit UUID
         client: Authenticated client from API key
         
     Returns:
-        Image bytes (JPEG/PNG) from cache or remote
+        Image bytes (JPEG/PNG/SVG)
         
     Response Headers:
-        - Content-Type: image/jpeg or image/png
+        - Content-Type: image/jpeg, image/png, or image/svg+xml
         - Cache-Control: public, max-age=86400 (24 hours)
-        - X-Image-Source: "original" or "placeholder"
-        - X-Image-Cache: "hit" or "miss"
+        - X-Image-Source: "generated" | "original" | "placeholder"
+        - X-Image-Cache: "hit" | "miss"
         
-    Expected aspect ratio: 1.91:1 (1200×630 Open Graph standard)
+    Expected aspect ratio: 1.91:1 for scraped, 16:9 (1024x576) for generated
     
     Raises:
         HTTPException: 404 if context unit not found
@@ -2564,7 +2702,27 @@ async def get_context_unit_image(
     try:
         company_id = client["company_id"]
         
-        # Check local cache first
+        # Priority 1: Check for GENERATED image (AI-generated via /generate-image)
+        generated_dir = Path("/app/cache/images/generated")
+        generated_file = generated_dir / f"{context_unit_id}.jpg"
+        
+        if generated_file.exists():
+            logger.debug("image_generated_hit",
+                context_unit_id=context_unit_id,
+                cache_file=str(generated_file)
+            )
+            
+            return Response(
+                content=generated_file.read_bytes(),
+                media_type="image/jpeg",
+                headers={
+                    "Cache-Control": "public, max-age=86400",
+                    "X-Image-Source": "generated",
+                    "X-Image-Cache": "hit"
+                }
+            )
+        
+        # Priority 2: Check local cache (scraped images)
         cache_dir = Path("/app/cache/images")
         cache_dir.mkdir(parents=True, exist_ok=True)
         
