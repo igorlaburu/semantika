@@ -2629,11 +2629,30 @@ async def generate_image_for_article(
                 generation_time_ms=gen_result["generation_time_ms"]
             )
             
+            # Auto-update article imagen_url to point to generated image
+            image_url = f"/api/v1/articles/{article_id}/image"
+            try:
+                supabase_client.client.table("press_articles")\
+                    .update({"imagen_url": image_url})\
+                    .eq("id", article_id)\
+                    .eq("company_id", company_id)\
+                    .execute()
+                
+                logger.info("article_imagen_url_updated",
+                    article_id=article_id,
+                    imagen_url=image_url
+                )
+            except Exception as update_error:
+                logger.error("failed_to_update_imagen_url",
+                    article_id=article_id,
+                    error=str(update_error)
+                )
+            
             return {
                 "article_id": article_id,
                 "titulo": article.get("titulo"),
                 "image_prompt": image_prompt,
-                "image_url": f"/api/v1/articles/{article_id}/image",
+                "image_url": image_url,
                 "status": "cached" if gen_result["cached"] else "generated",
                 "generated_at": datetime.utcnow().isoformat(),
                 "generation_time_ms": gen_result["generation_time_ms"]

@@ -606,6 +606,26 @@ async def execute_redact_news_rich(
             logger.error("image_prompt_generation_failed", error=str(e))
             result["image_prompt"] = ""
 
+        # Auto-assign featured_image from first context unit (if available)
+        imagen_url = None
+        if context_units:
+            first_cu = context_units[0]
+            source_metadata = first_cu.get("source_metadata") or {}
+            featured_image = source_metadata.get("featured_image")
+            
+            if featured_image and featured_image.get("url"):
+                imagen_url = f"/api/v1/context-units/{first_cu['id']}/image"
+                logger.info("article_image_auto_assigned",
+                    context_unit_id=first_cu["id"],
+                    imagen_url=imagen_url
+                )
+            else:
+                logger.debug("no_featured_image_in_first_context_unit",
+                    context_unit_id=first_cu["id"]
+                )
+        
+        result["imagen_url"] = imagen_url
+
         # Add references section to article content
         from utils.article_references import append_references_to_content
         
