@@ -168,6 +168,35 @@ Action required:
             source_name=source_name,
             consecutive_failures=consecutive_failures
         )
+    
+    def test_alert(self):
+        """Send test alert to verify SMTP configuration."""
+        subject = "✅ Test: Alert system working"
+        
+        body = """This is a test alert from Semantika alert service.
+
+If you receive this email, the SMTP configuration is working correctly.
+
+System info:
+- SMTP Host: {smtp_host}
+- SMTP Port: {smtp_port}
+- Admin Email: {admin_email}
+
+All future alerts will be sent to this address.
+""".format(
+            smtp_host=settings.smtp_host,
+            smtp_port=settings.smtp_port,
+            admin_email=settings.admin_email
+        )
+        
+        context = {
+            "test": True,
+            "smtp_configured": bool(settings.smtp_user and settings.smtp_password)
+        }
+        
+        self._send_email(subject, body, context)
+        
+        logger.info("test_alert_sent")
 
 
 # Global singleton
