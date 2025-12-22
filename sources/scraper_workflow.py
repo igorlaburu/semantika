@@ -645,8 +645,13 @@ async def scrape_articles_from_index(
     for article in articles:
         article_date_str = article.get("date")
         if not article_date_str:
-            # No date - include (could be very recent)
-            articles_filtered.append(article)
+            # No date - REJECT by default (conservative approach)
+            # Too risky: could be category pages with mixed old/new content
+            logger.debug("article_filtered_no_date",
+                url=article.get("url"),
+                title=article.get("title", "")[:50],
+                reason="LLM could not extract date, rejecting to avoid old content"
+            )
             continue
         
         try:
@@ -665,13 +670,13 @@ async def scrape_articles_from_index(
                     age_hours=int((datetime.utcnow() - article_date.replace(tzinfo=None)).total_seconds() / 3600)
                 )
         except Exception as e:
-            # Date parsing failed - include article (conservative)
-            logger.warn("article_date_parse_failed",
+            # Date parsing failed - REJECT (conservative approach)
+            logger.warn("article_date_parse_failed_rejected",
                 url=article.get("url"),
                 date_str=article_date_str,
-                error=str(e)
+                error=str(e),
+                reason="Could not parse date, rejecting to avoid old content"
             )
-            articles_filtered.append(article)
     
     if len(articles_filtered) < len(articles):
         logger.info("articles_filtered_by_date",
