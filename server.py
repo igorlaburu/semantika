@@ -2762,20 +2762,22 @@ async def get_article_image(
 
 @app.get("/api/v1/context-units/{context_unit_id}/image")
 async def get_context_unit_image(
-    context_unit_id: str
+    context_unit_id: str,
+    company_id: str = Depends(get_company_id_from_auth)
 ):
     """Get featured image for context unit (scraped from source).
     
-    Public endpoint - no authentication required.
     Returns the featured_image from source_metadata or placeholder.
     """
     from pathlib import Path
     
     try:
-        # Fetch context unit (no auth required - images are public anyway)
+        # Fetch context unit (allow pool access)
+        pool_company_id = "99999999-9999-9999-9999-999999999999"
+        
         result = supabase_client.client.table("press_context_units").select(
             "id, source_metadata, company_id"
-        ).eq("id", context_unit_id).maybe_single().execute()
+        ).eq("id", context_unit_id).in_("company_id", [company_id, pool_company_id]).maybe_single().execute()
         
         if not result.data:
             logger.debug("context_unit_not_found_for_image", context_unit_id=context_unit_id)
