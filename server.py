@@ -3169,91 +3169,42 @@ async def get_filter_options(
         company_id = user["company_id"]
         supabase = get_supabase_client()
 
-        # Get source types with counts
-        sources_query = f"""
-        SELECT
-            source_type as value,
-            source_type as label,
-            COUNT(*) as count
-        FROM press_context_units
-        WHERE company_id = '{company_id}'
-        GROUP BY source_type
-        ORDER BY count DESC;
-        """
-        sources_result = supabase.client.rpc('exec_sql', {'sql': sources_query}).execute()
+        # Query all units and aggregate manually (simple and reliable)
+        all_units = supabase.client.table("press_context_units")\
+            .select("source_type, tags, category")\
+            .eq("company_id", company_id)\
+            .execute()
 
-        # Get topics (tags) with counts
-        topics_query = f"""
-        SELECT
-            tag as value,
-            tag as label,
-            COUNT(*) as count
-        FROM press_context_units, unnest(tags) as tag
-        WHERE company_id = '{company_id}'
-        GROUP BY tag
-        ORDER BY count DESC;
-        """
-        topics_result = supabase.client.rpc('exec_sql', {'sql': topics_query}).execute()
+        # Manual aggregation
+        sources_map = {}
+        topics_map = {}
+        categories_map = {}
 
-        # Get categories with counts
-        categories_query = f"""
-        SELECT
-            category as value,
-            category as label,
-            COUNT(*) as count
-        FROM press_context_units
-        WHERE company_id = '{company_id}' AND category IS NOT NULL
-        GROUP BY category
-        ORDER BY count DESC;
-        """
-        categories_result = supabase.client.rpc('exec_sql', {'sql': categories_query}).execute()
+        for unit in all_units.data or []:
+            source_type = unit.get("source_type")
+            if source_type:
+                sources_map[source_type] = sources_map.get(source_type, 0) + 1
 
-        return {
-            "sources": sources_result.data or [],
-            "topics": topics_result.data or [],
-            "categories": categories_result.data or []
-        }
+            for tag in unit.get("tags") or []:
+                topics_map[tag] = topics_map.get(tag, 0) + 1
+
+            category = unit.get("category")
+            if category:
+                categories_map[category] = categories_map.get(category, 0) + 1
+
+        sources = [{"value": k, "label": k, "count": v} for k, v in sources_map.items()]
+        topics = [{"value": k, "label": k, "count": v} for k, v in topics_map.items()]
+        categories = [{"value": k, "label": k, "count": v} for k, v in categories_map.items()]
+
+        sources.sort(key=lambda x: x["count"], reverse=True)
+        topics.sort(key=lambda x: x["count"], reverse=True)
+        categories.sort(key=lambda x: x["count"], reverse=True)
+
+        return {"sources": sources, "topics": topics, "categories": categories}
 
     except Exception as e:
         logger.error("get_filter_options_error", error=str(e))
-        # Fallback: query directly from table
-        try:
-            # Simple fallback without SQL aggregation
-            all_units = supabase.client.table("press_context_units")\
-                .select("source_type, tags, category")\
-                .eq("company_id", company_id)\
-                .execute()
-
-            # Manual aggregation
-            sources_map = {}
-            topics_map = {}
-            categories_map = {}
-
-            for unit in all_units.data or []:
-                source_type = unit.get("source_type")
-                if source_type:
-                    sources_map[source_type] = sources_map.get(source_type, 0) + 1
-
-                for tag in unit.get("tags") or []:
-                    topics_map[tag] = topics_map.get(tag, 0) + 1
-
-                category = unit.get("category")
-                if category:
-                    categories_map[category] = categories_map.get(category, 0) + 1
-
-            sources = [{"value": k, "label": k, "count": v} for k, v in sources_map.items()]
-            topics = [{"value": k, "label": k, "count": v} for k, v in topics_map.items()]
-            categories = [{"value": k, "label": k, "count": v} for k, v in categories_map.items()]
-
-            sources.sort(key=lambda x: x["count"], reverse=True)
-            topics.sort(key=lambda x: x["count"], reverse=True)
-            categories.sort(key=lambda x: x["count"], reverse=True)
-
-            return {"sources": sources, "topics": topics, "categories": categories}
-
-        except Exception as fallback_error:
-            logger.error("get_filter_options_fallback_error", error=str(fallback_error))
-            raise HTTPException(status_code=500, detail="Failed to fetch filter options")
+        raise HTTPException(status_code=500, detail="Failed to fetch filter options")
 
 
 @app.get("/api/v1/context-units/{context_unit_id}")
