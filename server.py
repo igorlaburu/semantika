@@ -2631,8 +2631,8 @@ async def generate_image_for_article(
                 generation_time_ms=gen_result["generation_time_ms"]
             )
             
-            # Auto-update article imagen_url to point to generated image
-            image_url = f"/api/v1/articles/{article_id}/image"
+            # Auto-update article imagen_url to point to unified image endpoint
+            image_url = f"/api/images/{article_id}"
             try:
                 supabase_client.client.table("press_articles")\
                     .update({"imagen_url": image_url})\
