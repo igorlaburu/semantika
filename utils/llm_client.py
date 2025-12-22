@@ -32,6 +32,15 @@ def _log_llm_error(operation: str, error: Exception):
             error_type="INSUFFICIENT_CREDITS",
             message=f"⚠️  CRITICAL: OpenRouter credits exhausted or max_tokens too high for {operation}"
         )
+        
+        # Send admin alert
+        from .alert_service import alert
+        alert.llm_credits_exhausted(
+            provider="openrouter",
+            operation=operation,
+            error_message=error_str,
+            remaining_tokens=None
+        )
     else:
         import traceback
         logger.error(f"{operation}_error",

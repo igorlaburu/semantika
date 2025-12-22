@@ -226,6 +226,12 @@ class Settings(BaseSettings):
         default="",
         description="SMTP password"
     )
+    
+    # Admin Alert Configuration
+    admin_email: str = Field(
+        default="igor@gako.ai",
+        description="Admin email for system alerts"
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",
