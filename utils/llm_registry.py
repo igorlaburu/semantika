@@ -23,7 +23,7 @@ class LLMRegistry:
         
         # OpenRouter models
         self._providers['sonnet_premium'] = OpenRouterProvider(
-            model_name='anthropic/claude-3-5-haiku',
+            model_name='anthropic/claude-haiku-4.5',
             model_alias='sonnet_premium',
             temperature=0.0
         )
