@@ -2553,8 +2553,8 @@ async def generate_image_for_article(
     - Quality: Excellent for simple photorealistic objects
     
     Generated images are:
-    - Cached permanently in /app/cache/images/generated/
-    - Served via GET /api/v1/articles/{id}/image
+    - Cached permanently in /app/cache/images/{article_id}.jpg
+    - Served via GET /api/v1/images/{article_id} (unified endpoint)
     
     **Authentication**: Accepts JWT or API Key
     
@@ -2686,10 +2686,10 @@ async def get_article_image(
     """Get image for article with fallback to placeholder.
     
     Image priority:
-    1. Generated AI image (from POST /generate-image) - X-Image-Source: "generated"
+    1. Cached image (from POST /generate-image) - X-Image-Source: "cached"
     2. Placeholder SVG - X-Image-Source: "placeholder"
     
-    Generated images are cached permanently in /app/cache/images/generated/
+    Images are cached in /app/cache/images/{article_id}.jpg
     
     Args:
         article_id: Article UUID
@@ -2701,7 +2701,7 @@ async def get_article_image(
     Response Headers:
         - Content-Type: image/jpeg or image/svg+xml
         - Cache-Control: public, max-age=86400 (24 hours)
-        - X-Image-Source: "generated" | "placeholder"
+        - X-Image-Source: "cached" | "placeholder"
         
     Expected aspect ratio: 16:9 (1024x576) for generated
     
@@ -2711,28 +2711,28 @@ async def get_article_image(
     from pathlib import Path
     
     try:
-        # Check for GENERATED image
-        generated_dir = Path("/app/cache/images/generated")
-        generated_file = generated_dir / f"{article_id}.jpg"
+        # Check unified cache
+        cache_dir = Path("/app/cache/images")
+        cache_file = cache_dir / f"{article_id}.jpg"
         
-        if generated_file.exists():
-            logger.debug("image_generated_hit",
+        if cache_file.exists():
+            logger.debug("article_image_cache_hit",
                 article_id=article_id,
-                cache_file=str(generated_file)
+                cache_file=str(cache_file)
             )
             
             return Response(
-                content=generated_file.read_bytes(),
+                content=cache_file.read_bytes(),
                 media_type="image/jpeg",
                 headers={
                     "Cache-Control": "public, max-age=86400",
-                    "X-Image-Source": "generated",
+                    "X-Image-Source": "cached",
                     "X-Image-Cache": "hit"
                 }
             )
         
         # Fallback: Return placeholder
-        logger.debug("image_cache_miss", article_id=article_id)
+        logger.debug("article_image_cache_miss", article_id=article_id)
         
         placeholder = generate_placeholder_image()
         return Response(
@@ -2809,7 +2809,25 @@ async def get_context_unit_image(
         
         image_url = featured_image["url"]
         
-        # Proxy the image
+        # Check cache first
+        cache_dir = Path("/app/cache/images")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_file = cache_dir / f"{context_unit_id}.jpg"
+        
+        if cache_file.exists():
+            logger.debug("image_cache_hit", context_unit_id=context_unit_id)
+            return Response(
+                content=cache_file.read_bytes(),
+                media_type="image/jpeg",
+                headers={
+                    "Cache-Control": "public, max-age=86400",
+                    "X-Image-Source": "cached",
+                    "X-Image-Cache": "hit"
+                }
+            )
+        
+        # Cache miss - download and cache
+        logger.debug("image_cache_miss", context_unit_id=context_unit_id)
         try:
             import ssl
             ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -2832,12 +2850,27 @@ async def get_context_unit_image(
                         image_bytes = await response.read()
                         content_type = response.headers.get("Content-Type", "image/jpeg")
                         
+                        # Cache to disk
+                        try:
+                            cache_file.write_bytes(image_bytes)
+                            logger.info("image_cached", 
+                                context_unit_id=context_unit_id,
+                                size_bytes=len(image_bytes),
+                                cache_path=str(cache_file)
+                            )
+                        except Exception as e:
+                            logger.warn("image_cache_write_failed", 
+                                context_unit_id=context_unit_id,
+                                error=str(e)
+                            )
+                        
                         return Response(
                             content=image_bytes,
                             media_type=content_type,
                             headers={
                                 "Cache-Control": "public, max-age=86400",
-                                "X-Image-Source": "original"
+                                "X-Image-Source": "original",
+                                "X-Image-Cache": "miss"
                             }
                         )
                     else:
@@ -2893,6 +2926,74 @@ def generate_placeholder_image() -> bytes:
   </text>
 </svg>"""
     return svg.encode('utf-8')
+
+
+# ============================================
+# UNIFIED IMAGE ENDPOINT
+# ============================================
+
+@app.get("/api/v1/images/{image_id}")
+async def get_image_unified(image_id: str):
+    """Unified public image endpoint.
+    
+    Serves cached images from /app/cache/images/{uuid}.jpg
+    No authentication required - knowing the UUID is the protection.
+    
+    Images can be:
+    1. AI-generated (from POST /articles/{id}/generate-image)
+    2. Featured images (cached from GET /context-units/{id}/image)
+    
+    Args:
+        image_id: UUID of article or context unit
+        
+    Returns:
+        - JPEG image if cached (X-Image-Source: "cached")
+        - SVG placeholder if not found (X-Image-Source: "placeholder")
+        
+    Headers:
+        - Cache-Control: public, max-age=86400 (24h)
+        - X-Image-Source: "cached" | "placeholder"
+    """
+    from pathlib import Path
+    
+    try:
+        cache_dir = Path("/app/cache/images")
+        cache_file = cache_dir / f"{image_id}.jpg"
+        
+        if cache_file.exists():
+            logger.debug("unified_image_cache_hit", image_id=image_id)
+            return Response(
+                content=cache_file.read_bytes(),
+                media_type="image/jpeg",
+                headers={
+                    "Cache-Control": "public, max-age=86400",
+                    "X-Image-Source": "cached"
+                }
+            )
+        
+        # Not cached - return placeholder
+        logger.debug("unified_image_not_found", image_id=image_id)
+        placeholder = generate_placeholder_image()
+        return Response(
+            content=placeholder,
+            media_type="image/svg+xml",
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "X-Image-Source": "placeholder"
+            }
+        )
+        
+    except Exception as e:
+        logger.error("unified_image_error", image_id=image_id, error=str(e))
+        placeholder = generate_placeholder_image()
+        return Response(
+            content=placeholder,
+            media_type="image/svg+xml",
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "X-Image-Source": "placeholder"
+            }
+        )
 
 
 # ============================================

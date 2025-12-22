@@ -1,7 +1,7 @@
 """Image generation using Fal.ai FLUX.1 [schnell] model.
 
 Generates photorealistic, conceptual images from prompts.
-Images are cached permanently in /app/cache/images/generated/.
+Images are cached permanently in /app/cache/images/.
 """
 
 import os
@@ -15,7 +15,7 @@ from utils.logger import get_logger
 logger = get_logger("image_generator")
 
 FAL_API_KEY = os.getenv("FAL_AI_API_KEY")
-CACHE_DIR = Path("/app/cache/images/generated")
+CACHE_DIR = Path("/app/cache/images")
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Configure fal_client with API key
