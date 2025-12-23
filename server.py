@@ -2615,11 +2615,15 @@ async def generate_image_for_article(
             )
             raise HTTPException(status_code=400, detail="image_prompt cannot be empty")
         
-        # Generate image using Fal.ai
+        # Generate image using Fal.ai with unique UUID
+        import uuid
         from utils.image_generator import generate_image_from_prompt
         
+        # Generate unique UUID for this image (allows multiple generations)
+        image_uuid = str(uuid.uuid4())
+        
         gen_result = await generate_image_from_prompt(
-            context_unit_id=article_id,  # Use article_id as cache key
+            context_unit_id=image_uuid,  # Use unique UUID as cache key
             image_prompt=image_prompt,
             force_regenerate=request.force_regenerate
         )
@@ -2627,33 +2631,17 @@ async def generate_image_for_article(
         if gen_result["success"]:
             logger.info("image_generation_success_endpoint",
                 article_id=article_id,
+                image_uuid=image_uuid,
                 cached=gen_result["cached"],
                 generation_time_ms=gen_result["generation_time_ms"]
             )
             
-            # Auto-update article imagen_url to point to unified image endpoint
-            image_url = f"/api/images/{article_id}"
-            try:
-                supabase_client.client.table("press_articles")\
-                    .update({"imagen_url": image_url})\
-                    .eq("id", article_id)\
-                    .eq("company_id", company_id)\
-                    .execute()
-                
-                logger.info("article_imagen_url_updated",
-                    article_id=article_id,
-                    imagen_url=image_url
-                )
-            except Exception as update_error:
-                logger.error("failed_to_update_imagen_url",
-                    article_id=article_id,
-                    error=str(update_error)
-                )
-            
+            # Return image UUID - frontend decides whether to assign it to article
             return {
                 "article_id": article_id,
+                "image_uuid": image_uuid,
+                "image_url": f"/api/v1/images/{image_uuid}",
                 "image_prompt": image_prompt,
-                "image_url": image_url,
                 "status": "cached" if gen_result["cached"] else "generated",
                 "generated_at": datetime.utcnow().isoformat(),
                 "generation_time_ms": gen_result["generation_time_ms"]
@@ -3585,8 +3573,11 @@ async def update_article(
     **Body**: JSON object with fields to update, e.g.:
         {
             "estado": "publicado",
-            "fecha_publicacion": "2025-11-23T10:00:00Z"
+            "fecha_publicacion": "2025-11-23T10:00:00Z",
+            "imagen_uuid": "a1b2c3d4-5678-90ab-cdef-1234567890ab"
         }
+    
+    **Note**: Use imagen_uuid (not imagen_url) for images. Frontend will construct URL.
     """
     try:
         supabase = get_supabase_client()
