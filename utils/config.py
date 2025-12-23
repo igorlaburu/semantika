@@ -43,6 +43,20 @@ class Settings(BaseSettings):
         default="openai/gpt-4o-mini",
         description="Fast model for simple tasks"
     )
+    
+    # LLM Model Selection (Registry aliases)
+    llm_writer_model: str = Field(
+        default="haiku",
+        description="Model for article writing (haiku | sonnet_premium | fast | groq_fast)"
+    )
+    llm_analyzer_model: str = Field(
+        default="fast",
+        description="Model for content analysis (fast | haiku | groq_fast | sonnet_premium)"
+    )
+    llm_aggregator_model: str = Field(
+        default="fast",
+        description="Model for multi-source aggregation (fast | haiku | sonnet_premium | groq_fast)"
+    )
 
     # Groq Configuration
     groq_api_key: str = Field(

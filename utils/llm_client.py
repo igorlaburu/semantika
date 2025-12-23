@@ -144,6 +144,8 @@ Documents:
 Generate a well-structured, informative summary that directly answers the query.""")
         ])
 
+        # Note: aggregation_chain uses legacy llm_sonnet (alias for llm_fast)
+        # For runtime model selection, use aggregate_documents method instead
         self.aggregation_chain = RunnableSequence(
             aggregation_prompt | self.llm_sonnet | StrOutputParser()
         )
@@ -335,7 +337,7 @@ Extract and respond in JSON:
     ) -> Dict[str, Any]:
         """Analyze text and extract title, summary, tags."""
         try:
-            provider = self.registry.get('fast')
+            provider = self.registry.get(settings.llm_analyzer_model)
             config = {}
             if organization_id:
                 config['tracking'] = {
@@ -371,8 +373,8 @@ Extract and respond in JSON:
         import json
 
         try:
-            # Use fast model (gpt-4o-mini on OpenRouter) to avoid Groq rate limits
-            provider = self.registry.get('fast')
+            # Use configured analyzer model
+            provider = self.registry.get(settings.llm_analyzer_model)
             config = {}
             if company_id:
                 config['tracking'] = {
@@ -617,8 +619,8 @@ Si NO encuentras fuente pública original, devuelve: {{"sources": []}}"""
             Dict with articles: [{"title": "...", "url": "...", "date": "..."}, ...]
         """
         try:
-            # Use fast model (gpt-4o-mini on OpenRouter) to avoid Groq rate limits
-            provider = self.registry.get('fast')
+            # Use configured analyzer model
+            provider = self.registry.get(settings.llm_analyzer_model)
             config = {}
             if organization_id:
                 config['tracking'] = {
@@ -801,7 +803,7 @@ Response format:
             ])
 
             redact_chain = RunnableSequence(
-                redact_prompt | self.registry.get('sonnet_premium').get_runnable() | JsonOutputParser()
+                redact_prompt | self.registry.get(settings.llm_writer_model).get_runnable() | JsonOutputParser()
             )
 
             result = await redact_chain.ainvoke({"text": text[:8000]})
@@ -913,14 +915,14 @@ Response format:
             ])
 
             redact_rich_chain = RunnableSequence(
-                redact_rich_prompt | self.registry.get('sonnet_premium').get_runnable() | JsonOutputParser()
+                redact_rich_prompt | self.registry.get(settings.llm_writer_model).get_runnable() | JsonOutputParser()
             )
 
             # Debug: call LLM and inspect raw response
             logger.info("redact_news_rich_calling_llm", source_text_length=len(source_text[:12000]))
 
             # Call LLM directly to see raw response
-            raw_response = await (redact_rich_prompt | self.registry.get('sonnet_premium').get_runnable()).ainvoke({
+            raw_response = await (redact_rich_prompt | self.registry.get(settings.llm_writer_model).get_runnable()).ainvoke({
                 "source_text": source_text[:12000],
                 "user_instructions": user_instructions
             })
@@ -1169,7 +1171,7 @@ Respond in JSON:
 }}""")
             ])
 
-            provider = self.registry.get('fast')
+            provider = self.registry.get(settings.llm_analyzer_model)
             config = {}
             if organization_id:
                 config['tracking'] = {
@@ -1248,8 +1250,8 @@ Formato exacto:
                 ("user", user_prompt)
             ])
 
-            # Use Groq fast for micro-edits (best for quick transformations)
-            provider = self.registry.get('groq_fast') if settings.groq_api_key else self.registry.get('fast')
+            # Use configured writer model for micro-edits
+            provider = self.registry.get(settings.llm_writer_model)
             
             config = {}
             if organization_id:
