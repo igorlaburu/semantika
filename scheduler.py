@@ -769,7 +769,7 @@ async def generate_articles_for_company(
 
 
 async def get_unused_context_units(company_id: str, limit: int) -> list:
-    """Get context units not used in any article."""
+    """Get context units not used in any article (includes pool units)."""
     
     supabase = get_supabase_client()
     
@@ -787,14 +787,16 @@ async def get_unused_context_units(company_id: str, limit: int) -> list:
             used_unit_ids.update(source_units)
     
     # Get unused units from last 30 days
+    # IMPORTANT: Include BOTH company units AND pool units
     cutoff_date = (datetime.utcnow() - timedelta(days=30)).isoformat()
+    pool_id = "99999999-9999-9999-9999-999999999999"
     
     all_units = await supabase.client.table("press_context_units")\
         .select("*")\
-        .eq("company_id", company_id)\
+        .in_("company_id", [company_id, pool_id])\
         .gte("created_at", cutoff_date)\
         .order("created_at", desc=True)\
-        .limit(limit * 2)\
+        .limit(limit * 3)\
         .execute()
     
     # Filter unused
