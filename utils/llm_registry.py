@@ -22,8 +22,14 @@ class LLMRegistry:
         """Initialize all LLM providers."""
         
         # OpenRouter models
-        self._providers['sonnet_premium'] = OpenRouterProvider(
+        self._providers['haiku'] = OpenRouterProvider(
             model_name='anthropic/claude-haiku-4.5',
+            model_alias='haiku',
+            temperature=0.0
+        )
+        
+        self._providers['sonnet_premium'] = OpenRouterProvider(
+            model_name='anthropic/claude-sonnet-4.5',
             model_alias='sonnet_premium',
             temperature=0.0
         )
