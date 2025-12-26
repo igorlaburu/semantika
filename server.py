@@ -3616,6 +3616,200 @@ async def update_article(
         raise HTTPException(status_code=500, detail="Failed to update article")
 
 
+@app.post("/api/v1/articles/{article_id}/approve")
+async def approve_article(
+    article_id: str,
+    request: Dict[str, Any],
+    company_id: str = Depends(get_company_id_from_auth)
+) -> Dict:
+    """
+    Approve an article for publication.
+    
+    If publish_now=true, publishes immediately.
+    If schedule_time is provided, schedules for that time.
+    If neither, backend calculates optimal schedule time.
+    
+    **Authentication**: Accepts either JWT or API Key
+    
+    **Body**:
+        {
+            "publish_now": false,    // optional, default false
+            "schedule_time": null    // optional ISO datetime, null = auto-schedule
+        }
+    
+    **Returns**:
+        {
+            "success": true,
+            "article_id": "xxx",
+            "status": "programado",
+            "scheduled_for": "2024-12-27T10:00:00Z"
+        }
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        # Get article to verify it exists and belongs to company
+        article_result = supabase.client.table("press_articles")\
+            .select("*")\
+            .eq("id", article_id)\
+            .eq("company_id", company_id)\
+            .single()\
+            .execute()
+        
+        if not article_result.data:
+            raise HTTPException(status_code=404, detail="Article not found")
+        
+        article = article_result.data
+        
+        # Check if article is in draft state
+        if article['estado'] != 'borrador':
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Article is not in draft state. Current state: {article['estado']}"
+            )
+        
+        # Determine publication strategy
+        publish_now = request.get('publish_now', False)
+        schedule_time = request.get('schedule_time')
+        
+        if publish_now:
+            # Publish immediately
+            update_data = {
+                "estado": "publicado",
+                "fecha_publicacion": datetime.utcnow().isoformat(),
+                "updated_at": datetime.utcnow().isoformat()
+            }
+            scheduled_for = None
+            new_status = "publicado"
+        else:
+            # Schedule for later
+            if schedule_time:
+                # Use provided schedule time
+                try:
+                    scheduled_datetime = datetime.fromisoformat(
+                        schedule_time.replace('Z', '+00:00')
+                    )
+                    if scheduled_datetime <= datetime.utcnow():
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Schedule time must be in the future"
+                        )
+                except ValueError:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Invalid datetime format"
+                    )
+            else:
+                # Calculate optimal schedule time
+                scheduled_datetime = await calculate_optimal_schedule_time(company_id)
+            
+            update_data = {
+                "estado": "programado",
+                "to_publish_at": scheduled_datetime.isoformat(),
+                "updated_at": datetime.utcnow().isoformat()
+            }
+            scheduled_for = scheduled_datetime.isoformat()
+            new_status = "programado"
+        
+        # Update article
+        update_result = supabase.client.table("press_articles")\
+            .update(update_data)\
+            .eq("id", article_id)\
+            .eq("company_id", company_id)\
+            .execute()
+        
+        if not update_result.data:
+            raise HTTPException(status_code=500, detail="Failed to update article")
+        
+        logger.info("article_approved",
+            article_id=article_id,
+            company_id=company_id,
+            new_status=new_status,
+            scheduled_for=scheduled_for
+        )
+        
+        return {
+            "success": True,
+            "article_id": article_id,
+            "status": new_status,
+            "scheduled_for": scheduled_for,
+            "message": f"Article {'published' if publish_now else 'scheduled for publication'}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("approve_article_error", 
+            error=str(e), 
+            article_id=article_id
+        )
+        raise HTTPException(status_code=500, detail="Failed to approve article")
+
+
+async def calculate_optimal_schedule_time(company_id: str) -> datetime:
+    """
+    Calculate optimal publication time for an article.
+    
+    Strategy:
+    - Avoid oversaturation (max 2 articles/hour)
+    - Prefer high-engagement hours (9-11, 13-15, 18-20)
+    - Distribute evenly across the day
+    - Start from 2 hours in the future minimum
+    """
+    supabase = get_supabase_client()
+    
+    # Get already scheduled articles for next 48 hours
+    now = datetime.utcnow()
+    start_time = now + timedelta(hours=2)  # Minimum 2 hours from now
+    end_time = now + timedelta(hours=48)
+    
+    scheduled_result = supabase.client.table("press_articles")\
+        .select("to_publish_at")\
+        .eq("company_id", company_id)\
+        .eq("estado", "programado")\
+        .gte("to_publish_at", start_time.isoformat())\
+        .lte("to_publish_at", end_time.isoformat())\
+        .execute()
+    
+    # Count articles per hour
+    scheduled_by_hour = {}
+    for article in scheduled_result.data:
+        if article['to_publish_at']:
+            scheduled_time = datetime.fromisoformat(
+                article['to_publish_at'].replace('Z', '+00:00')
+            )
+            hour_key = scheduled_time.replace(minute=0, second=0, microsecond=0)
+            scheduled_by_hour[hour_key] = scheduled_by_hour.get(hour_key, 0) + 1
+    
+    # Define optimal hours (in UTC)
+    optimal_hours = [9, 10, 11, 13, 14, 15, 18, 19, 20]
+    
+    # Find next available slot
+    check_time = start_time.replace(minute=0, second=0, microsecond=0)
+    
+    while check_time <= end_time:
+        # Check if this hour is optimal
+        is_optimal = check_time.hour in optimal_hours
+        
+        # Check if this hour has capacity (max 2 articles/hour)
+        current_count = scheduled_by_hour.get(check_time, 0)
+        
+        if is_optimal and current_count < 2:
+            # Found a good slot, schedule at :00 or :30
+            if current_count == 0:
+                return check_time  # Schedule at :00
+            else:
+                return check_time + timedelta(minutes=30)  # Schedule at :30
+        elif not is_optimal and current_count == 0:
+            # Use non-optimal hour if necessary
+            backup_time = check_time
+        
+        check_time += timedelta(hours=1)
+    
+    # If no optimal slot found, use the backup or start_time
+    return backup_time if 'backup_time' in locals() else start_time
+
+
 @app.get("/api/v1/executions")
 async def list_executions(
     user: Dict = Depends(get_current_user_from_jwt),

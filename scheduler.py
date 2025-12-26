@@ -24,6 +24,11 @@ from sources.email_monitor import EmailMonitor
 from sources.email_source import EmailSource
 from sources.web_scraper import WebScraper
 from core.universal_pipeline import UniversalPipeline
+from utils.llm_client import LLMClient
+from utils.image_generator import generate_image_from_prompt
+from utils.image_extractor import extract_featured_image
+import uuid
+import aiohttp
 
 logger = get_logger("scheduler")
 
@@ -569,6 +574,415 @@ async def schedule_garbage_collection(scheduler):
     logger.info("garbage_collection_scheduled", interval_minutes=30)
 
 
+async def daily_article_generation():
+    """Generate daily articles for companies with autogenerate_enabled=true."""
+    
+    try:
+        logger.info("daily_article_generation_start")
+        
+        supabase = get_supabase_client()
+        
+        # Get companies with autogeneration enabled
+        result = supabase.client.table("companies")\
+            .select("id, name, autogenerate_enabled, autogenerate_max")\
+            .eq("autogenerate_enabled", True)\
+            .eq("is_active", True)\
+            .execute()
+        
+        companies = result.data if result.data else []
+        
+        logger.info("daily_generation_companies_found", 
+            count=len(companies)
+        )
+        
+        total_generated = 0
+        
+        for company in companies:
+            try:
+                # Check if already generated today
+                today = datetime.utcnow().date()
+                existing = await supabase.client.table("press_articles")\
+                    .select("id, working_json")\
+                    .eq("company_id", company['id'])\
+                    .eq("estado", "borrador")\
+                    .gte("created_at", f"{today}T00:00:00Z")\
+                    .execute()
+                
+                # Count auto-generated articles today
+                auto_generated_today = sum(
+                    1 for a in existing.data 
+                    if a.get('working_json', {}).get('auto_generated', False)
+                )
+                
+                if auto_generated_today > 0:
+                    logger.info("company_already_generated_today",
+                        company_id=company['id'],
+                        company_name=company['name'],
+                        count=auto_generated_today
+                    )
+                    continue
+                
+                # Generate articles for this company
+                generated = await generate_articles_for_company(
+                    company_id=company['id'],
+                    company_name=company['name'],
+                    max_articles=company.get('autogenerate_max', 5)
+                )
+                
+                total_generated += generated
+                
+                # Small delay between companies
+                await asyncio.sleep(5)
+                
+            except Exception as e:
+                logger.error("company_generation_failed",
+                    company_id=company['id'],
+                    company_name=company['name'],
+                    error=str(e)
+                )
+        
+        logger.info("daily_generation_completed",
+            companies_processed=len(companies),
+            total_articles_generated=total_generated
+        )
+        
+    except Exception as e:
+        logger.error("daily_generation_job_failed", error=str(e))
+
+
+async def generate_articles_for_company(
+    company_id: str,
+    company_name: str,
+    max_articles: int
+) -> int:
+    """Generate articles for a specific company."""
+    
+    logger.info("company_generation_start",
+        company_id=company_id,
+        company_name=company_name,
+        max_articles=max_articles
+    )
+    
+    supabase = get_supabase_client()
+    llm_client = LLMClient()
+    
+    # Get unused context units
+    unused_units = await get_unused_context_units(
+        company_id=company_id,
+        limit=max_articles * 2  # Get extra to have choice
+    )
+    
+    if not unused_units:
+        logger.info("no_unused_context_units",
+            company_id=company_id,
+            company_name=company_name
+        )
+        return 0
+    
+    # Evaluate quality if configured
+    min_quality = settings.autogenerate_min_quality if hasattr(settings, 'autogenerate_min_quality') else 3.0
+    
+    if min_quality > 0:
+        evaluated_units = await evaluate_units_quality(unused_units, llm_client)
+        selected_units = [
+            u for u in evaluated_units 
+            if u.get('quality_score', 0) >= min_quality
+        ][:max_articles]
+    else:
+        selected_units = unused_units[:max_articles]
+    
+    if not selected_units:
+        logger.info("no_quality_units",
+            company_id=company_id,
+            evaluated=len(unused_units),
+            min_quality=min_quality
+        )
+        return 0
+    
+    # Generate articles
+    generation_batch_id = str(uuid.uuid4())
+    generated_count = 0
+    
+    for unit in selected_units:
+        try:
+            # Generate article content
+            article_data = await llm_client.redact_news(
+                text=unit['raw_text'],
+                organization_id=company_id,
+                client_id=company_id
+            )
+            
+            # Handle image
+            image_uuid = await handle_article_image(unit, article_data, llm_client)
+            
+            # Create article
+            article_id = str(uuid.uuid4())
+            
+            insert_result = await supabase.client.table("press_articles").insert({
+                "id": article_id,
+                "titulo": article_data['title'],
+                "excerpt": article_data['summary'],
+                "contenido": article_data['article'],
+                "tags": article_data['tags'],
+                "categoria": unit.get('category', 'general'),
+                "estado": "borrador",
+                "imagen_uuid": image_uuid,
+                "company_id": company_id,
+                "created_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.utcnow().isoformat(),
+                "working_json": {
+                    "auto_generated": True,
+                    "generation_date": datetime.utcnow().isoformat(),
+                    "generation_batch_id": generation_batch_id,
+                    "source_context_units": [unit['id']],
+                    "context_unit_title": unit['title'],
+                    "quality_score": unit.get('quality_score'),
+                    "llm_model": settings.llm_writer_model
+                }
+            }).execute()
+            
+            generated_count += 1
+            
+            logger.info("article_auto_generated",
+                company_id=company_id,
+                article_id=article_id,
+                context_unit_id=unit['id'],
+                title=article_data['title'][:50]
+            )
+            
+        except Exception as e:
+            logger.error("article_generation_failed",
+                company_id=company_id,
+                unit_id=unit['id'],
+                error=str(e)
+            )
+    
+    logger.info("company_generation_completed",
+        company_id=company_id,
+        company_name=company_name,
+        requested=max_articles,
+        generated=generated_count,
+        batch_id=generation_batch_id
+    )
+    
+    return generated_count
+
+
+async def get_unused_context_units(company_id: str, limit: int) -> list:
+    """Get context units not used in any article."""
+    
+    supabase = get_supabase_client()
+    
+    # Get IDs already used (from working_json)
+    articles = await supabase.client.table("press_articles")\
+        .select("working_json")\
+        .eq("company_id", company_id)\
+        .not_("working_json", "is", None)\
+        .execute()
+    
+    used_unit_ids = set()
+    for article in articles.data:
+        source_units = article.get('working_json', {}).get('source_context_units', [])
+        if source_units:
+            used_unit_ids.update(source_units)
+    
+    # Get unused units from last 30 days
+    cutoff_date = (datetime.utcnow() - timedelta(days=30)).isoformat()
+    
+    all_units = await supabase.client.table("press_context_units")\
+        .select("*")\
+        .eq("company_id", company_id)\
+        .gte("created_at", cutoff_date)\
+        .order("created_at", desc=True)\
+        .limit(limit * 2)\
+        .execute()
+    
+    # Filter unused
+    unused = [u for u in all_units.data if u['id'] not in used_unit_ids]
+    
+    return unused[:limit]
+
+
+async def evaluate_units_quality(units: list, llm_client) -> list:
+    """Evaluate context units quality with LLM."""
+    
+    if not units:
+        return []
+    
+    prompt = """Evalúa la calidad periodística de estas noticias del 1 al 5.
+    
+Criterios:
+- 5: Excelente - Muy relevante, actual, completa
+- 4: Buena - Relevante y actual
+- 3: Regular - Algo relevante
+- 2: Pobre - Poco relevante
+- 1: Mala - Sin valor periodístico
+
+Para cada noticia responde en JSON: {"unit_id": "xxx", "quality_score": 4, "reason": "..."}
+
+Noticias:
+"""
+    
+    # Process in batches of 10
+    for i in range(0, len(units), 10):
+        batch = units[i:i+10]
+        units_text = "\n\n".join([
+            f"ID: {u['id']}\nTítulo: {u['title']}\nResumen: {u.get('summary', '')[:200]}"
+            for u in batch
+        ])
+        
+        try:
+            result = await llm_client.analyze(prompt + units_text)
+            
+            # Map scores back to units
+            if isinstance(result, list):
+                for unit in batch:
+                    eval_data = next(
+                        (e for e in result if e.get('unit_id') == unit['id']),
+                        {"quality_score": 3}
+                    )
+                    unit['quality_score'] = eval_data.get('quality_score', 3)
+                    unit['quality_reason'] = eval_data.get('reason', '')
+            
+        except Exception as e:
+            logger.error("quality_evaluation_failed", error=str(e))
+            # Default score if evaluation fails
+            for unit in batch:
+                unit['quality_score'] = 3
+    
+    return units
+
+
+async def handle_article_image(unit: dict, article_data: dict, llm_client) -> str:
+    """Generate or copy featured image for article."""
+    
+    # Check if unit has featured image
+    featured = unit.get('source_metadata', {}).get('featured_image')
+    
+    if featured and featured.get('url'):
+        try:
+            # Download and cache featured image
+            image_uuid = str(uuid.uuid4())
+            cache_path = f"/app/cache/images/{image_uuid}.jpg"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(featured['url']) as response:
+                    if response.status == 200:
+                        image_data = await response.read()
+                        with open(cache_path, 'wb') as f:
+                            f.write(image_data)
+                        
+                        logger.info("featured_image_cached",
+                            image_uuid=image_uuid,
+                            source_url=featured['url']
+                        )
+                        
+                        return image_uuid
+        except Exception as e:
+            logger.error("featured_image_download_failed", 
+                error=str(e),
+                url=featured['url']
+            )
+    
+    # Generate with AI
+    try:
+        # Generate prompt
+        prompt_result = await llm_client.generate_image_prompt(
+            title=article_data['title'],
+            content=article_data['article']
+        )
+        
+        image_prompt = prompt_result.get('prompt', 'A professional news image')
+        
+        # Generate image
+        result = await generate_image_from_prompt(
+            context_unit_id=str(uuid.uuid4()),
+            image_prompt=image_prompt
+        )
+        
+        if result['success']:
+            return result['image_uuid']
+        else:
+            # Return None if image generation fails
+            logger.error("image_generation_failed_for_article",
+                error=result.get('error')
+            )
+            return None
+            
+    except Exception as e:
+        logger.error("image_generation_error", error=str(e))
+        return None
+
+
+async def publish_scheduled_articles():
+    """Check and publish articles that are scheduled for publication."""
+    
+    try:
+        logger.info("scheduled_publication_check_start")
+        
+        supabase = get_supabase_client()
+        
+        # Get all scheduled articles ready to publish
+        now = datetime.utcnow()
+        
+        scheduled = await supabase.client.table("press_articles")\
+            .select("id, titulo, company_id")\
+            .eq("estado", "programado")\
+            .lte("to_publish_at", now.isoformat())\
+            .execute()
+        
+        if not scheduled.data:
+            logger.debug("no_articles_to_publish")
+            return
+        
+        logger.info("scheduled_articles_found", count=len(scheduled.data))
+        
+        published_count = 0
+        
+        # Use the approve endpoint to publish each article
+        for article in scheduled.data:
+            try:
+                # Call the approve endpoint with publish_now=true
+                # This ensures we use the same logic as manual publishing
+                
+                # Since we're in the scheduler, we need to use internal calls
+                # or direct database updates. For now, let's do direct update
+                # matching what the endpoint does
+                
+                update_result = await supabase.client.table("press_articles")\
+                    .update({
+                        "estado": "publicado",
+                        "fecha_publicacion": now.isoformat(),
+                        "updated_at": now.isoformat()
+                    })\
+                    .eq("id", article['id'])\
+                    .eq("estado", "programado")\
+                    .execute()
+                
+                if update_result.data:
+                    published_count += 1
+                    logger.info("article_auto_published",
+                        article_id=article['id'],
+                        title=article['titulo'][:50],
+                        company_id=article['company_id']
+                    )
+                
+            except Exception as e:
+                logger.error("article_publication_failed",
+                    article_id=article['id'],
+                    error=str(e)
+                )
+        
+        if published_count > 0:
+            logger.info("scheduled_publication_completed",
+                total_found=len(scheduled.data),
+                published=published_count
+            )
+        
+    except Exception as e:
+        logger.error("scheduled_publication_check_failed", error=str(e))
+
+
 async def main():
     """Main scheduler entry point."""
     logger.info("scheduler_starting")
@@ -598,6 +1012,26 @@ async def main():
         
         # Schedule periodic garbage collection (every 30 minutes)
         await schedule_garbage_collection(scheduler)
+        
+        # Schedule daily article generation at 7:15 AM UTC
+        scheduler.add_job(
+            daily_article_generation,
+            trigger=CronTrigger(hour=7, minute=15),
+            id="daily_article_generation",
+            replace_existing=True,
+            max_instances=1
+        )
+        logger.info("daily_article_generation_scheduled", time="7:15 AM UTC")
+        
+        # Schedule publication check every 5 minutes
+        scheduler.add_job(
+            publish_scheduled_articles,
+            trigger=IntervalTrigger(minutes=5),
+            id="publish_scheduled_articles",
+            replace_existing=True,
+            max_instances=1
+        )
+        logger.info("scheduled_publication_check_scheduled", interval_minutes=5)
 
         # Create tasks for monitors
         monitor_tasks = []
