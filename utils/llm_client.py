@@ -783,6 +783,7 @@ CRITICAL REQUIREMENTS:
 Article structure:
 - Write a COMPREHENSIVE, well-developed article
 - Create an engaging, accurate title based ONLY on source content
+- IMPORTANT: Do NOT repeat the title as the first sentence of the article - start directly with informative content
 - Write a brief summary (2-3 sentences) reflecting ONLY source information
 - Generate 3-5 relevant tags from topics in the source
 - Format article with clear paragraph breaks (use \\n\\n between paragraphs)
@@ -882,6 +883,7 @@ Article structure:
 - ALL sources marked with ## headers MUST be represented in the article - do not ignore any source
 - Create an engaging, accurate title based ONLY on source content
 - Title capitalization: Use sentence case (only capitalize first word and proper nouns/place names), not title case
+- IMPORTANT: Do NOT repeat the title as the first sentence of the article - start directly with informative content
 - Write a brief summary (2-3 sentences) reflecting ONLY source information from ALL sources
 - Generate 3-5 relevant tags from topics in ALL the sources
 - Format article with clear paragraph breaks (use \\n\\n between paragraphs)
@@ -971,20 +973,33 @@ Title: {title}
 
 Content: {content}
 
-Generate a prompt for a CONCEPTUAL, photorealistic image that evokes the article's theme.
+Generate a prompt for a SIMPLE, photorealistic image that evokes the article's theme.
 
-REQUIREMENTS:
-- Simple, photorealistic, neutral, well-lit, single object/scene
-- NO people (except distant silhouettes), NO recognizable landmarks, NO specific buildings, NO commercial brands
-- Format: "A [simple object/scene] in [context], [lighting], photorealistic, sharp focus"
+CRITICAL REQUIREMENTS:
+- SIMPLE objects only (1-3 items maximum)
+- NO text, letters, numbers, signs, newspapers, screens, books with visible text
+- NO complex scenes with multiple elements
+- NO people (distant silhouettes are acceptable if relevant)
+- NO recognizable landmarks, specific buildings, or commercial brands
+- Plain or blurred backgrounds only
+- Natural or studio lighting
+- Format: "A [single simple object], [simple context], [lighting], photorealistic, sharp focus"
 
-Examples:
-- Budget news → "A calculator and documents on a wooden desk, natural daylight, photorealistic, sharp focus"
-- Accident news → "A wet road with tire tracks, overcast sky, photorealistic, sharp focus"
-- Education news → "An open book on a table near a window, morning light, photorealistic, sharp focus"
-- Environment news → "A single green leaf with water droplets, soft natural light, photorealistic, macro photography"
-- Technology news → "A computer keyboard backlit in blue light, minimalist setup, photorealistic, sharp focus"
-- Culture news → "A violin resting on sheet music, warm indoor lighting, photorealistic, shallow depth of field"
+GOOD Examples (simple, no text):
+- Budget news → "A calculator on a wooden desk, natural daylight, photorealistic, sharp focus"
+- Accident news → "A wet road with tire marks, overcast sky, photorealistic, sharp focus"
+- Education news → "Colorful books stacked on a table, warm indoor lighting, photorealistic, sharp focus"
+- Environment news → "A green leaf with water droplets, soft natural light, photorealistic, macro photography"
+- Technology news → "A modern computer keyboard, blue ambient light, minimalist, photorealistic, sharp focus"
+- Culture news → "A wooden violin, warm studio lighting, photorealistic, shallow depth of field"
+- Health news → "A stethoscope on a clean surface, soft clinical lighting, photorealistic, sharp focus"
+- Sports news → "A soccer ball on grass, natural daylight, photorealistic, sharp focus"
+
+BAD Examples (avoid):
+❌ "Newspaper with headline about..." (has text)
+❌ "Person reading documents..." (has people)
+❌ "Complex office scene with multiple desks..." (too complex)
+❌ "Billboard showing statistics..." (has text and complex)
 
 Respond with ONLY the prompt text (no JSON, no markdown, no explanation).""")
             ])
