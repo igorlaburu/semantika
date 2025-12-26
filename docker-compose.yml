@@ -13,6 +13,7 @@ services:
       - .:/app  # Mount for development hot-reload
       - fastembed_cache:/root/.cache/fastembed  # Cache FastEmbed models
       - whisper_cache:/root/.cache/whisper  # Cache Whisper models
+      - images_cache:/app/cache/images  # Persistent image cache
     restart: unless-stopped
     networks:
       - semantika-network
@@ -34,6 +35,7 @@ services:
 volumes:
   fastembed_cache:
   whisper_cache:
+  images_cache:
 
 networks:
   semantika-network:
