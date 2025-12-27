@@ -386,6 +386,24 @@ async def test_enrich_content():
     assert result["category"] == "política"
 ```
 
+## Deploy VPS (EasyPanel)
+
+**IMPORTANTE**: EasyPanel usa `docker-compose.easypanel.yml`, NO `docker-compose.yml`
+
+### Volúmenes persistentes configurados:
+- `images_cache:/app/cache/images` - Imágenes generadas/cacheadas
+- `fastembed_cache:/root/.cache/fastembed` - Modelos embeddings  
+- `whisper_cache:/root/.cache/whisper` - Modelos audio
+
+### SSH debug:
+```bash
+ssh semantika-vps
+sudo docker logs -f ekimen_semantika-semantika-api-1
+sudo docker exec ekimen_semantika-semantika-api-1 ls /app/cache/images/
+```
+
+**Deploy**: Auto desde GitHub push → EasyPanel web restart
+
 ## Comandos Útiles
 
 ### Desarrollo Local (Mac M1)
