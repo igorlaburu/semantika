@@ -584,8 +584,7 @@ async def daily_article_generation():
         
         # Get companies with autogeneration enabled
         result = supabase.client.table("companies")\
-            .select("id, name, autogenerate_enabled, autogenerate_max")\
-            .eq("autogenerate_enabled", True)\
+            .select("id, company_name, settings")\
             .eq("is_active", True)\
             .execute()
         
@@ -599,9 +598,14 @@ async def daily_article_generation():
         
         for company in companies:
             try:
+                # Check if company has autogeneration enabled in settings
+                settings = company.get('settings', {})
+                if not settings.get('autogenerate_enabled', False):
+                    continue
+                
                 # Check if already generated today
                 today = datetime.utcnow().date()
-                existing = await supabase.client.table("press_articles")\
+                existing = supabase.client.table("press_articles")\
                     .select("id, working_json")\
                     .eq("company_id", company['id'])\
                     .eq("estado", "borrador")\
@@ -617,7 +621,7 @@ async def daily_article_generation():
                 if auto_generated_today > 0:
                     logger.info("company_already_generated_today",
                         company_id=company['id'],
-                        company_name=company['name'],
+                        company_name=company['company_name'],
                         count=auto_generated_today
                     )
                     continue
@@ -625,8 +629,8 @@ async def daily_article_generation():
                 # Generate articles for this company
                 generated = await generate_articles_for_company(
                     company_id=company['id'],
-                    company_name=company['name'],
-                    max_articles=company.get('autogenerate_max', 5)
+                    company_name=company['company_name'],
+                    max_articles=settings.get('autogenerate_max', 5)
                 )
                 
                 total_generated += generated
