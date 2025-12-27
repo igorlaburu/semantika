@@ -11,6 +11,10 @@ services:
       - FAL_AI_API_KEY
       - QDRANT_COLLECTION_NAME=semantika_prod
       - LOG_LEVEL=INFO
+    volumes:
+      - fastembed_cache:/root/.cache/fastembed  # Cache FastEmbed models
+      - whisper_cache:/root/.cache/whisper  # Cache Whisper models
+      - images_cache:/app/cache/images  # Persistent image cache
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health', timeout=5)"]
@@ -31,6 +35,14 @@ services:
       - FAL_AI_API_KEY
       - QDRANT_COLLECTION_NAME=semantika_prod
       - LOG_LEVEL=INFO
+    volumes:
+      - fastembed_cache:/root/.cache/fastembed  # Cache FastEmbed models
+      - whisper_cache:/root/.cache/whisper  # Cache Whisper models
     restart: unless-stopped
     depends_on:
       - semantika-api
+
+volumes:
+  fastembed_cache:
+  whisper_cache:
+  images_cache:
