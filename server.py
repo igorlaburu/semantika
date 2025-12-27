@@ -3704,7 +3704,7 @@ async def approve_article(
                 scheduled_datetime = await calculate_optimal_schedule_time(company_id)
             
             update_data = {
-                "estado": "programado",
+                "estado": "borrador",
                 "to_publish_at": scheduled_datetime.isoformat(),
                 "updated_at": datetime.utcnow().isoformat()
             }
