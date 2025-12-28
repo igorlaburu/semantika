@@ -6,6 +6,11 @@ Este documento contiene instrucciones específicas para Claude Code al trabajar 
 
 `semantika` es un pipeline de datos semánticos multi-tenant diseñado para operar como servicio headless. Agrega, procesa y unifica información de múltiples fuentes en PostgreSQL/pgvector para búsquedas semánticas híbridas, alertas y agregación.
 
+### Terminología clave
+
+- **UC (Unidad de Contexto)**: Set de información de uno o varios statements que se obtiene de diversas fuentes primarias o de forma manual del usuario, email, texto añadido o micrófono.
+- **Artículo**: Producto de la generación de nuestro sistema listo para publicar a partir de una o varias UC.
+
 ## Stack Tecnológico
 
 - **Backend**: Python 3.10+, FastAPI, APScheduler

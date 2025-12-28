@@ -944,45 +944,72 @@ async def publish_scheduled_articles():
         logger.info("scheduled_articles_found", count=len(scheduled.data))
         
         published_count = 0
+        failed_count = 0
         
-        # Use the approve endpoint to publish each article
-        for article in scheduled.data:
-            try:
-                # Call the approve endpoint with publish_now=true
-                # This ensures we use the same logic as manual publishing
+        # Call the approve endpoint for each article to use the full publication flow
+        async with aiohttp.ClientSession() as session:
+            for article in scheduled.data:
+                try:
+                    # Call the internal API endpoint to use the complete publication flow
+                    url = f"http://localhost:8000/api/v1/articles/{article['id']}/approve"
+                    
+                    # Get API key for this company (we need to get a valid API key)
+                    # For now, use the company_id as client_id to find the API key
+                    client_result = await supabase.client.table("clients")\
+                        .select("api_key")\
+                        .eq("company_id", article['company_id'])\
+                        .eq("is_active", True)\
+                        .limit(1)\
+                        .execute()
+                    
+                    if not client_result.data:
+                        logger.error("no_api_key_found_for_company",
+                            article_id=article['id'],
+                            company_id=article['company_id']
+                        )
+                        failed_count += 1
+                        continue
+                    
+                    api_key = client_result.data[0]['api_key']
+                    
+                    headers = {
+                        'X-API-Key': api_key,
+                        'Content-Type': 'application/json'
+                    }
+                    
+                    payload = {
+                        'publish_now': True
+                    }
+                    
+                    async with session.post(url, headers=headers, json=payload) as response:
+                        if response.status == 200:
+                            published_count += 1
+                            logger.info("article_auto_published_via_endpoint",
+                                article_id=article['id'],
+                                title=article['titulo'][:50],
+                                company_id=article['company_id']
+                            )
+                        else:
+                            response_text = await response.text()
+                            logger.error("article_publication_endpoint_failed",
+                                article_id=article['id'],
+                                status_code=response.status,
+                                response=response_text[:200]
+                            )
+                            failed_count += 1
                 
-                # Since we're in the scheduler, we need to use internal calls
-                # or direct database updates. For now, let's do direct update
-                # matching what the endpoint does
-                
-                update_result = await supabase.client.table("press_articles")\
-                    .update({
-                        "estado": "publicado",
-                        "fecha_publicacion": now.isoformat(),
-                        "updated_at": now.isoformat()
-                    })\
-                    .eq("id", article['id'])\
-                    .eq("estado", "programado")\
-                    .execute()
-                
-                if update_result.data:
-                    published_count += 1
-                    logger.info("article_auto_published",
+                except Exception as e:
+                    logger.error("article_publication_failed",
                         article_id=article['id'],
-                        title=article['titulo'][:50],
-                        company_id=article['company_id']
+                        error=str(e)
                     )
-                
-            except Exception as e:
-                logger.error("article_publication_failed",
-                    article_id=article['id'],
-                    error=str(e)
-                )
+                    failed_count += 1
         
-        if published_count > 0:
+        if published_count > 0 or failed_count > 0:
             logger.info("scheduled_publication_completed",
                 total_found=len(scheduled.data),
-                published=published_count
+                published=published_count,
+                failed=failed_count
             )
         
     except Exception as e:
