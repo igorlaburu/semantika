@@ -931,7 +931,7 @@ async def publish_scheduled_articles():
         # Get all scheduled articles ready to publish
         now = datetime.utcnow()
         
-        scheduled = await supabase.client.table("press_articles")\
+        scheduled = supabase.client.table("press_articles")\
             .select("id, titulo, company_id")\
             .eq("estado", "programado")\
             .lte("to_publish_at", now.isoformat())\
@@ -955,7 +955,7 @@ async def publish_scheduled_articles():
                     
                     # Get API key for this company (we need to get a valid API key)
                     # For now, use the company_id as client_id to find the API key
-                    client_result = await supabase.client.table("clients")\
+                    client_result = supabase.client.table("clients")\
                         .select("api_key")\
                         .eq("company_id", article['company_id'])\
                         .eq("is_active", True)\
