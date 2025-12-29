@@ -12,6 +12,7 @@ Example routing:
 import imaplib
 import email
 from email.header import decode_header
+from email.message import Message
 from typing import List, Dict, Optional, Tuple, Any
 import asyncio
 import tempfile
@@ -529,7 +530,7 @@ class MultiCompanyEmailMonitor:
         message_id: str,
         source: Dict,
         source_metadata: Dict,
-        raw_message: email.Message = None
+        raw_message: Message = None
     ):
         """
         Process combined email content (body + attachments) as single context unit.
