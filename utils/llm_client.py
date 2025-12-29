@@ -808,6 +808,17 @@ Response format:
             )
 
             result = await redact_chain.ainvoke({"text": text[:8000]})
+            
+            # Decode HTML entities in text fields
+            import html
+            if isinstance(result, dict):
+                for key in ["article", "title", "summary"]:
+                    if key in result and isinstance(result[key], str):
+                        result[key] = html.unescape(result[key])
+                
+                # Also decode HTML entities in tags if they're strings
+                if "tags" in result and isinstance(result["tags"], list):
+                    result["tags"] = [html.unescape(tag) if isinstance(tag, str) else tag for tag in result["tags"]]
 
             logger.debug("redact_news_completed", article_length=len(result.get("article", "")))
             return result
