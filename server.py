@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 from typing import Dict, Optional, Any, List
 import subprocess
 import io
+import re
+from pathlib import Path
 
 from fastapi import FastAPI, Request, Header, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -2914,6 +2916,97 @@ def generate_placeholder_image() -> bytes:
   </text>
 </svg>"""
     return svg.encode('utf-8')
+
+
+@app.get("/api/v1/context-units/{context_unit_id}/email-images")
+async def get_context_unit_email_images(
+    context_unit_id: str,
+    company_id: str = Depends(get_company_id_from_auth)
+):
+    """Get cached email images for context unit."""
+    try:
+        # Get context unit with cached images metadata
+        pool_company_id = "99999999-9999-9999-9999-999999999999"
+        
+        result = supabase_client.client.table("press_context_units").select(
+            "id, source_metadata, source_type"
+        ).eq("id", context_unit_id).in_("company_id", [company_id, pool_company_id]).maybe_single().execute()
+        
+        if not result.data or result.data.get("source_type") != "email":
+            return {"images": []}
+        
+        cached_images = result.data.get("source_metadata", {}).get("connector_specific", {}).get("cached_images", [])
+        
+        # Filter existing images and add access URLs
+        available_images = []
+        for img in cached_images:
+            cache_path = Path(img["cache_path"])
+            if cache_path.exists():
+                available_images.append({
+                    "url": f"/api/v1/context-units/{context_unit_id}/email-image/{cache_path.name}",
+                    "source": img["source"],
+                    "filename": img.get("original_filename"),
+                    "size_bytes": img.get("size_bytes")
+                })
+        
+        return {"images": available_images}
+        
+    except Exception as e:
+        logger.error("get_email_images_error", error=str(e))
+        return {"images": []}
+
+
+@app.get("/api/v1/context-units/{context_unit_id}/email-image/{image_filename}")
+async def serve_cached_email_image(
+    context_unit_id: str,
+    image_filename: str,
+    company_id: str = Depends(get_company_id_from_auth)
+):
+    """Serve cached email image."""
+    try:
+        # Security: validate filename format
+        if not re.match(r'^[a-f0-9\-]+(\_img\_\d+)\.(jpg|png|webp|gif)$', image_filename):
+            raise HTTPException(status_code=400, detail="Invalid image filename")
+        
+        # Verify context unit belongs to user
+        pool_company_id = "99999999-9999-9999-9999-999999999999"
+        result = supabase_client.client.table("press_context_units").select(
+            "id"
+        ).eq("id", context_unit_id).in_("company_id", [company_id, pool_company_id]).maybe_single().execute()
+        
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Context unit not found")
+        
+        # Serve image
+        image_path = Path(f"/app/cache/email_images/{image_filename}")
+        if not image_path.exists():
+            raise HTTPException(status_code=404, detail="Image not found")
+        
+        # Determine content type
+        ext = image_path.suffix.lower()
+        content_type_map = {
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg", 
+            ".png": "image/png",
+            ".webp": "image/webp",
+            ".gif": "image/gif"
+        }
+        content_type = content_type_map.get(ext, "image/jpeg")
+        
+        return Response(
+            content=image_path.read_bytes(),
+            media_type=content_type,
+            headers={
+                "Cache-Control": "public, max-age=2592000",  # 30 days
+                "X-Image-Source": "email_cache"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("serve_email_image_error", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to serve image")
 
 
 # ============================================

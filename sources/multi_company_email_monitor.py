@@ -17,12 +17,15 @@ import asyncio
 import tempfile
 import os
 import re
+from datetime import datetime
+from pathlib import Path
 
 from utils.logger import get_logger
 from utils.supabase_client import get_supabase_client
 from utils.unified_context_verifier import verify_novelty
 from utils.unified_context_ingester import ingest_context_unit
 from utils.source_metadata_schema import normalize_source_metadata
+from utils.email_image_processor import EmailImageProcessor
 from .audio_transcriber import AudioTranscriber
 
 logger = get_logger("multi_company_email_monitor")
@@ -64,6 +67,9 @@ class MultiCompanyEmailMonitor:
 
         # Initialize audio transcriber
         self.transcriber = AudioTranscriber(model_name="base")
+        
+        # Initialize image processor
+        self.image_processor = EmailImageProcessor()
 
         logger.info(
             "multi_company_email_monitor_initialized",
@@ -522,7 +528,8 @@ class MultiCompanyEmailMonitor:
         organization: Dict,
         message_id: str,
         source: Dict,
-        source_metadata: Dict
+        source_metadata: Dict,
+        raw_message: email.Message = None
     ):
         """
         Process combined email content (body + attachments) as single context unit.
@@ -584,6 +591,28 @@ class MultiCompanyEmailMonitor:
                 )
                 return
 
+            # Phase 1.5: Process email images BEFORE ingesting context unit
+            cached_images = []
+            if raw_message:
+                try:
+                    # Generate temporary context_unit_id for caching
+                    temp_context_id = f"temp_{hash(subject + combined_text[:100])}"
+                    
+                    cached_images = await self.image_processor.process_email_images(
+                        raw_message, 
+                        temp_context_id,
+                        source_metadata
+                    )
+                    
+                    logger.info("email_images_cached",
+                        subject=subject[:50],
+                        images_count=len(cached_images)
+                    )
+                    
+                except Exception as e:
+                    logger.error("email_image_processing_failed", error=str(e))
+                    # Continue without images - not critical
+
             # Phase 2: Ingest context unit with unified ingester
             
             # Normalize metadata to standard schema
@@ -613,7 +642,8 @@ class MultiCompanyEmailMonitor:
                     "subject": subject,
                     "organization_id": str(organization["id"]),
                     "combined_content": True,
-                    "has_attachments": len(content_parts) > 1
+                    "has_attachments": len(content_parts) > 1,
+                    "cached_images": cached_images
                 }
             )
             
@@ -645,6 +675,11 @@ class MultiCompanyEmailMonitor:
                     generated_fields=ingest_result.get("generated_fields", []),
                     raw_text_length=len(combined_text)
                 )
+                
+                # Rename cached images with real context_unit_id
+                if cached_images:
+                    real_context_id = ingest_result["context_unit_id"]
+                    await self._rename_cached_images(cached_images, real_context_id)
             elif ingest_result.get("duplicate"):
                 logger.info("email_duplicate_semantic",
                     subject=subject[:50],
@@ -715,6 +750,35 @@ class MultiCompanyEmailMonitor:
                 )
             except Exception as log_error:
                 logger.error("execution_log_error", error=str(log_error))
+
+    async def _rename_cached_images(
+        self, 
+        cached_images: List[Dict], 
+        real_context_id: str
+    ):
+        """Rename cached images with real context unit ID."""
+        try:
+            for i, img in enumerate(cached_images):
+                old_path = Path(img["cache_path"])
+                if old_path.exists():
+                    # New filename with real ID
+                    ext = old_path.suffix
+                    new_filename = f"{real_context_id}_img_{i+1}{ext}"
+                    new_path = old_path.parent / new_filename
+                    
+                    # Rename file
+                    old_path.rename(new_path)
+                    
+                    # Update metadata
+                    img["cache_path"] = str(new_path)
+                    
+            logger.info("cached_images_renamed", 
+                context_unit_id=real_context_id,
+                count=len(cached_images)
+            )
+            
+        except Exception as e:
+            logger.error("image_rename_error", error=str(e))
 
     async def _process_email(self, mail: imaplib.IMAP4_SSL, email_id: bytes):
         """
@@ -856,8 +920,11 @@ class MultiCompanyEmailMonitor:
                         "source_name": source["source_name"],
                         "workflow_code": source.get("workflow_code", "default"),
                         "attachments_count": len(text_attachments) + len(audio_transcriptions),
-                        "message_id": message_id
-                    }
+                        "message_id": message_id,
+                        "from": from_header,
+                        "date": message.get("Date")
+                    },
+                    raw_message=message
                 )
 
             # Mark as read
