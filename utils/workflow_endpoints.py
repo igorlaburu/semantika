@@ -185,10 +185,26 @@ async def execute_redact_news(
         style_guide = params.get("style_guide")
         language = params.get("language", "es")
         
+        # Fetch company settings for article_general_settings
+        instructions = None
+        try:
+            supabase_client = get_supabase_client()
+            settings_result = supabase_client.client.table("companies")\
+                .select("article_general_settings")\
+                .eq("id", client["company_id"])\
+                .maybe_single()\
+                .execute()
+            
+            if settings_result.data and settings_result.data.get("article_general_settings"):
+                instructions = settings_result.data["article_general_settings"]
+        except Exception as e:
+            logger.warn("company_settings_fetch_failed", error=str(e))
+        
         result = await pipeline.redact_news(
             text=text,
             style_guide=style_guide,
-            language=language
+            language=language,
+            instructions=instructions
         )
         return result
         
@@ -471,11 +487,32 @@ async def execute_redact_news_rich(
             source_text_preview=source_text[:500]
         )
         
+        # Fetch company settings for article_general_settings
+        combined_instructions = ""
+        try:
+            settings_result = supabase_client.client.table("companies")\
+                .select("article_general_settings")\
+                .eq("id", client["company_id"])\
+                .maybe_single()\
+                .execute()
+            
+            if settings_result.data and settings_result.data.get("article_general_settings"):
+                combined_instructions = settings_result.data["article_general_settings"]
+        except Exception as e:
+            logger.warn("company_settings_fetch_failed", error=str(e))
+        
+        # Combine company settings with specific instructions from request
+        if instructions:
+            if combined_instructions:
+                combined_instructions += f"\n\nInstrucciones específicas:\n{instructions}"
+            else:
+                combined_instructions = instructions
+        
         openrouter = get_llm_client()
         result = await openrouter.redact_news_rich(
             source_text=source_text,
             title_suggestion=title or "",
-            instructions=instructions or "",
+            instructions=combined_instructions,
             style_guide=style_guide,
             language=language,
             organization_id=organization_id,

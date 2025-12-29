@@ -4033,6 +4033,7 @@ class CompanySettingsUpdate(BaseModel):
     autogenerate_max: Optional[int] = Field(None, ge=1, le=20)
     autogenerate_min_quality: Optional[float] = Field(None, ge=1.0, le=5.0)
     email_alias: Optional[str] = None
+    article_general_settings: Optional[str] = Field(None, max_length=2000)
 
 
 @app.get("/api/v1/companies/{company_id}/settings")
@@ -4116,7 +4117,8 @@ async def update_company_settings(
             "autogenerate_enabled": true,         // Enable daily article generation
             "autogenerate_max": 5,                // Max articles per day (1-20)
             "autogenerate_min_quality": 3.0,     // Min quality score (1.0-5.0)
-            "email_alias": "p.company@ekimen.ai" // Email alias for routing
+            "email_alias": "p.company@ekimen.ai", // Email alias for routing
+            "article_general_settings": "Escribir en tono formal y profesional..." // General instructions for article writing (max 2000 chars)
         }
     """
     try:

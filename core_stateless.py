@@ -90,7 +90,8 @@ class StatelessPipeline:
         self,
         text: str,
         style_guide: Optional[str] = None,
-        language: str = "es"
+        language: str = "es",
+        instructions: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Generate news article from text/facts with specific style.
@@ -99,6 +100,7 @@ class StatelessPipeline:
             text: Source text or atomic facts
             style_guide: Markdown style guide (optional)
             language: Target language (default: es)
+            instructions: General writing instructions (optional)
 
         Returns:
             Dict with article, title, summary, tags
@@ -107,6 +109,7 @@ class StatelessPipeline:
             "redact_news_start",
             text_length=len(text),
             has_style_guide=style_guide is not None,
+            has_instructions=instructions is not None,
             language=language
         )
 
@@ -115,6 +118,7 @@ class StatelessPipeline:
                 text=text,
                 style_guide=style_guide,
                 language=language,
+                instructions=instructions,
                 organization_id=self.organization_id,
                 client_id=self.client_id
             )
