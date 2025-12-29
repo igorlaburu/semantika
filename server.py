@@ -3754,15 +3754,21 @@ async def approve_article(
         
         article = article_result.data
         
-        # Check if article is in draft state
-        if article['estado'] != 'borrador':
+        # Determine publication strategy first
+        publish_now = request.get('publish_now', False)
+        
+        # Check article state - allow programado articles to be published immediately
+        if article['estado'] == 'borrador':
+            # Draft articles can be approved/scheduled
+            pass
+        elif article['estado'] == 'programado' and publish_now:
+            # Scheduled articles can be published immediately (used by scheduler)
+            pass
+        else:
             raise HTTPException(
                 status_code=400, 
-                detail=f"Article is not in draft state. Current state: {article['estado']}"
+                detail=f"Article cannot be processed. Current state: {article['estado']}, publish_now: {publish_now}"
             )
-        
-        # Determine publication strategy
-        publish_now = request.get('publish_now', False)
         schedule_time = request.get('schedule_time')
         
         if publish_now:
