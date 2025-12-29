@@ -641,7 +641,7 @@ async def daily_article_generation():
             except Exception as e:
                 logger.error("company_generation_failed",
                     company_id=company['id'],
-                    company_name=company['name'],
+                    company_name=company['company_name'],
                     error=str(e)
                 )
         
