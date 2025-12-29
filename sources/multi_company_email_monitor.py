@@ -643,8 +643,7 @@ class MultiCompanyEmailMonitor:
                     "subject": subject,
                     "organization_id": str(organization["id"]),
                     "combined_content": True,
-                    "has_attachments": len(content_parts) > 1,
-                    "cached_images": cached_images
+                    "has_attachments": len(content_parts) > 1
                 }
             )
             
@@ -677,10 +676,35 @@ class MultiCompanyEmailMonitor:
                     raw_text_length=len(combined_text)
                 )
                 
-                # Rename cached images with real context_unit_id
+                # Handle cached images with real context_unit_id
                 if cached_images:
                     real_context_id = ingest_result["context_unit_id"]
                     await self._rename_cached_images(cached_images, real_context_id)
+                    
+                    # Update metadata with featured_image in standard format
+                    first_image = cached_images[0]
+                    cache_filename = f"{real_context_id}.jpeg"
+                    
+                    featured_image = {
+                        "url": f"/app/cache/images/{cache_filename}",
+                        "source": "email_attachment", 
+                        "content_type": first_image.get("content_type"),
+                        "size_bytes": first_image.get("size_bytes")
+                    }
+                    
+                    # Update source_metadata in database
+                    supabase = get_supabase_client()
+                    updated_metadata = metadata.copy()
+                    updated_metadata["featured_image"] = featured_image
+                    
+                    supabase.client.table("press_context_units").update({
+                        "source_metadata": updated_metadata
+                    }).eq("id", real_context_id).execute()
+                    
+                    logger.info("email_image_metadata_updated",
+                        context_unit_id=real_context_id,
+                        image_path=cache_filename
+                    )
             elif ingest_result.get("duplicate"):
                 logger.info("email_duplicate_semantic",
                     subject=subject[:50],
