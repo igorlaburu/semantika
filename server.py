@@ -2799,20 +2799,52 @@ async def get_context_unit_image(
         
         image_url = featured_image["url"]
         
-        # Check cache first
+        # Check cache first - try different extensions
         cache_dir = Path("/app/cache/images")
         cache_dir.mkdir(parents=True, exist_ok=True)
-        cache_file = cache_dir / f"{context_unit_id}.jpg"
         
-        if cache_file.exists():
-            logger.debug("image_cache_hit", context_unit_id=context_unit_id)
+        # For email attachments, try multiple extensions
+        for ext in [".jpg", ".jpeg", ".png", ".webp", ".gif"]:
+            cache_file = cache_dir / f"{context_unit_id}{ext}"
+            if cache_file.exists():
+                # Determine media type from extension
+                media_type_map = {
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".png": "image/png",
+                    ".webp": "image/webp", 
+                    ".gif": "image/gif"
+                }
+                media_type = media_type_map.get(ext, "image/jpeg")
+                
+                logger.debug("image_cache_hit", 
+                    context_unit_id=context_unit_id,
+                    cache_file=str(cache_file),
+                    extension=ext
+                )
+                return Response(
+                    content=cache_file.read_bytes(),
+                    media_type=media_type,
+                    headers={
+                        "Cache-Control": "public, max-age=86400",
+                        "X-Image-Source": "cached",
+                        "X-Image-Cache": "hit"
+                    }
+                )
+        
+        # Handle file:// URLs (email attachments) - should not reach here if cache works
+        if image_url.startswith("file://"):
+            logger.warn("file_url_without_cache", 
+                context_unit_id=context_unit_id, 
+                file_url=image_url
+            )
+            placeholder = generate_placeholder_image()
             return Response(
-                content=cache_file.read_bytes(),
-                media_type="image/jpeg",
+                content=placeholder,
+                media_type="image/svg+xml",
                 headers={
-                    "Cache-Control": "public, max-age=86400",
-                    "X-Image-Source": "cached",
-                    "X-Image-Cache": "hit"
+                    "Cache-Control": "public, max-age=3600",
+                    "X-Image-Source": "placeholder"
                 }
             )
         
