@@ -29,8 +29,8 @@ class EmailImageProcessor:
     # Max images to process per email
     MAX_IMAGES = 3
     
-    def __init__(self, cache_dir: str = "/app/cache/email_images"):
-        """Initialize with cache directory."""
+    def __init__(self, cache_dir: str = "/app/cache/images"):
+        """Initialize with unified cache directory (same for all image sources)."""
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
     

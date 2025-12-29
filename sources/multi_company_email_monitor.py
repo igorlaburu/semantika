@@ -757,25 +757,35 @@ class MultiCompanyEmailMonitor:
         cached_images: List[Dict], 
         real_context_id: str
     ):
-        """Rename cached images with real context unit ID."""
+        """Rename cached images with real context unit ID to unified cache format."""
         try:
+            # Unified cache directory path
+            unified_cache_dir = Path("/app/cache/images")
+            
             for i, img in enumerate(cached_images):
                 old_path = Path(img["cache_path"])
                 if old_path.exists():
-                    # New filename with real ID
+                    # New filename: just UUID with extension (unified format)
                     ext = old_path.suffix
-                    new_filename = f"{real_context_id}_img_{i+1}{ext}"
-                    new_path = old_path.parent / new_filename
+                    if i == 0:
+                        # First image gets just the UUID
+                        new_filename = f"{real_context_id}{ext}"
+                    else:
+                        # Additional images get _2, _3, etc.
+                        new_filename = f"{real_context_id}_{i+1}{ext}"
                     
-                    # Rename file
+                    new_path = unified_cache_dir / new_filename
+                    
+                    # Move file to unified cache directory
                     old_path.rename(new_path)
                     
-                    # Update metadata
+                    # Update metadata with unified path
                     img["cache_path"] = str(new_path)
                     
-            logger.info("cached_images_renamed", 
+            logger.info("cached_images_renamed_to_unified", 
                 context_unit_id=real_context_id,
-                count=len(cached_images)
+                count=len(cached_images),
+                cache_dir="/app/cache/images"
             )
             
         except Exception as e:
