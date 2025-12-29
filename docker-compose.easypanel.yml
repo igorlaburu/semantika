@@ -38,6 +38,7 @@ services:
     volumes:
       - fastembed_cache:/root/.cache/fastembed  # Cache FastEmbed models
       - whisper_cache:/root/.cache/whisper  # Cache Whisper models
+      - images_cache:/app/cache/images  # Persistent image cache (shared with API)
     restart: unless-stopped
     depends_on:
       - semantika-api

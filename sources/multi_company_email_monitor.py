@@ -690,7 +690,7 @@ class MultiCompanyEmailMonitor:
                     cache_filename = cache_path.name
                     
                     featured_image = {
-                        "url": f"/app/cache/images/{cache_filename}",
+                        "url": f"file:///app/cache/images/{cache_filename}",  # Dummy URL for consistency
                         "source": "email_attachment", 
                         "content_type": best_image.get("content_type"),
                         "size_bytes": best_image.get("size_bytes")
