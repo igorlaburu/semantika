@@ -592,16 +592,17 @@ class MultiCompanyEmailMonitor:
                 )
                 return
 
-            # Phase 1.5: Process email images BEFORE ingesting context unit
+            # Phase 1.5: Generate final UUID BEFORE processing images (no renaming needed)
+            import uuid
+            final_context_id = str(uuid.uuid4())
+            
+            # Process email images with final UUID directly
             cached_images = []
             if raw_message:
                 try:
-                    # Generate temporary context_unit_id for caching
-                    temp_context_id = f"temp_{hash(subject + combined_text[:100])}"
-                    
                     cached_images = await self.image_processor.process_email_images(
                         raw_message, 
-                        temp_context_id,
+                        final_context_id,
                         source_metadata
                     )
                     
@@ -662,6 +663,9 @@ class MultiCompanyEmailMonitor:
 
                 # Optional metadata
                 source_metadata=metadata,
+                
+                # Pre-generated UUID (for images already cached with this UUID)
+                context_unit_id=final_context_id,
 
                 # Control flags
                 generate_embedding_flag=True,
@@ -676,30 +680,14 @@ class MultiCompanyEmailMonitor:
                     raw_text_length=len(combined_text)
                 )
                 
-                # Handle cached images with real context_unit_id
+                # Handle cached images - they are already saved with correct UUID, just update metadata
                 if cached_images:
-                    real_context_id = ingest_result["context_unit_id"]
+                    # Only one image (the best) should be in the list
+                    best_image = cached_images[0]
                     
-                    # Select best image (largest by file size)
-                    best_image = max(cached_images, key=lambda img: img.get("size_bytes", 0))
-                    
-                    # Determine file extension from content type or original filename
-                    content_type = best_image.get("content_type", "")
-                    original_filename = best_image.get("original_filename", "")
-                    
-                    if content_type == "image/png" or original_filename.lower().endswith(".png"):
-                        ext = ".png"
-                    elif content_type == "image/webp" or original_filename.lower().endswith(".webp"):
-                        ext = ".webp"
-                    elif content_type == "image/gif" or original_filename.lower().endswith(".gif"):
-                        ext = ".gif"
-                    else:
-                        ext = ".jpg"  # Default to JPEG
-                    
-                    cache_filename = f"{real_context_id}{ext}"
-                    
-                    # Rename only the best image, delete others to save space
-                    await self._rename_best_image(cached_images, best_image, real_context_id, ext)
+                    # Image is already saved with final_context_id, extract filename from cache_path
+                    cache_path = Path(best_image["cache_path"])
+                    cache_filename = cache_path.name
                     
                     featured_image = {
                         "url": f"/app/cache/images/{cache_filename}",
@@ -708,13 +696,6 @@ class MultiCompanyEmailMonitor:
                         "size_bytes": best_image.get("size_bytes")
                     }
                     
-                    logger.info("email_image_selected",
-                        context_unit_id=real_context_id,
-                        total_images=len(cached_images),
-                        selected_size=best_image.get("size_bytes"),
-                        selected_type=best_image.get("content_type")
-                    )
-                    
                     # Update source_metadata in database
                     supabase = get_supabase_client()
                     updated_metadata = metadata.copy()
@@ -722,11 +703,12 @@ class MultiCompanyEmailMonitor:
                     
                     supabase.client.table("press_context_units").update({
                         "source_metadata": updated_metadata
-                    }).eq("id", real_context_id).execute()
+                    }).eq("id", final_context_id).execute()
                     
                     logger.info("email_image_metadata_updated",
-                        context_unit_id=real_context_id,
-                        image_path=cache_filename
+                        context_unit_id=final_context_id,
+                        image_filename=cache_filename,
+                        size_bytes=best_image.get("size_bytes")
                     )
             elif ingest_result.get("duplicate"):
                 logger.info("email_duplicate_semantic",
@@ -744,7 +726,7 @@ class MultiCompanyEmailMonitor:
                 "combined_email_content_processed_with_workflow",
                 subject=subject,
                 company_code=company["company_code"],
-                context_unit_id=ingest_result.get("context_unit_id") if ingest_result["success"] else None
+                context_unit_id=final_context_id if ingest_result["success"] else None
             )
 
             # Log execution
@@ -838,48 +820,6 @@ class MultiCompanyEmailMonitor:
         except Exception as e:
             logger.error("image_rename_error", error=str(e))
 
-    async def _rename_best_image(
-        self,
-        cached_images: List[Dict], 
-        best_image: Dict,
-        real_context_id: str,
-        ext: str
-    ):
-        """Rename only the best image and clean up others to save space."""
-        try:
-            # Unified cache directory path
-            unified_cache_dir = Path("/app/cache/images")
-            
-            # Find and rename the best image
-            best_image_renamed = False
-            for img in cached_images:
-                old_path = Path(img["cache_path"])
-                if old_path.exists():
-                    if img == best_image and not best_image_renamed:
-                        # Rename best image to UUID format
-                        new_filename = f"{real_context_id}{ext}"
-                        new_path = unified_cache_dir / new_filename
-                        old_path.rename(new_path)
-                        img["cache_path"] = str(new_path)
-                        best_image_renamed = True
-                        logger.debug("best_image_renamed", 
-                            old_path=str(old_path),
-                            new_path=str(new_path)
-                        )
-                    else:
-                        # Delete non-best images to save space
-                        old_path.unlink()
-                        logger.debug("non_best_image_deleted", path=str(old_path))
-                        
-            logger.info("best_image_selected_and_cleaned",
-                context_unit_id=real_context_id,
-                total_images=len(cached_images),
-                selected_size=best_image.get("size_bytes"),
-                cache_dir="/app/cache/images"
-            )
-            
-        except Exception as e:
-            logger.error("best_image_selection_error", error=str(e))
 
     async def _process_email(self, mail: imaplib.IMAP4_SSL, email_id: bytes):
         """

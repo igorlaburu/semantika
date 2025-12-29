@@ -40,13 +40,11 @@ class EmailImageProcessor:
         context_unit_id: str,
         source_metadata: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
-        """Extract and cache images from email.
+        """Extract and cache the best image from email.
         
         Returns:
-            List of cached image metadata up to MAX_IMAGES
+            List with single best image metadata, or empty list
         """
-        cached_images = []
-        
         # 1. Extract inline images (data: URIs in HTML)
         inline_images = self._extract_inline_images(message)
         
@@ -56,38 +54,47 @@ class EmailImageProcessor:
         # 3. Combine and prioritize (attachments first, then inline)
         all_images = attachment_images + inline_images
         
-        # 4. Process and cache up to MAX_IMAGES
-        for i, image_data in enumerate(all_images[:self.MAX_IMAGES]):
-            try:
-                cached_path = await self._cache_image(
-                    image_data, 
-                    context_unit_id, 
-                    f"img_{i+1}"
+        if not all_images:
+            return []
+        
+        # 4. Select best image (largest by file size)
+        best_image = max(all_images, key=lambda img: img.get("size_bytes", 0))
+        
+        # 5. Cache only the best image with final UUID
+        try:
+            cached_path = await self._cache_image(
+                best_image, 
+                context_unit_id, 
+                ""  # No suffix needed
+            )
+            
+            if cached_path:
+                cached_images = [{
+                    "cache_path": str(cached_path),
+                    "source": best_image["source"],
+                    "original_filename": best_image.get("filename"),
+                    "content_type": best_image.get("content_type"),
+                    "size_bytes": best_image.get("size_bytes")
+                }]
+                
+                logger.info("email_best_image_cached",
+                    context_unit_id=context_unit_id,
+                    total_found=len(all_images),
+                    selected_size=best_image.get("size_bytes"),
+                    cache_path=str(cached_path)
                 )
                 
-                if cached_path:
-                    cached_images.append({
-                        "cache_path": str(cached_path),
-                        "source": image_data["source"],
-                        "original_filename": image_data.get("filename"),
-                        "content_type": image_data.get("content_type"),
-                        "size_bytes": image_data.get("size_bytes")
-                    })
-                    
-            except Exception as e:
-                logger.error("image_cache_error", 
-                    context_unit_id=context_unit_id,
-                    image_index=i,
-                    error=str(e)
-                )
-        
-        logger.info("email_images_processed",
-            context_unit_id=context_unit_id,
-            total_found=len(all_images),
-            cached_count=len(cached_images)
-        )
-        
-        return cached_images
+                return cached_images
+            else:
+                logger.error("best_image_cache_failed", context_unit_id=context_unit_id)
+                return []
+                
+        except Exception as e:
+            logger.error("best_image_cache_error", 
+                context_unit_id=context_unit_id,
+                error=str(e)
+            )
+            return []
     
     def _extract_inline_images(self, message: Message) -> List[Dict[str, Any]]:
         """Extract data: URIs from HTML email body."""
@@ -216,8 +223,8 @@ class EmailImageProcessor:
             else:
                 ext = ".jpg"
             
-            # Create cache file path
-            cache_filename = f"{context_unit_id}_{suffix}{ext}"
+            # Create cache file path directly with UUID (no suffix needed)
+            cache_filename = f"{context_unit_id}{ext}"
             cache_path = self.cache_dir / cache_filename
             
             # Write to disk

@@ -141,6 +141,9 @@ async def ingest_context_unit(
     source_metadata: Optional[Dict[str, Any]] = None,
     url_content_unit_id: Optional[str] = None,
 
+    # Optional UUID (for pre-generated UUIDs, e.g., email images)
+    context_unit_id: Optional[str] = None,
+
     # Control flags
     force_save: bool = False,
     check_duplicates: bool = True,
@@ -402,7 +405,9 @@ async def ingest_context_unit(
         try:
             supabase = get_supabase_client()
 
-            context_unit_id = str(uuid.uuid4())
+            # Use pre-generated UUID if provided, otherwise generate new one
+            if not context_unit_id:
+                context_unit_id = str(uuid.uuid4())
             now = datetime.utcnow().isoformat()
 
             context_unit_data = {
@@ -609,7 +614,9 @@ async def ingest_web_context_unit(
         # Save to database
         supabase = get_supabase_client()
         
-        context_unit_id = str(uuid.uuid4())
+        # Use pre-generated UUID if provided, otherwise generate new one
+        if not context_unit_id:
+            context_unit_id = str(uuid.uuid4())
         
         context_unit_data = {
             "id": context_unit_id,
