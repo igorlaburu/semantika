@@ -4669,10 +4669,17 @@ async def create_publication_target(
         from utils.credential_manager import CredentialManager
         from publishers.publisher_factory import PublisherFactory
         
+        logger.info("create_publication_target_request",
+            company_id=company_id,
+            received_fields=list(target_data.keys()),
+            data_keys=target_data.keys()
+        )
+        
         # Validate required fields
         required_fields = ['platform_type', 'name', 'base_url', 'credentials']
         for field in required_fields:
             if field not in target_data:
+                logger.error("missing_required_field", field=field, received_data=target_data)
                 raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
         
         platform_type = target_data['platform_type']
