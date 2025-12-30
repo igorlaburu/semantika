@@ -4741,9 +4741,10 @@ async def create_publication_target(
     except Exception as e:
         logger.error("create_publication_target_error",
             company_id=company_id,
+            target_data=str(target_data),
             error=str(e)
         )
-        raise HTTPException(status_code=500, detail="Failed to create publication target")
+        raise HTTPException(status_code=500, detail=f"Failed to create publication target: {str(e)}")
 
 
 @app.get("/api/v1/publication-targets/{target_id}")
