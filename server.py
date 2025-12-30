@@ -3804,8 +3804,8 @@ async def publish_to_platforms(
         # Get image URL if available
         image_url = None
         if article.get('imagen_uuid'):
-            # Build image URL for the article's featured image
-            image_url = f"http://semantika-api:8000/api/v1/images/{article['imagen_uuid']}"
+            # Build public image URL for the article's featured image
+            image_url = f"https://press.ekimen.ai/api/images/{article['imagen_uuid']}"
         
         # Publish to each target
         for target in targets:
