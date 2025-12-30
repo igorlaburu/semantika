@@ -25,16 +25,21 @@ class WordPressPublisher(BasePublisher):
         return f"{base}/wp-json/wp/v2/{endpoint}"
     
     def _get_auth_header(self) -> str:
-        """Get basic auth header for WordPress."""
+        """Get authentication header for WordPress (API Key or App Password)."""
+        api_key = self.credentials.get('api_key')
         username = self.credentials.get('username')
         app_password = self.credentials.get('app_password')
         
-        if not username or not app_password:
-            raise ValueError("WordPress requires 'username' and 'app_password' in credentials")
-        
-        credentials = f"{username}:{app_password}"
-        encoded_credentials = base64.b64encode(credentials.encode()).decode()
-        return f"Basic {encoded_credentials}"
+        if api_key:
+            # Use API Key authentication
+            return f"Bearer {api_key}"
+        elif username and app_password:
+            # Use Application Password authentication
+            credentials = f"{username}:{app_password}"
+            encoded_credentials = base64.b64encode(credentials.encode()).decode()
+            return f"Basic {encoded_credentials}"
+        else:
+            raise ValueError("WordPress requires either 'api_key' OR ('username' + 'app_password') in credentials")
     
     async def test_connection(self) -> Dict[str, Any]:
         """Test WordPress connection and authentication."""
@@ -51,19 +56,22 @@ class WordPressPublisher(BasePublisher):
                 async with session.get(url, headers=headers, timeout=10) as response:
                     if response.status == 200:
                         user_data = await response.json()
+                        auth_method = "API Key" if self.credentials.get('api_key') else "Application Password"
                         return {
                             "success": True,
-                            "message": f"Connected as {user_data.get('name', 'Unknown')}",
+                            "message": f"Connected as {user_data.get('name', 'Unknown')} using {auth_method}",
                             "details": {
                                 "user_id": user_data.get('id'),
                                 "username": user_data.get('username'),
-                                "capabilities": user_data.get('capabilities', {})
+                                "capabilities": user_data.get('capabilities', {}),
+                                "auth_method": auth_method
                             }
                         }
                     elif response.status == 401:
+                        auth_method = "API key" if self.credentials.get('api_key') else "username/app password"
                         return {
                             "success": False,
-                            "message": "Authentication failed. Check username and app password."
+                            "message": f"Authentication failed. Check your WordPress {auth_method}."
                         }
                     elif response.status == 403:
                         return {
