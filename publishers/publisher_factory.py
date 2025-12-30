@@ -17,7 +17,7 @@ class PublisherFactory:
     def create_publisher(
         platform_type: str,
         base_url: str,
-        credentials_encrypted: bytes
+        credentials_encrypted
     ) -> BasePublisher:
         """Create a publisher instance for the given platform.
         
@@ -36,7 +36,16 @@ class PublisherFactory:
         # Decrypt credentials
         try:
             from utils.credential_manager import CredentialManager
-            credentials = CredentialManager.decrypt_credentials(credentials_encrypted)
+            
+            # Handle both bytes and hex string formats
+            if isinstance(credentials_encrypted, str):
+                # From database (hex string)
+                credentials_bytes = bytes.fromhex(credentials_encrypted)
+            else:
+                # Direct bytes (from current session)
+                credentials_bytes = credentials_encrypted
+                
+            credentials = CredentialManager.decrypt_credentials(credentials_bytes)
             
         except Exception as e:
             logger.error("credential_decryption_failed", error=str(e))

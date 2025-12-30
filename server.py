@@ -4732,7 +4732,7 @@ async def create_publication_target(
             "platform_type": platform_type,
             "name": target_data['name'],
             "base_url": target_data['base_url'],
-            "credentials_encrypted": credentials_encrypted,
+            "credentials_encrypted": credentials_encrypted.hex(),  # Convert bytes to hex string
             "is_default": target_data.get('is_default', False),
             "last_tested_at": datetime.utcnow().isoformat(),
             "test_result": test_result
