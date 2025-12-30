@@ -144,6 +144,12 @@ class Settings(BaseSettings):
     api_host: str = Field(default="0.0.0.0", description="API host")
     api_port: int = Field(default=8000, description="API port")
     log_level: str = Field(default="INFO", description="Logging level")
+    
+    # Publication Targets Configuration
+    credentials_encryption_key: str = Field(
+        default="",
+        description="Key for encrypting publication target credentials"
+    )
 
     # File Monitor Configuration
     file_monitor_enabled: bool = Field(
