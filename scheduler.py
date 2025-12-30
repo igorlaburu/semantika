@@ -1059,15 +1059,15 @@ async def main():
         # Schedule periodic garbage collection (every 30 minutes)
         await schedule_garbage_collection(scheduler)
         
-        # Schedule daily article generation at 17:45 UTC (5 articles)
+        # Schedule daily article generation at 17:15 UTC (5 articles)
         scheduler.add_job(
             daily_article_generation,
-            trigger=CronTrigger(hour=17, minute=45),
+            trigger=CronTrigger(hour=17, minute=15),
             id="daily_article_generation",
             replace_existing=True,
             max_instances=1
         )
-        logger.info("daily_article_generation_scheduled", time="17:45 UTC")
+        logger.info("daily_article_generation_scheduled", time="17:15 UTC")
         
         # Schedule publication check every 5 minutes
         scheduler.add_job(
