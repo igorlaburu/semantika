@@ -117,9 +117,11 @@ class WordPressPublisher(BasePublisher):
                 image_data = await img_response.read()
                 content_type = img_response.headers.get('content-type', 'image/jpeg')
             
-            # Extract filename from URL or use default
+            # Extract filename from URL and ensure .jpg extension
             parsed_url = urlparse(image_url)
-            filename = parsed_url.path.split('/')[-1] or 'article-image.jpg'
+            filename = parsed_url.path.split('/')[-1] or 'article-image'
+            if not filename.endswith('.jpg') and not filename.endswith('.jpeg'):
+                filename = f"{filename}.jpg"
             
             # Upload to WordPress
             upload_headers = headers.copy()
