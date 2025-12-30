@@ -4671,8 +4671,7 @@ async def create_publication_target(
         
         logger.info("create_publication_target_request",
             company_id=company_id,
-            received_fields=list(target_data.keys()),
-            data_keys=target_data.keys()
+            received_fields=list(target_data.keys())
         )
         
         # Validate required fields
