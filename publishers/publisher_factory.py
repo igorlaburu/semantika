@@ -35,24 +35,8 @@ class PublisherFactory:
         
         # Decrypt credentials
         try:
-            from utils.supabase_client import get_supabase_client
-            supabase = get_supabase_client()
-            
-            # Use PostgreSQL to decrypt
-            decrypt_query = f"""
-                SELECT pgp_sym_decrypt($1::bytea, '{settings.credentials_encryption_key}') as decrypted
-            """
-            
-            result = supabase.client.rpc('execute_sql', {
-                'query': decrypt_query,
-                'params': [credentials_encrypted.hex()]
-            }).execute()
-            
-            if not result.data:
-                raise ValueError("Failed to decrypt credentials")
-            
-            decrypted_str = result.data[0]['decrypted']
-            credentials = json.loads(decrypted_str)
+            from utils.credential_manager import CredentialManager
+            credentials = CredentialManager.decrypt_credentials(credentials_encrypted)
             
         except Exception as e:
             logger.error("credential_decryption_failed", error=str(e))
