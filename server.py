@@ -3741,14 +3741,14 @@ async def update_article(
         raise HTTPException(status_code=500, detail="Failed to update article")
 
 
-@app.post("/api/v1/articles/{article_id}/approve")
-async def approve_article(
+@app.post("/api/v1/articles/{article_id}/publish")
+async def publish_article(
     article_id: str,
     request: Dict[str, Any],
     company_id: str = Depends(get_company_id_from_auth)
 ) -> Dict:
     """
-    Approve an article for publication.
+    Publish an article.
     
     If publish_now=true, publishes immediately.
     If schedule_time is provided, schedules for that time.
@@ -3791,7 +3791,7 @@ async def approve_article(
         
         # Check article state - allow programado articles to be published immediately
         if article['estado'] == 'borrador':
-            # Draft articles can be approved/scheduled
+            # Draft articles can be published/scheduled
             pass
         elif article['estado'] == 'programado' and publish_now:
             # Scheduled articles can be published immediately (used by scheduler)
@@ -3852,7 +3852,7 @@ async def approve_article(
         if not update_result.data:
             raise HTTPException(status_code=500, detail="Failed to update article")
         
-        logger.info("article_approved",
+        logger.info("article_published",
             article_id=article_id,
             company_id=company_id,
             new_status=new_status,
@@ -3870,11 +3870,11 @@ async def approve_article(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("approve_article_error", 
+        logger.error("publish_article_error", 
             error=str(e), 
             article_id=article_id
         )
-        raise HTTPException(status_code=500, detail="Failed to approve article")
+        raise HTTPException(status_code=500, detail="Failed to publish article")
 
 
 async def calculate_optimal_schedule_time(company_id: str) -> datetime:

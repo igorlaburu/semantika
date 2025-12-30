@@ -934,7 +934,7 @@ async def publish_scheduled_articles():
         scheduled = supabase.client.table("press_articles")\
             .select("id, titulo, company_id")\
             .eq("estado", "programado")\
-            .lte("fecha_publicacion", now.isoformat())\
+            .lte("to_publish_at", now.isoformat())\
             .execute()
         
         if not scheduled.data:
@@ -946,12 +946,12 @@ async def publish_scheduled_articles():
         published_count = 0
         failed_count = 0
         
-        # Call the approve endpoint for each article to use the full publication flow
+        # Call the publish endpoint for each article to use the full publication flow
         async with aiohttp.ClientSession() as session:
             for article in scheduled.data:
                 try:
                     # Call the internal API endpoint to use the complete publication flow
-                    url = f"http://semantika-api:8000/api/v1/articles/{article['id']}/approve"
+                    url = f"http://semantika-api:8000/api/v1/articles/{article['id']}/publish"
                     
                     # Get API key for this company (we need to get a valid API key)
                     # For now, use the company_id as client_id to find the API key
