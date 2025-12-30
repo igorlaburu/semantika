@@ -3757,6 +3757,133 @@ async def update_article(
         raise HTTPException(status_code=500, detail="Failed to update article")
 
 
+async def publish_to_platforms(
+    article: Dict[str, Any],
+    company_id: str,
+    target_ids: list
+) -> Dict[str, Any]:
+    """Publish article to specified platforms or default platforms."""
+    from publishers.publisher_factory import PublisherFactory
+    
+    publication_results = {}
+    supabase = get_supabase_client()
+    
+    try:
+        # Get publication targets
+        if target_ids:
+            # Use specified targets
+            targets_query = supabase.client.table("press_publication_targets")\
+                .select("*")\
+                .eq("company_id", company_id)\
+                .eq("is_active", True)\
+                .in_("id", target_ids)
+        else:
+            # Use default targets for each platform
+            targets_query = supabase.client.table("press_publication_targets")\
+                .select("*")\
+                .eq("company_id", company_id)\
+                .eq("is_active", True)\
+                .eq("is_default", True)
+        
+        targets_result = targets_query.execute()
+        targets = targets_result.data or []
+        
+        if not targets:
+            logger.warn("no_publication_targets_found", 
+                company_id=company_id,
+                specified_targets=target_ids
+            )
+            return {}
+        
+        # Prepare article data for publication
+        title = article.get('titulo', 'Untitled')
+        content = article.get('contenido', '')
+        excerpt = article.get('excerpt', '')
+        tags = article.get('tags', [])
+        
+        # Get image URL if available
+        image_url = None
+        if article.get('imagen_uuid'):
+            # Build image URL for the article's featured image
+            image_url = f"http://semantika-api:8000/api/v1/images/{article['imagen_uuid']}"
+        
+        # Publish to each target
+        for target in targets:
+            target_id = target['id']
+            
+            try:
+                # Create publisher
+                publisher = PublisherFactory.create_publisher(
+                    target['platform_type'],
+                    target['base_url'],
+                    target['credentials_encrypted']
+                )
+                
+                # Publish article
+                result = await publisher.publish_article(
+                    title=title,
+                    content=content,
+                    excerpt=excerpt,
+                    tags=tags,
+                    image_url=image_url,
+                    status="publish"
+                )
+                
+                publication_results[target_id] = {
+                    "success": result.success,
+                    "platform": target['platform_type'],
+                    "target_name": target['name'],
+                    "url": result.url,
+                    "external_id": result.external_id,
+                    "published_at": result.published_at,
+                    "error": result.error,
+                    "metadata": result.metadata
+                }
+                
+                logger.info("article_published_to_platform",
+                    article_id=article['id'],
+                    target_id=target_id,
+                    platform=target['platform_type'],
+                    success=result.success,
+                    url=result.url
+                )
+                
+            except Exception as e:
+                publication_results[target_id] = {
+                    "success": False,
+                    "platform": target['platform_type'],
+                    "target_name": target['name'],
+                    "error": f"Publication error: {str(e)}"
+                }
+                
+                logger.error("platform_publication_failed",
+                    article_id=article['id'],
+                    target_id=target_id,
+                    platform=target['platform_type'],
+                    error=str(e)
+                )
+        
+        # Update article publication status
+        if publication_results:
+            supabase.client.table("press_articles")\
+                .update({
+                    "publication_targets": list(publication_results.keys()),
+                    "publication_status": publication_results
+                })\
+                .eq("id", article['id'])\
+                .execute()
+        
+    except Exception as e:
+        logger.error("publish_to_platforms_error",
+            article_id=article['id'],
+            company_id=company_id,
+            error=str(e)
+        )
+        # Return empty dict on error rather than failing the whole publication
+    
+    return publication_results
+
+
 @app.post("/api/v1/articles/{article_id}/publish")
 async def publish_article(
     article_id: str,
@@ -3764,9 +3891,9 @@ async def publish_article(
     company_id: str = Depends(get_company_id_from_auth)
 ) -> Dict:
     """
-    Publish an article.
+    Publish an article to multiple platforms.
     
-    If publish_now=true, publishes immediately.
+    If publish_now=true, publishes immediately to all specified targets.
     If schedule_time is provided, schedules for that time.
     If neither, backend calculates optimal schedule time.
     
@@ -3774,8 +3901,9 @@ async def publish_article(
     
     **Body**:
         {
-            "publish_now": false,    // optional, default false
-            "schedule_time": null    // optional ISO datetime, null = auto-schedule
+            "publish_now": false,           // optional, default false
+            "schedule_time": null,          // optional ISO datetime, null = auto-schedule
+            "targets": ["uuid1", "uuid2"]   // optional, publication target IDs. If empty, uses default targets
         }
     
     **Returns**:
@@ -3783,7 +3911,11 @@ async def publish_article(
             "success": true,
             "article_id": "xxx",
             "status": "programado",
-            "scheduled_for": "2024-12-27T10:00:00Z"
+            "scheduled_for": "2024-12-27T10:00:00Z",
+            "publication_results": {
+                "uuid1": {"success": true, "url": "https://...", "platform": "wordpress"},
+                "uuid2": {"success": false, "error": "Connection failed"}
+            }
         }
     """
     try:
@@ -3818,6 +3950,15 @@ async def publish_article(
                 detail=f"Article cannot be processed. Current state: {article['estado']}, publish_now: {publish_now}"
             )
         schedule_time = request.get('schedule_time')
+        publication_results = {}
+        
+        # Handle multi-platform publication if immediate
+        if publish_now:
+            publication_results = await publish_to_platforms(
+                article, 
+                company_id, 
+                request.get('targets', [])
+            )
         
         if publish_now:
             # Publish immediately
@@ -3875,13 +4016,19 @@ async def publish_article(
             scheduled_for=scheduled_for
         )
         
-        return {
+        response = {
             "success": True,
             "article_id": article_id,
             "status": new_status,
             "scheduled_for": scheduled_for,
             "message": f"Article {'published' if publish_now else 'scheduled for publication'}"
         }
+        
+        # Add publication results if we published immediately
+        if publish_now and publication_results:
+            response["publication_results"] = publication_results
+            
+        return response
         
     except HTTPException:
         raise
@@ -4471,6 +4618,359 @@ async def update_current_company_settings(
             company_id=auth_company_id
         )
         raise HTTPException(status_code=500, detail="Failed to update current company settings")
+
+
+# ============================================
+# PUBLICATION TARGETS ENDPOINTS
+# ============================================
+
+@app.get("/api/v1/publication-targets")
+async def list_publication_targets(
+    company_id: str = Depends(get_company_id_from_auth)
+) -> Dict[str, Any]:
+    """Get all publication targets for the company.
+    
+    Returns list without encrypted credentials for security.
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        result = supabase.client.table("press_publication_targets")\
+            .select("id, platform_type, name, base_url, is_default, is_active, created_at, updated_at, last_tested_at, test_result")\
+            .eq("company_id", company_id)\
+            .eq("is_active", True)\
+            .order("created_at", desc=True)\
+            .execute()
+        
+        logger.info("publication_targets_listed",
+            company_id=company_id,
+            count=len(result.data) if result.data else 0
+        )
+        
+        return {
+            "targets": result.data or []
+        }
+        
+    except Exception as e:
+        logger.error("list_publication_targets_error",
+            company_id=company_id,
+            error=str(e)
+        )
+        raise HTTPException(status_code=500, detail="Failed to fetch publication targets")
+
+
+@app.post("/api/v1/publication-targets")
+async def create_publication_target(
+    target_data: Dict[str, Any],
+    company_id: str = Depends(get_company_id_from_auth)
+) -> Dict[str, Any]:
+    """Create a new publication target with encrypted credentials."""
+    try:
+        from utils.credential_manager import CredentialManager
+        from publishers.publisher_factory import PublisherFactory
+        
+        # Validate required fields
+        required_fields = ['platform_type', 'name', 'base_url', 'credentials']
+        for field in required_fields:
+            if field not in target_data:
+                raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
+        
+        platform_type = target_data['platform_type']
+        if platform_type not in PublisherFactory.get_supported_platforms():
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Unsupported platform: {platform_type}. Supported: {PublisherFactory.get_supported_platforms()}"
+            )
+        
+        # Encrypt credentials
+        credentials = target_data['credentials']
+        credentials_encrypted = CredentialManager.encrypt_credentials(credentials)
+        
+        # Test connection before saving
+        publisher = PublisherFactory.create_publisher(
+            platform_type, 
+            target_data['base_url'], 
+            credentials_encrypted
+        )
+        
+        test_result = await publisher.test_connection()
+        
+        if not test_result.get('success'):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Connection test failed: {test_result.get('message')}"
+            )
+        
+        # Save to database
+        supabase = get_supabase_client()
+        
+        insert_data = {
+            "company_id": company_id,
+            "platform_type": platform_type,
+            "name": target_data['name'],
+            "base_url": target_data['base_url'],
+            "credentials_encrypted": credentials_encrypted,
+            "is_default": target_data.get('is_default', False),
+            "last_tested_at": datetime.utcnow().isoformat(),
+            "test_result": test_result
+        }
+        
+        result = supabase.client.table("press_publication_targets")\
+            .insert(insert_data)\
+            .execute()
+        
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to create publication target")
+        
+        created_target = result.data[0]
+        
+        # Remove encrypted credentials from response
+        response_data = {k: v for k, v in created_target.items() if k != 'credentials_encrypted'}
+        
+        logger.info("publication_target_created",
+            target_id=created_target['id'],
+            company_id=company_id,
+            platform=platform_type,
+            name=target_data['name']
+        )
+        
+        return response_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("create_publication_target_error",
+            company_id=company_id,
+            error=str(e)
+        )
+        raise HTTPException(status_code=500, detail="Failed to create publication target")
+
+
+@app.get("/api/v1/publication-targets/{target_id}")
+async def get_publication_target(
+    target_id: str,
+    company_id: str = Depends(get_company_id_from_auth)
+) -> Dict[str, Any]:
+    """Get a specific publication target (without credentials)."""
+    try:
+        supabase = get_supabase_client()
+        
+        result = supabase.client.table("press_publication_targets")\
+            .select("id, platform_type, name, base_url, is_default, is_active, created_at, updated_at, last_tested_at, test_result")\
+            .eq("id", target_id)\
+            .eq("company_id", company_id)\
+            .maybe_single()\
+            .execute()
+        
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Publication target not found")
+        
+        return result.data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("get_publication_target_error",
+            target_id=target_id,
+            company_id=company_id,
+            error=str(e)
+        )
+        raise HTTPException(status_code=500, detail="Failed to fetch publication target")
+
+
+@app.put("/api/v1/publication-targets/{target_id}")
+async def update_publication_target(
+    target_id: str,
+    target_data: Dict[str, Any],
+    company_id: str = Depends(get_company_id_from_auth)
+) -> Dict[str, Any]:
+    """Update publication target. If credentials provided, they will be re-encrypted."""
+    try:
+        from utils.credential_manager import CredentialManager
+        from publishers.publisher_factory import PublisherFactory
+        
+        supabase = get_supabase_client()
+        
+        # Check target exists and belongs to company
+        existing = supabase.client.table("press_publication_targets")\
+            .select("*")\
+            .eq("id", target_id)\
+            .eq("company_id", company_id)\
+            .maybe_single()\
+            .execute()
+        
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Publication target not found")
+        
+        update_data = {}
+        test_result = None
+        
+        # Handle credential update
+        if 'credentials' in target_data:
+            credentials_encrypted = CredentialManager.encrypt_credentials(target_data['credentials'])
+            
+            # Test connection with new credentials
+            base_url = target_data.get('base_url', existing.data['base_url'])
+            platform_type = existing.data['platform_type']
+            
+            publisher = PublisherFactory.create_publisher(
+                platform_type, 
+                base_url, 
+                credentials_encrypted
+            )
+            
+            test_result = await publisher.test_connection()
+            
+            if not test_result.get('success'):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Connection test failed: {test_result.get('message')}"
+                )
+            
+            update_data['credentials_encrypted'] = credentials_encrypted
+            update_data['last_tested_at'] = datetime.utcnow().isoformat()
+            update_data['test_result'] = test_result
+        
+        # Handle other field updates
+        updatable_fields = ['name', 'base_url', 'is_default']
+        for field in updatable_fields:
+            if field in target_data:
+                update_data[field] = target_data[field]
+        
+        if not update_data:
+            raise HTTPException(status_code=400, detail="No valid fields to update")
+        
+        update_data['updated_at'] = datetime.utcnow().isoformat()
+        
+        result = supabase.client.table("press_publication_targets")\
+            .update(update_data)\
+            .eq("id", target_id)\
+            .eq("company_id", company_id)\
+            .execute()
+        
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to update publication target")
+        
+        updated_target = result.data[0]
+        
+        # Remove encrypted credentials from response
+        response_data = {k: v for k, v in updated_target.items() if k != 'credentials_encrypted'}
+        
+        logger.info("publication_target_updated",
+            target_id=target_id,
+            company_id=company_id,
+            updated_fields=list(update_data.keys())
+        )
+        
+        return response_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("update_publication_target_error",
+            target_id=target_id,
+            company_id=company_id,
+            error=str(e)
+        )
+        raise HTTPException(status_code=500, detail="Failed to update publication target")
+
+
+@app.delete("/api/v1/publication-targets/{target_id}")
+async def delete_publication_target(
+    target_id: str,
+    company_id: str = Depends(get_company_id_from_auth)
+) -> Dict[str, Any]:
+    """Soft delete (deactivate) a publication target."""
+    try:
+        supabase = get_supabase_client()
+        
+        result = supabase.client.table("press_publication_targets")\
+            .update({"is_active": False, "updated_at": datetime.utcnow().isoformat()})\
+            .eq("id", target_id)\
+            .eq("company_id", company_id)\
+            .execute()
+        
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Publication target not found")
+        
+        logger.info("publication_target_deleted",
+            target_id=target_id,
+            company_id=company_id
+        )
+        
+        return {"success": True, "message": "Publication target deactivated"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("delete_publication_target_error",
+            target_id=target_id,
+            company_id=company_id,
+            error=str(e)
+        )
+        raise HTTPException(status_code=500, detail="Failed to delete publication target")
+
+
+@app.post("/api/v1/publication-targets/{target_id}/test")
+async def test_publication_target(
+    target_id: str,
+    company_id: str = Depends(get_company_id_from_auth)
+) -> Dict[str, Any]:
+    """Test connection to a publication target."""
+    try:
+        from publishers.publisher_factory import PublisherFactory
+        
+        supabase = get_supabase_client()
+        
+        # Get target with credentials
+        result = supabase.client.table("press_publication_targets")\
+            .select("*")\
+            .eq("id", target_id)\
+            .eq("company_id", company_id)\
+            .eq("is_active", True)\
+            .maybe_single()\
+            .execute()
+        
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Publication target not found")
+        
+        target = result.data
+        
+        # Create publisher and test
+        publisher = PublisherFactory.create_publisher(
+            target['platform_type'],
+            target['base_url'],
+            target['credentials_encrypted']
+        )
+        
+        test_result = await publisher.test_connection()
+        
+        # Update test result in database
+        supabase.client.table("press_publication_targets")\
+            .update({
+                "last_tested_at": datetime.utcnow().isoformat(),
+                "test_result": test_result
+            })\
+            .eq("id", target_id)\
+            .execute()
+        
+        logger.info("publication_target_tested",
+            target_id=target_id,
+            company_id=company_id,
+            success=test_result.get('success')
+        )
+        
+        return test_result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("test_publication_target_error",
+            target_id=target_id,
+            company_id=company_id,
+            error=str(e)
+        )
+        raise HTTPException(status_code=500, detail="Failed to test publication target")
 
 
 if __name__ == "__main__":
