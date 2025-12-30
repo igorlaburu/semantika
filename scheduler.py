@@ -719,10 +719,20 @@ async def generate_articles_for_company(
             # Handle image
             image_uuid = await handle_article_image(unit, article_data, llm_client)
             
+            # Get default style for this company
+            default_style = supabase.client.table("press_styles")\
+                .select("id")\
+                .eq("company_id", company_id)\
+                .eq("predeterminado", True)\
+                .maybe_single()\
+                .execute()
+            
+            style_id = default_style.data["id"] if default_style.data else None
+            
             # Create article
             article_id = str(uuid.uuid4())
             
-            insert_result = await supabase.client.table("press_articles").insert({
+            article_insert_data = {
                 "id": article_id,
                 "titulo": article_data['title'],
                 "excerpt": article_data['summary'],
@@ -731,6 +741,7 @@ async def generate_articles_for_company(
                 "categoria": unit.get('category', 'general'),
                 "estado": "borrador",
                 "imagen_uuid": image_uuid,
+                "style_id": style_id,
                 "company_id": company_id,
                 "created_at": datetime.utcnow().isoformat(),
                 "updated_at": datetime.utcnow().isoformat(),
@@ -743,7 +754,9 @@ async def generate_articles_for_company(
                     "quality_score": unit.get('quality_score'),
                     "llm_model": settings.llm_writer_model
                 }
-            }).execute()
+            }
+            
+            insert_result = await supabase.client.table("press_articles").insert(article_insert_data).execute()
             
             generated_count += 1
             

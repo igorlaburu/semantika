@@ -3609,6 +3609,22 @@ async def create_or_update_article(
         clean_data["company_id"] = company_id
         clean_data["updated_at"] = datetime.utcnow().isoformat()
         
+        # If no style_id is provided, use default style for the company
+        if "style_id" not in clean_data or clean_data["style_id"] is None:
+            default_style = supabase.client.table("press_styles")\
+                .select("id")\
+                .eq("company_id", company_id)\
+                .eq("predeterminado", True)\
+                .maybe_single()\
+                .execute()
+            
+            if default_style.data:
+                clean_data["style_id"] = default_style.data["id"]
+                logger.debug("using_default_style",
+                    company_id=company_id,
+                    style_id=default_style.data["id"]
+                )
+        
         article_id = clean_data.get("id")
         if not article_id:
             raise HTTPException(status_code=400, detail="Missing article id")
