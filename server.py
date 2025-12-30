@@ -4710,6 +4710,14 @@ async def create_publication_target(
         
         test_result = await publisher.test_connection()
         
+        logger.info("wordpress_connection_test_result",
+            company_id=company_id,
+            platform_type=platform_type,
+            base_url=target_data['base_url'],
+            success=test_result.get('success'),
+            message=test_result.get('message', 'No message')
+        )
+        
         if not test_result.get('success'):
             raise HTTPException(
                 status_code=400,
