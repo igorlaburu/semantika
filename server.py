@@ -4685,7 +4685,7 @@ async def create_publication_target(
         # Encrypt credentials
         credentials = target_data['credentials']
         masked_creds = CredentialManager.mask_credentials_for_logging(credentials)
-        logger.debug("publication_target_validation_passed",
+        logger.info("publication_target_validation_passed",
             company_id=company_id,
             platform_type=platform_type,
             name=target_data['name'],
