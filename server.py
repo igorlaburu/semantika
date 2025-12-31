@@ -3821,6 +3821,16 @@ async def publish_to_platforms(
         tags = article.get('tags', [])
         category = article.get('category', None)
         
+        # Use article slug (required field in press_articles)
+        slug = article.get('slug')
+        if not slug:
+            logger.warn("article_missing_slug_field", 
+                article_id=article.get('id'),
+                title=title[:50]
+            )
+            # Fallback to generated slug if missing
+            slug = _generate_slug_from_title(title)
+        
         # Get image URL if available
         image_url = None
         if article.get('imagen_uuid'):
@@ -3847,7 +3857,8 @@ async def publish_to_platforms(
                     tags=tags,
                     image_url=image_url,
                     category=category,
-                    status="publish"
+                    status="publish",
+                    slug=slug
                 )
                 
                 publication_results[target_id] = {
@@ -5016,6 +5027,31 @@ async def test_publication_target(
             error=str(e)
         )
         raise HTTPException(status_code=500, detail="Failed to test publication target")
+
+
+def _generate_slug_from_title(title: str) -> str:
+    """Generate WordPress-compatible slug from title."""
+    import re
+    
+    # Convert to lowercase and replace common Spanish characters
+    slug = title.lower()
+    
+    # Replace Spanish characters
+    replacements = {
+        'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u', 'ü': 'u',
+        'ñ': 'n', 'ç': 'c'
+    }
+    
+    for char, replacement in replacements.items():
+        slug = slug.replace(char, replacement)
+    
+    # Remove special characters and replace spaces with hyphens
+    slug = re.sub(r'[^\w\s-]', '', slug)
+    slug = re.sub(r'[\s_]+', '-', slug)
+    slug = slug.strip('-')
+    
+    # Limit length to 200 characters (WordPress limit)
+    return slug[:200]
 
 
 if __name__ == "__main__":

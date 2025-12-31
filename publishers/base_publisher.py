@@ -52,7 +52,8 @@ class BasePublisher(ABC):
         excerpt: Optional[str] = None,
         tags: Optional[list] = None,
         image_url: Optional[str] = None,
-        status: str = "publish"
+        status: str = "publish",
+        slug: Optional[str] = None
     ) -> PublicationResult:
         """Publish an article to the platform.
         
@@ -63,6 +64,7 @@ class BasePublisher(ABC):
             tags: List of tags
             image_url: Featured image URL
             status: Publication status ("draft" or "publish")
+            slug: Article slug/URL identifier (optional)
             
         Returns:
             PublicationResult with success/failure details

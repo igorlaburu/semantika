@@ -166,7 +166,8 @@ class WordPressPublisher(BasePublisher):
         tags: Optional[list] = None,
         image_url: Optional[str] = None,
         category: Optional[str] = None,
-        status: str = "publish"
+        status: str = "publish",
+        slug: Optional[str] = None
     ) -> PublicationResult:
         """Publish article to WordPress."""
         
@@ -197,11 +198,27 @@ class WordPressPublisher(BasePublisher):
                     if category_id:
                         category_ids.append(category_id)
                 
+                # Use provided slug or generate from title
+                if not slug:
+                    slug = self._generate_slug(title)
+                    logger.debug("wordpress_slug_generated_from_title",
+                        original_title=title[:50],
+                        generated_slug=slug
+                    )
+                else:
+                    logger.debug("wordpress_using_provided_slug",
+                        provided_slug=slug
+                    )
+                
+                # Check if post with this slug already exists
+                existing_post_id = await self._find_post_by_slug(session, slug, headers)
+                
                 # Prepare post data
                 post_data = {
                     "title": title,
                     "content": self.sanitize_content(content),
                     "status": status,  # "draft" or "publish"
+                    "slug": slug
                 }
                 
                 if excerpt:
@@ -216,16 +233,26 @@ class WordPressPublisher(BasePublisher):
                 if category_ids:
                     post_data["categories"] = category_ids
                 
-                # Create post
+                # Update existing post or create new one
                 posts_url = self._get_api_url('posts')
+                if existing_post_id:
+                    # Update existing post
+                    posts_url = f"{posts_url}/{existing_post_id}"
+                    method = session.put
+                    action = "updated"
+                else:
+                    # Create new post
+                    method = session.post
+                    action = "created"
                 
-                async with session.post(
+                async with method(
                     posts_url,
                     json=post_data,
                     headers=headers
                 ) as response:
                     
-                    if response.status == 201:
+                    # WordPress returns 201 for POST (create) and 200 for PUT (update)
+                    if response.status in [200, 201]:
                         post_data_response = await response.json()
                         post_id = post_data_response.get('id')
                         post_url = post_data_response.get('link')
@@ -234,7 +261,9 @@ class WordPressPublisher(BasePublisher):
                             post_id=post_id,
                             title=title[:50],
                             url=post_url,
-                            status=status
+                            status=status,
+                            action=action,
+                            slug=slug
                         )
                         
                         return PublicationResult(
@@ -429,3 +458,78 @@ class WordPressPublisher(BasePublisher):
         # WordPress accepts HTML, but we might want to do some cleanup
         # For now, return as-is since our content is already HTML
         return content
+    
+    def _generate_slug(self, title: str) -> str:
+        """Generate WordPress-compatible slug from title."""
+        import re
+        
+        # Convert to lowercase and replace common Spanish characters
+        slug = title.lower()
+        
+        # Replace Spanish characters
+        replacements = {
+            'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u', 'ü': 'u',
+            'ñ': 'n', 'ç': 'c'
+        }
+        
+        for char, replacement in replacements.items():
+            slug = slug.replace(char, replacement)
+        
+        # Remove special characters and replace spaces with hyphens
+        slug = re.sub(r'[^\w\s-]', '', slug)
+        slug = re.sub(r'[\s_]+', '-', slug)
+        slug = slug.strip('-')
+        
+        # Limit length to 200 characters (WordPress limit)
+        return slug[:200]
+    
+    async def _find_post_by_slug(
+        self, 
+        session: aiohttp.ClientSession, 
+        slug: str, 
+        headers: Dict[str, str]
+    ) -> Optional[int]:
+        """Find existing WordPress post by slug.
+        
+        Returns:
+            Post ID if found, None if not found
+        """
+        try:
+            search_url = self._get_api_url('posts')
+            search_params = {'slug': slug}
+            
+            async with session.get(
+                search_url,
+                params=search_params,
+                headers=headers
+            ) as response:
+                
+                if response.status == 200:
+                    posts = await response.json()
+                    
+                    if posts and len(posts) > 0:
+                        post_id = posts[0].get('id')
+                        logger.debug("wordpress_post_found_by_slug",
+                            slug=slug,
+                            post_id=post_id,
+                            title=posts[0].get('title', {}).get('rendered', 'Unknown')
+                        )
+                        return post_id
+                    else:
+                        logger.debug("wordpress_post_not_found_by_slug", slug=slug)
+                        return None
+                else:
+                    error_text = await response.text()
+                    logger.warn("wordpress_slug_search_failed",
+                        slug=slug,
+                        status=response.status,
+                        error=error_text[:200]
+                    )
+                    return None
+                    
+        except Exception as e:
+            logger.error("wordpress_slug_search_error",
+                slug=slug,
+                error=str(e)
+            )
+            return None
