@@ -3800,6 +3800,7 @@ async def publish_to_platforms(
         content = article.get('contenido', '')
         excerpt = article.get('excerpt', '')
         tags = article.get('tags', [])
+        category = article.get('categoria_noticia', None)
         
         # Get image URL if available
         image_url = None
@@ -3826,6 +3827,7 @@ async def publish_to_platforms(
                     excerpt=excerpt,
                     tags=tags,
                     image_url=image_url,
+                    category=category,
                     status="publish"
                 )
                 

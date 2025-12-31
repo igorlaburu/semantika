@@ -165,6 +165,7 @@ class WordPressPublisher(BasePublisher):
         excerpt: Optional[str] = None,
         tags: Optional[list] = None,
         image_url: Optional[str] = None,
+        category: Optional[str] = None,
         status: str = "publish"
     ) -> PublicationResult:
         """Publish article to WordPress."""
@@ -189,6 +190,13 @@ class WordPressPublisher(BasePublisher):
                 if tags:
                     tag_ids = await self._get_or_create_tags(session, tags, headers)
                 
+                # Handle category - get or create category ID
+                category_ids = []
+                if category:
+                    category_id = await self._get_or_create_category(session, category, headers)
+                    if category_id:
+                        category_ids.append(category_id)
+                
                 # Prepare post data
                 post_data = {
                     "title": title,
@@ -204,6 +212,9 @@ class WordPressPublisher(BasePublisher):
                 
                 if tag_ids:
                     post_data["tags"] = tag_ids
+                
+                if category_ids:
+                    post_data["categories"] = category_ids
                 
                 # Create post
                 posts_url = self._get_api_url('posts')
@@ -234,7 +245,8 @@ class WordPressPublisher(BasePublisher):
                                 "platform": "wordpress",
                                 "post_id": post_id,
                                 "featured_media_id": featured_media_id,
-                                "tag_count": len(tag_ids) if tag_ids else 0
+                                "tag_count": len(tag_ids) if tag_ids else 0,
+                                "category_count": len(category_ids) if category_ids else 0
                             }
                         )
                     
@@ -323,6 +335,94 @@ class WordPressPublisher(BasePublisher):
                 continue
         
         return tag_ids
+    
+    async def _get_or_create_category(
+        self,
+        session: aiohttp.ClientSession,
+        category_name: str,
+        headers: Dict[str, str]
+    ) -> Optional[int]:
+        """Get existing category ID or create new category.
+        
+        Args:
+            session: HTTP session for requests
+            category_name: Name of the category
+            headers: Authentication headers
+            
+        Returns:
+            Category ID if successful, None if failed
+        """
+        try:
+            # Search for existing category
+            search_url = self._get_api_url('categories')
+            search_params = {'search': category_name}
+            
+            async with session.get(
+                search_url,
+                params=search_params,
+                headers=headers
+            ) as response:
+                
+                if response.status == 200:
+                    existing_categories = await response.json()
+                    
+                    # Look for exact match
+                    category_id = None
+                    for existing_category in existing_categories:
+                        if existing_category.get('name', '').lower() == category_name.lower():
+                            category_id = existing_category.get('id')
+                            logger.debug("wordpress_category_found",
+                                category_name=category_name,
+                                category_id=category_id
+                            )
+                            break
+                    
+                    # Create category if not found
+                    if category_id is None:
+                        create_data = {
+                            'name': category_name,
+                            'slug': category_name.lower().replace(' ', '-').replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u').replace('ñ', 'n')
+                        }
+                        
+                        async with session.post(
+                            search_url,
+                            json=create_data,
+                            headers=headers
+                        ) as create_response:
+                            
+                            if create_response.status == 201:
+                                new_category = await create_response.json()
+                                category_id = new_category.get('id')
+                                
+                                logger.info("wordpress_category_created",
+                                    category_name=category_name,
+                                    category_id=category_id,
+                                    slug=create_data['slug']
+                                )
+                            else:
+                                error_text = await create_response.text()
+                                logger.warn("wordpress_category_creation_failed",
+                                    category_name=category_name,
+                                    status=create_response.status,
+                                    error=error_text[:200]
+                                )
+                    
+                    return category_id
+                else:
+                    error_text = await response.text()
+                    logger.warn("wordpress_category_search_failed",
+                        category_name=category_name,
+                        status=response.status,
+                        error=error_text[:200]
+                    )
+                    return None
+                    
+        except Exception as e:
+            logger.error("wordpress_category_processing_error",
+                category_name=category_name,
+                error=str(e)
+            )
+            return None
     
     def sanitize_content(self, content: str) -> str:
         """Clean content for WordPress."""
