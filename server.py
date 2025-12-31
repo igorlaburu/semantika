@@ -3814,6 +3814,27 @@ async def publish_to_platforms(
             )
             return {}
         
+        # Update article with auto-assigned targets if needed
+        if not target_ids:  # Only if no targets were specified (auto-assignment case)
+            assigned_target_ids = [t['id'] for t in targets]
+            try:
+                supabase.client.table("press_articles")\
+                    .update({"publication_targets": assigned_target_ids})\
+                    .eq("id", article['id'])\
+                    .eq("company_id", company_id)\
+                    .execute()
+                
+                logger.info("publication_targets_auto_assigned",
+                    article_id=article['id'],
+                    target_ids=assigned_target_ids,
+                    target_names=[t['name'] for t in targets]
+                )
+            except Exception as e:
+                logger.warn("failed_to_update_article_targets",
+                    article_id=article['id'],
+                    error=str(e)
+                )
+        
         # Prepare article data for publication
         title = article.get('titulo', 'Untitled')
         content = article.get('contenido', '')
