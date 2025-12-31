@@ -945,7 +945,7 @@ async def publish_scheduled_articles():
         now = datetime.utcnow()
         
         scheduled = supabase.client.table("press_articles")\
-            .select("id, titulo, company_id")\
+            .select("id, titulo, company_id, publication_targets")\
             .eq("estado", "programado")\
             .lte("to_publish_at", now.isoformat())\
             .execute()
@@ -955,6 +955,62 @@ async def publish_scheduled_articles():
             return
         
         logger.info("scheduled_articles_found", count=len(scheduled.data))
+        
+        # Auto-assign publication targets for articles that don't have them
+        for article in scheduled.data:
+            publication_targets = article.get("publication_targets", [])
+            
+            # If article has no publication targets, assign default or first available
+            if not publication_targets:
+                logger.debug("article_missing_publication_targets", 
+                    article_id=article['id'],
+                    company_id=article['company_id']
+                )
+                
+                # Get publication targets for this company
+                targets_result = supabase.client.table("press_publication_targets")\
+                    .select("id, name, is_default")\
+                    .eq("company_id", article['company_id'])\
+                    .eq("is_active", True)\
+                    .order("is_default", desc=True)\
+                    .execute()
+                
+                if not targets_result.data:
+                    logger.error("no_publication_targets_available",
+                        article_id=article['id'],
+                        company_id=article['company_id']
+                    )
+                    continue
+                
+                # Use default target if available, otherwise first one
+                default_target = next(
+                    (t for t in targets_result.data if t.get("is_default")), 
+                    targets_result.data[0]
+                )
+                
+                target_id = default_target['id']
+                target_name = default_target['name']
+                
+                # Update article with the publication target
+                update_result = supabase.client.table("press_articles")\
+                    .update({"publication_targets": [target_id]})\
+                    .eq("id", article['id'])\
+                    .execute()
+                
+                if update_result.data:
+                    article["publication_targets"] = [target_id]
+                    logger.info("publication_target_auto_assigned",
+                        article_id=article['id'],
+                        target_id=target_id,
+                        target_name=target_name,
+                        is_default=default_target.get("is_default", False)
+                    )
+                else:
+                    logger.error("failed_to_assign_publication_target",
+                        article_id=article['id'],
+                        target_id=target_id
+                    )
+                    continue
         
         published_count = 0
         failed_count = 0

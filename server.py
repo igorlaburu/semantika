@@ -3777,16 +3777,35 @@ async def publish_to_platforms(
                 .eq("company_id", company_id)\
                 .eq("is_active", True)\
                 .in_("id", target_ids)
+            
+            targets_result = targets_query.execute()
+            targets = targets_result.data or []
         else:
-            # Use default targets for each platform
+            # First try default targets for each platform
             targets_query = supabase.client.table("press_publication_targets")\
                 .select("*")\
                 .eq("company_id", company_id)\
                 .eq("is_active", True)\
                 .eq("is_default", True)
-        
-        targets_result = targets_query.execute()
-        targets = targets_result.data or []
+            
+            targets_result = targets_query.execute()
+            targets = targets_result.data or []
+            
+            # If no default targets found, use the first available target
+            if not targets:
+                logger.info("no_default_targets_found_using_first_available", 
+                    company_id=company_id
+                )
+                
+                targets_query = supabase.client.table("press_publication_targets")\
+                    .select("*")\
+                    .eq("company_id", company_id)\
+                    .eq("is_active", True)\
+                    .order("created_at")\
+                    .limit(1)
+                
+                targets_result = targets_query.execute()
+                targets = targets_result.data or []
         
         if not targets:
             logger.warn("no_publication_targets_found", 
@@ -3905,7 +3924,7 @@ async def publish_article(
         {
             "publish_now": false,           // optional, default false
             "schedule_time": null,          // optional ISO datetime, null = auto-schedule
-            "targets": ["uuid1", "uuid2"]   // optional, publication target IDs. If empty, uses default targets
+            "targets": ["uuid1", "uuid2"]   // optional, publication target IDs. If empty, uses default targets, then first available target
         }
     
     **Returns**:
