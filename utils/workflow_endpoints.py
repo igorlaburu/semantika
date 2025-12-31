@@ -645,6 +645,8 @@ async def execute_redact_news_rich(
 
         # Auto-assign featured_image from first context unit (if available)
         imagen_url = None
+        image_info = None
+        
         if context_units:
             first_cu = context_units[0]
             source_metadata = first_cu.get("source_metadata") or {}
@@ -652,14 +654,28 @@ async def execute_redact_news_rich(
             
             if featured_image and featured_image.get("url"):
                 imagen_url = f"/api/v1/context-units/{first_cu['id']}/image"
+                # Image comes from source
+                image_info = {
+                    "ai_generated": False,
+                    "source_url": featured_image.get("url")
+                }
                 logger.info("article_image_auto_assigned",
                     context_unit_id=first_cu["id"],
                     imagen_url=imagen_url
                 )
             else:
+                # Will likely be AI generated if article gets published
+                image_info = {
+                    "ai_generated": True
+                }
                 logger.debug("no_featured_image_in_first_context_unit",
                     context_unit_id=first_cu["id"]
                 )
+        else:
+            # No context units, will be AI generated
+            image_info = {
+                "ai_generated": True
+            }
         
         result["imagen_url"] = imagen_url
 
@@ -679,7 +695,8 @@ async def execute_redact_news_rich(
             result["article"] = append_references_to_content(
                 content=result["article"],
                 context_units=context_units,
-                enrichments=enrichments if enrichments else None
+                enrichments=enrichments if enrichments else None,
+                image_info=image_info
             )
 
         return result
