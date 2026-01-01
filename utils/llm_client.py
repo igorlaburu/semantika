@@ -767,7 +767,9 @@ Use:
 
             redact_prompt = ChatPromptTemplate.from_messages([
                 ("system", system_prompt),
-                ("user", """Based on this source content, write a professional news article.
+                ("user", """TEMPORAL CONTEXT: Today is {current_date} at {current_time}. Use this to properly contextualize events as past, present, or future.
+
+Based on this source content, write a professional news article.
 
 Source content:
 {text}
@@ -780,15 +782,41 @@ CRITICAL REQUIREMENTS:
 - If source lacks information, DO NOT fill gaps with invented content
 - Every fact in your article MUST be traceable to the source content
 
+EDITORIAL STYLE (neutral-critical journalism):
+- European Spanish style (no American capitalizations)
+- Neutral-critical tone, NOT promotional or sensationalist
+- Vary sentence length: alternate short and long sentences
+- Include controversy or criticism if present in sources
+- If sources mention past events, use past tense appropriately given current date
+
+PROHIBITED WORDS/PHRASES:
+- "emblemático", "icónico", "revolucionario", "transformador"
+- "es crucial", "es fundamental", "cabe destacar", "hay que destacar"
+- Inspirational endings or calls to action
+- Corporate buzzwords or overly optimistic language
+
+PROHIBITED STRUCTURES (anti-AI patterns):
+- Lists of exactly 3 elements
+- Paragraphs of exactly 3 sentences
+- Rhetorical questions in titles
+- Metaphors about "navegar", "explorar", "viaje"
+- Generic transitions like "por otro lado", "además", "finalmente"
+
 Article structure:
 - Write a COMPREHENSIVE, well-developed article
-- Create an engaging, accurate title based ONLY on source content
-- IMPORTANT: Do NOT repeat the title as the first sentence of the article - start directly with informative content
+- Create an engaging, accurate title based ONLY on source content (maximum 8 words, factual)
+- CRITICAL: NEVER start the article text with the title or a variation of the title
+- CRITICAL: Do NOT begin with "El [título]...", "[Título] es...", or any phrase that repeats the title
+- CRITICAL: Start DIRECTLY with informative content about WHO/WHAT/WHEN/WHERE
+- The title field and article content must be completely separate - NO TITLE REPETITION EVER
+- Lead paragraph: WHO/WHAT/WHEN/WHERE in 2 sentences maximum
 - Write a brief summary (2-3 sentences) reflecting ONLY source information
 - Generate 3-5 relevant tags from topics in the source
 - Format article with clear paragraph breaks (use \\n\\n between paragraphs)
-- Each paragraph should be well-developed with 3-5 sentences providing context, details, and background
+- Each paragraph should be well-developed but vary length (avoid exactly 3-5 sentences pattern)
 - Aim for a complete article of at least 6-10 paragraphs that fully explores the topic
+- Use inverted pyramid structure (most important information first)
+- Include verifiable data with specific sources when available
 - Develop each point thoroughly with context, implications, and relevant details from the source
 - NO advertisement blocks or meta-content
 
@@ -796,6 +824,8 @@ Formatting rules:
 - Use **bold** for proper names (people, organizations, brands)
 - Use **bold** for place names (cities, countries, regions)
 - For sections with clearly defined context and substantial length (3+ paragraphs), add an H2 subtitle (## Subtitle)
+
+QUALITY CHECK: Read your article aloud mentally. If it sounds corporate, overly promotional, or artificially optimistic, rewrite it with a more neutral, journalistic tone.
 
 IMPORTANT: Respond with ONLY raw JSON. Do NOT wrap in markdown code blocks or add any text before/after.
 
@@ -807,12 +837,22 @@ Response format:
                 redact_prompt | self.registry.get(settings.llm_writer_model).get_runnable() | JsonOutputParser()
             )
 
-            result = await redact_chain.ainvoke({"text": text[:8000]})
+            # Get current date and time for temporal context
+            from datetime import datetime
+            now = datetime.utcnow()
+            current_date = now.strftime("%Y-%m-%d")
+            current_time = now.strftime("%H:%M UTC")
+            
+            result = await redact_chain.ainvoke({
+                "text": text[:8000],
+                "current_date": current_date,
+                "current_time": current_time
+            })
             
             # Decode HTML entities in text fields
             import html
             if isinstance(result, dict):
-                for key in ["article", "title", "summary"]:
+                for key in ["article", "title", "summary", "excerpt"]:
                     if key in result and isinstance(result[key], str):
                         result[key] = html.unescape(result[key])
                 
@@ -874,7 +914,9 @@ Follow these instructions when writing the article."""
 
             redact_rich_prompt = ChatPromptTemplate.from_messages([
                 ("system", system_prompt),
-                ("user", """Based on these source materials from multiple context units, write a comprehensive news article.
+                ("user", """TEMPORAL CONTEXT: Today is {current_date} at {current_time}. Use this to properly contextualize events as past, present, or future.
+
+Based on these source materials from multiple context units, write a comprehensive news article.
 
 {user_instructions}
 
@@ -889,19 +931,44 @@ CRITICAL REQUIREMENTS:
 - If sources lack information, DO NOT fill gaps with invented content
 - Every fact in your article MUST be traceable to the source materials
 
+EDITORIAL STYLE (neutral-critical journalism):
+- European Spanish style (no American capitalizations)
+- Neutral-critical tone, NOT promotional or sensationalist
+- Vary sentence length: alternate short and long sentences
+- Include controversy or criticism if present in sources
+- If sources mention past events, use past tense appropriately given current date
+
+PROHIBITED WORDS/PHRASES:
+- "emblemático", "icónico", "revolucionario", "transformador"
+- "es crucial", "es fundamental", "cabe destacar", "hay que destacar"
+- Inspirational endings or calls to action
+- Corporate buzzwords or overly optimistic language
+
+PROHIBITED STRUCTURES (anti-AI patterns):
+- Lists of exactly 3 elements
+- Paragraphs of exactly 3 sentences
+- Rhetorical questions in titles
+- Metaphors about "navegar", "explorar", "viaje"
+- Generic transitions like "por otro lado", "además", "finalmente"
+
 Article structure:
 - Write a COMPREHENSIVE, well-developed article that SYNTHESIZES information from ALL provided sources
 - ALL sources marked with ## headers MUST be represented in the article - do not ignore any source
-- Create an engaging, accurate title based ONLY on source content
+- Create an engaging, accurate title based ONLY on source content (maximum 8 words, factual)
 - Title capitalization: Use sentence case (only capitalize first word and proper nouns/place names), not title case
-- IMPORTANT: Do NOT repeat the title as the first sentence of the article - start directly with informative content
+- CRITICAL: NEVER start the article text with the title or a variation of the title
+- CRITICAL: Do NOT begin with "El [título]...", "[Título] es...", or any phrase that repeats the title
+- CRITICAL: Start DIRECTLY with informative content about WHO/WHAT/WHEN/WHERE
+- The title field and article content must be completely separate - NO TITLE REPETITION EVER
+- Lead paragraph: WHO/WHAT/WHEN/WHERE in 2 sentences maximum
 - Write a brief summary (2-3 sentences) reflecting ONLY source information from ALL sources
 - Generate 3-5 relevant tags from topics in ALL the sources
 - Format article with clear paragraph breaks (use \\n\\n between paragraphs)
-- Each paragraph should be well-developed with 3-5 sentences providing context, details, and background
+- Each paragraph should be well-developed but vary length (avoid exactly 3-5 sentences pattern)
 - Aim for a complete article of at least 8-12 paragraphs that fully explores the topic
+- Use inverted pyramid structure (most important information first)
 - Integrate facts and information from ALL context units provided, not just the first one
-- Develop each point thoroughly with context, implications, and relevant details from the sources
+- Include verifiable data with specific sources when available
 - NO advertisement blocks or meta-content
 
 Formatting rules:
@@ -921,6 +988,8 @@ MANDATORY STATEMENT TRACKING:
   {{"uuid-1": [0, 1, 3], "uuid-2": [16, 17, 20]}}
 - The statements_used field is REQUIRED in your response - do not omit it
 
+QUALITY CHECK: Read your article aloud mentally. If it sounds corporate, overly promotional, or artificially optimistic, rewrite it with a more neutral, journalistic tone.
+
 IMPORTANT: Respond with ONLY raw JSON. Do NOT wrap in markdown code blocks or add any text before/after.
 
 Response format:
@@ -931,13 +1000,24 @@ Response format:
                 redact_rich_prompt | self.registry.get(settings.llm_writer_model).get_runnable() | JsonOutputParser()
             )
 
+            # Get current date and time for temporal context
+            from datetime import datetime
+            now = datetime.utcnow()
+            current_date = now.strftime("%Y-%m-%d")
+            current_time = now.strftime("%H:%M UTC")
+
             # Debug: call LLM and inspect raw response
-            logger.info("redact_news_rich_calling_llm", source_text_length=len(source_text[:12000]))
+            logger.info("redact_news_rich_calling_llm", 
+                       source_text_length=len(source_text[:12000]),
+                       current_date=current_date,
+                       current_time=current_time)
 
             # Call LLM directly to see raw response
             raw_response = await (redact_rich_prompt | self.registry.get(settings.llm_writer_model).get_runnable()).ainvoke({
                 "source_text": source_text[:12000],
-                "user_instructions": user_instructions
+                "user_instructions": user_instructions,
+                "current_date": current_date,
+                "current_time": current_time
             })
 
             logger.info("redact_news_rich_raw_response",
