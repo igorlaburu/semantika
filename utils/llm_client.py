@@ -810,7 +810,7 @@ Article structure:
 - CRITICAL: Start DIRECTLY with informative content about WHO/WHAT/WHEN/WHERE
 - The title field and article content must be completely separate - NO TITLE REPETITION EVER
 - Lead paragraph: WHO/WHAT/WHEN/WHERE in 2 sentences maximum
-- Write a brief summary (2-3 sentences) reflecting ONLY source information
+- Write a brief excerpt (2-3 sentences) reflecting ONLY source information
 - Generate 3-5 relevant tags from topics in the source
 - Format article with clear paragraph breaks (use \\n\\n between paragraphs)
 - Each paragraph should be well-developed but vary length (avoid exactly 3-5 sentences pattern)
@@ -830,7 +830,7 @@ QUALITY CHECK: Read your article aloud mentally. If it sounds corporate, overly 
 IMPORTANT: Respond with ONLY raw JSON. Do NOT wrap in markdown code blocks or add any text before/after.
 
 Response format:
-{{"article": "Full article text...", "title": "...", "summary": "...", "tags": [...], "author": "Redacción"}}""")
+{{"article": "Full article text...", "title": "...", "excerpt": "...", "tags": [...], "author": "Redacción"}}""")
             ])
 
             redact_chain = RunnableSequence(
@@ -852,7 +852,7 @@ Response format:
             # Decode HTML entities in text fields
             import html
             if isinstance(result, dict):
-                for key in ["article", "title", "summary", "excerpt"]:
+                for key in ["article", "title", "excerpt"]:
                     if key in result and isinstance(result[key], str):
                         result[key] = html.unescape(result[key])
                 
@@ -961,7 +961,7 @@ Article structure:
 - CRITICAL: Start DIRECTLY with informative content about WHO/WHAT/WHEN/WHERE
 - The title field and article content must be completely separate - NO TITLE REPETITION EVER
 - Lead paragraph: WHO/WHAT/WHEN/WHERE in 2 sentences maximum
-- Write a brief summary (2-3 sentences) reflecting ONLY source information from ALL sources
+- Write a brief excerpt (2-3 sentences) reflecting ONLY source information from ALL sources
 - Generate 3-5 relevant tags from topics in ALL the sources
 - Format article with clear paragraph breaks (use \\n\\n between paragraphs)
 - Each paragraph should be well-developed but vary length (avoid exactly 3-5 sentences pattern)
@@ -993,7 +993,7 @@ QUALITY CHECK: Read your article aloud mentally. If it sounds corporate, overly 
 IMPORTANT: Respond with ONLY raw JSON. Do NOT wrap in markdown code blocks or add any text before/after.
 
 Response format:
-{{"article": "Full article text...", "title": "...", "summary": "...", "tags": [...], "author": "Redacción", "statements_used": {{"context-unit-uuid": [0, 1, 3]}}}}""")
+{{"article": "Full article text...", "title": "...", "excerpt": "...", "tags": [...], "author": "Redacción", "statements_used": {{"context-unit-uuid": [0, 1, 3]}}}}""")
             ])
 
             redact_rich_chain = RunnableSequence(
@@ -1029,7 +1029,7 @@ Response format:
 
             # Decode HTML entities in all text fields (fix &#39; → ')
             import html
-            for field in ["article", "title", "summary", "excerpt"]:
+            for field in ["article", "title", "excerpt"]:
                 if field in result and isinstance(result[field], str):
                     result[field] = html.unescape(result[field])
             
