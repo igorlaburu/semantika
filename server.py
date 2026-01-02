@@ -3625,6 +3625,14 @@ async def create_or_update_article(
                     style_id=default_style.data["id"]
                 )
         
+        # Log category inheritance for debugging
+        if "category" in clean_data and "context_unit_ids" in clean_data:
+            logger.info("article_with_category_and_context",
+                category=clean_data["category"],
+                context_unit_ids_count=len(clean_data.get("context_unit_ids", [])),
+                article_id=clean_data.get("id")
+            )
+        
         article_id = clean_data.get("id")
         if not article_id:
             raise HTTPException(status_code=400, detail="Missing article id")
