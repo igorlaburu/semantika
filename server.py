@@ -4906,7 +4906,14 @@ async def update_publication_target(
             
             update_data['credentials_encrypted'] = credentials_encrypted
             update_data['last_tested_at'] = datetime.utcnow().isoformat()
-            update_data['test_result'] = test_result
+            # Ensure test_result is JSON serializable (no bytes objects)
+            serializable_test_result = {}
+            for key, value in test_result.items():
+                if isinstance(value, (str, bool, int, float, dict, list)) or value is None:
+                    serializable_test_result[key] = value
+                else:
+                    serializable_test_result[key] = str(value)
+            update_data['test_result'] = serializable_test_result
         
         # Handle other field updates
         updatable_fields = ['name', 'base_url', 'is_default']
