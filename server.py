@@ -4861,7 +4861,7 @@ async def update_publication_target(
     target_data: Dict[str, Any],
     company_id: str = Depends(get_company_id_from_auth)
 ) -> Dict[str, Any]:
-    """Update publication target. If credentials provided, they will be re-encrypted and tested."""
+    """Update publication target. If credentials provided, they will be re-encrypted and tested for connection."""
     try:
         from utils.credential_manager import CredentialManager
         from publishers.publisher_factory import PublisherFactory
