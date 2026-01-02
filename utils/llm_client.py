@@ -993,7 +993,7 @@ QUALITY CHECK: Read your article aloud mentally. If it sounds corporate, overly 
 IMPORTANT: Respond with ONLY raw JSON. Do NOT wrap in markdown code blocks or add any text before/after.
 
 Response format:
-{{"article": "Full article text...", "title": "...", "excerpt": "...", "tags": [...], "author": "Redacción", "statements_used": {{"context-unit-uuid": [0, 1, 3]}}}}""")
+{{"article": "Full article text...", "title": "...", "summary": "Brief 1-2 sentence summary...", "excerpt": "...", "tags": [...], "author": "Redacción", "statements_used": {{"context-unit-uuid": [0, 1, 3]}}}}""")
             ])
 
             redact_rich_chain = RunnableSequence(
@@ -1029,7 +1029,7 @@ Response format:
 
             # Decode HTML entities in all text fields (fix &#39; → ')
             import html
-            for field in ["article", "title", "excerpt"]:
+            for field in ["article", "title", "summary", "excerpt"]:
                 if field in result and isinstance(result[field], str):
                     result[field] = html.unescape(result[field])
             
@@ -1045,7 +1045,7 @@ Response format:
             return result
         except Exception as e:
             _log_llm_error("redact_news_rich", e)
-            return {"article": "", "title": "", "summary": "", "tags": [], "error": str(e)}
+            return {"article": "", "title": "", "summary": "", "excerpt": "", "tags": [], "error": str(e)}
 
     async def generate_image_prompt(
         self,
