@@ -4907,13 +4907,24 @@ async def update_publication_target(
             update_data['credentials_encrypted'] = credentials_encrypted
             update_data['last_tested_at'] = datetime.utcnow().isoformat()
             # Ensure test_result is JSON serializable (no bytes objects)
-            serializable_test_result = {}
-            for key, value in test_result.items():
-                if isinstance(value, (str, bool, int, float, dict, list)) or value is None:
-                    serializable_test_result[key] = value
+            def make_json_serializable(obj):
+                """Recursively convert object to JSON serializable format."""
+                if obj is None:
+                    return None
+                elif isinstance(obj, (bool, int, float, str)):
+                    return obj
+                elif isinstance(obj, bytes):
+                    # Convert bytes to hex string
+                    return obj.hex()
+                elif isinstance(obj, dict):
+                    return {k: make_json_serializable(v) for k, v in obj.items()}
+                elif isinstance(obj, (list, tuple)):
+                    return [make_json_serializable(item) for item in obj]
                 else:
-                    serializable_test_result[key] = str(value)
-            update_data['test_result'] = serializable_test_result
+                    # Convert any other type to string
+                    return str(obj)
+            
+            update_data['test_result'] = make_json_serializable(test_result)
         
         # Handle other field updates
         updatable_fields = ['name', 'base_url', 'is_default']
