@@ -3606,6 +3606,11 @@ async def create_or_update_article(
         supabase = get_supabase_client()
 
         clean_data = {k: v for k, v in article_data.items() if v is not None}
+        
+        # Map 'categoria' parameter to 'category' database field
+        if "categoria" in clean_data:
+            clean_data["category"] = clean_data.pop("categoria")
+        
         clean_data["company_id"] = company_id
         clean_data["updated_at"] = datetime.utcnow().isoformat()
         
@@ -3626,9 +3631,9 @@ async def create_or_update_article(
                 )
         
         # Log category inheritance for debugging
-        if "categoria" in clean_data and "context_unit_ids" in clean_data:
+        if "category" in clean_data and "context_unit_ids" in clean_data:
             logger.info("article_with_category_and_context",
-                categoria=clean_data["categoria"],
+                category=clean_data["category"],
                 context_unit_ids_count=len(clean_data.get("context_unit_ids", [])),
                 article_id=clean_data.get("id")
             )
