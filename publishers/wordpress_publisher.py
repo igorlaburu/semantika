@@ -284,7 +284,7 @@ class WordPressPublisher(BasePublisher):
                             title=title[:50],
                             url=post_url,
                             status=status,
-                            action=action,
+                            operation=action,
                             slug=slug
                         )
                         
