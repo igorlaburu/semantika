@@ -4861,10 +4861,9 @@ async def update_publication_target(
     target_data: Dict[str, Any],
     company_id: str = Depends(get_company_id_from_auth)
 ) -> Dict[str, Any]:
-    """Update publication target. If credentials provided, they will be re-encrypted and tested for connection."""
+    """Update publication target."""
     try:
         from utils.credential_manager import CredentialManager
-        from publishers.publisher_factory import PublisherFactory
         
         supabase = get_supabase_client()
         
@@ -4880,51 +4879,11 @@ async def update_publication_target(
             raise HTTPException(status_code=404, detail="Publication target not found")
         
         update_data = {}
-        test_result = None
         
         # Handle credential update
         if 'credentials' in target_data:
             credentials_encrypted = CredentialManager.encrypt_credentials(target_data['credentials'])
-            
-            # Test connection with new credentials
-            base_url = target_data.get('base_url', existing.data['base_url'])
-            platform_type = existing.data['platform_type']
-            
-            publisher = PublisherFactory.create_publisher(
-                platform_type, 
-                base_url, 
-                credentials_encrypted
-            )
-            
-            test_result = await publisher.test_connection()
-            
-            if not test_result.get('success'):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Connection test failed: {test_result.get('message')}"
-                )
-            
             update_data['credentials_encrypted'] = credentials_encrypted
-            update_data['last_tested_at'] = datetime.utcnow().isoformat()
-            # Ensure test_result is JSON serializable (no bytes objects)
-            def make_json_serializable(obj):
-                """Recursively convert object to JSON serializable format."""
-                if obj is None:
-                    return None
-                elif isinstance(obj, (bool, int, float, str)):
-                    return obj
-                elif isinstance(obj, bytes):
-                    # Convert bytes to hex string
-                    return obj.hex()
-                elif isinstance(obj, dict):
-                    return {k: make_json_serializable(v) for k, v in obj.items()}
-                elif isinstance(obj, (list, tuple)):
-                    return [make_json_serializable(item) for item in obj]
-                else:
-                    # Convert any other type to string
-                    return str(obj)
-            
-            update_data['test_result'] = make_json_serializable(test_result)
         
         # Handle other field updates
         updatable_fields = ['name', 'base_url', 'is_default']
