@@ -70,7 +70,7 @@ async def enrich_content(
             - title: str
             - summary: str
             - tags: List[str]
-            - category: str (política, economía, sociedad, cultura, deportes, tecnología,
+            - category: str (política, economía, sociedad, cultura, entrevista, deportes, tecnología,
                              medio_ambiente, infraestructuras, seguridad, salud, turismo,
                              internacional, general)
             - atomic_statements: List[Dict] (each with 'statement' and 'confidence')

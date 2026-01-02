@@ -27,6 +27,7 @@ CLASSIFICATION_PROMPT = """Classify this news content into ONE category from thi
 - economía: Business, employment, finance, commerce, industry
 - sociedad: Social services, education, housing, citizenship
 - cultura: Cultural events, art, heritage, festivals, museums
+- entrevista: Interviews, conversations, Q&A sessions with officials or personalities
 - deportes: Sports competitions, teams, facilities
 - tecnología: Technology, innovation, digital, startups
 - medio_ambiente: Environment, climate, sustainability, nature
@@ -75,7 +76,7 @@ async def classify_content(title: str, summary: str, registry) -> str:
 
         # Validate category
         valid_categories = [
-            'política', 'economía', 'sociedad', 'cultura', 'deportes',
+            'política', 'economía', 'sociedad', 'cultura', 'entrevista', 'deportes',
             'tecnología', 'medio_ambiente', 'infraestructuras', 'seguridad',
             'salud', 'turismo', 'internacional', 'general'
         ]

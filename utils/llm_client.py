@@ -182,7 +182,7 @@ Si HAY contenido útil (noticias, eventos, anuncios, convocatorias, comunicados)
 2. Resumen (3 frases)
 3. 5-10 tags
 4. 10-20 hechos: {{"order": N, "type": "fact"/"quote"/"context", "speaker": null/"Name", "text": "..."}}
-5. Categoría (UNA): política, economía, sociedad, cultura, deportes, tecnología, medio_ambiente, infraestructuras, seguridad, salud, turismo, internacional, general
+5. Categoría (UNA): política, economía, sociedad, cultura, entrevista, deportes, tecnología, medio_ambiente, infraestructuras, seguridad, salud, turismo, internacional, general
 6. Ubicaciones (DONDE OCURRE EL EVENTO, NO quien participa):
    - level: "primary" → Ciudad DONDE ocurre el evento (NO la ciudad del visitante)
    - level: "context" → Provincia/región/país

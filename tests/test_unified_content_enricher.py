@@ -122,6 +122,7 @@ class TestEnrichContent:
         category_tests = [
             ("economía", "La empresa anunció beneficios récord"),
             ("cultura", "El museo inaugura nueva exposición"),
+            ("entrevista", "Conversación con el alcalde sobre los proyectos futuros"),
             ("deportes", "El equipo ganó el campeonato"),
             ("salud", "El hospital abre nuevo servicio"),
             ("medio_ambiente", "Nueva planta de reciclaje")
