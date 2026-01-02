@@ -688,7 +688,7 @@ class SemanticSearchRequest(BaseModel):
     limit: int = Field(default=10, ge=1, le=100, description="Maximum number of results")
     threshold: float = Field(default=0.18, ge=0.0, le=1.0, description="Minimum similarity score (0.0-1.0, default 0.18 for high recall)")
     max_days: Optional[int] = Field(default=None, ge=1, description="Maximum age of context units in days (e.g., 30 = last 30 days)")
-    filters: Optional[Dict[str, Any]] = Field(default=None, description="Optional filters (category, source_type, etc.)")
+    filters: Optional[Dict[str, Any]] = Field(default=None, description="Optional filters (categoria, source_type, etc.)")
     include_pool: bool = Field(default=False, description="Include pool content (company_id = 99999999-9999-9999-9999-999999999999)")
 
 
@@ -1433,7 +1433,7 @@ async def create_context_unit(
             raw_text=request.text,
             title=request.title,  # Pre-generated title (optional)
 
-            # LLM will generate: summary, tags, category, atomic_statements (if needed)
+            # LLM will generate: summary, tags, categoria, atomic_statements (if needed)
 
             # Required metadata
             company_id=company["id"],
@@ -1568,7 +1568,7 @@ async def create_context_unit_from_url(
     5. Filter content (decide if should ingest)
     6. Save to monitored_urls (tracking)
     7. Save to url_content_units (content)
-    8. Create press_context_unit (with embeddings + category)
+    8. Create press_context_unit (with embeddings + categoria)
     
     Features:
     - Intelligent change detection
@@ -2475,7 +2475,7 @@ async def save_enriched_statements(
                     "source_id": None,
                     "title": None,  # Inherit from base
                     "summary": None,  # Inherit from base
-                    "category": None,  # Inherit from base
+                    "categoria": None,  # Inherit from base
                     "tags": [],
                     "atomic_statements": [],
                     "enriched_statements": final_statements,
@@ -3285,7 +3285,7 @@ async def list_context_units(
     timePeriod: str = "24h",
     source: str = "all",
     topic: str = "all",
-    category: str = "all",
+    categoria: str = "all",
     starred: bool = False,
     include_pool: bool = False
 ) -> Dict:
@@ -3340,8 +3340,8 @@ async def list_context_units(
             query = query.contains("tags", [topic])
 
         # Category filter
-        if category != "all":
-            query = query.eq("category", category)
+        if categoria != "all":
+            query = query.eq("category", categoria)
 
         # Starred filter
         if starred:
@@ -3402,9 +3402,9 @@ async def get_filter_options(
             for tag in unit.get("tags") or []:
                 topics_map[tag] = topics_map.get(tag, 0) + 1
 
-            category = unit.get("category")
-            if category:
-                categories_map[category] = categories_map.get(category, 0) + 1
+            categoria = unit.get("category")
+            if categoria:
+                categories_map[categoria] = categories_map.get(categoria, 0) + 1
 
         sources = [{"value": k, "label": k, "count": v} for k, v in sources_map.items()]
         topics = [{"value": k, "label": k, "count": v} for k, v in topics_map.items()]
@@ -3503,7 +3503,7 @@ async def get_context_unit(
 async def list_articles(
     company_id: str = Depends(get_company_id_from_auth),
     status: str = "all",
-    category: str = "all",
+    categoria: str = "all",
     limit: int = 20,
     offset: int = 0
 ) -> Dict:
@@ -3529,8 +3529,8 @@ async def list_articles(
             query = query.eq("estado", status)
 
         # Category filter
-        if category != "all":
-            query = query.eq("category", category)
+        if categoria != "all":
+            query = query.eq("category", categoria)
 
         # Order and paginate
         result = query.order("updated_at", desc=True)\
@@ -3626,9 +3626,9 @@ async def create_or_update_article(
                 )
         
         # Log category inheritance for debugging
-        if "category" in clean_data and "context_unit_ids" in clean_data:
+        if "categoria" in clean_data and "context_unit_ids" in clean_data:
             logger.info("article_with_category_and_context",
-                category=clean_data["category"],
+                categoria=clean_data["categoria"],
                 context_unit_ids_count=len(clean_data.get("context_unit_ids", [])),
                 article_id=clean_data.get("id")
             )
@@ -3848,7 +3848,7 @@ async def publish_to_platforms(
         content = article.get('contenido', '')
         excerpt = article.get('excerpt', '')
         tags = article.get('tags', [])
-        category = article.get('category', None)
+        categoria = article.get('categoria', None)
         
         # Use article slug (required field in press_articles)
         slug = article.get('slug')
@@ -3885,9 +3885,10 @@ async def publish_to_platforms(
                     excerpt=excerpt,
                     tags=tags,
                     image_url=image_url,
-                    category=category,
+                    category=categoria,
                     status="publish",
-                    slug=slug
+                    slug=slug,
+                    fecha_publicacion=article.get('fecha_publicacion')
                 )
                 
                 publication_results[target_id] = {
@@ -3962,9 +3963,10 @@ async def publish_article(
     
     **Body**:
         {
-            "publish_now": false,           // optional, default false
-            "schedule_time": null,          // optional ISO datetime, null = auto-schedule
-            "targets": ["uuid1", "uuid2"]   // optional, publication target IDs. If empty, uses default targets, then first available target
+            "publish_now": false,               // optional, default false
+            "preserve_original_date": false,    // optional, mantener fecha de publicación original
+            "schedule_time": null,              // optional ISO datetime, null = auto-schedule
+            "targets": ["uuid1", "uuid2"]       // optional, publication target IDs. If empty, uses default targets, then first available target
         }
     
     **Returns**:
@@ -3997,6 +3999,7 @@ async def publish_article(
         
         # Determine publication strategy first
         publish_now = request.get('publish_now', False)
+        preserve_original_date = request.get('preserve_original_date', False)
         
         # Check article state - allow programado articles to be published immediately
         if article['estado'] == 'borrador':
@@ -4022,10 +4025,28 @@ async def publish_article(
             )
         
         if publish_now:
+            # Determine publication date
+            existing_date = article.get('fecha_publicacion')
+            
+            if preserve_original_date and existing_date:
+                # Mantener fecha original
+                publication_date = existing_date
+                logger.info("preserving_original_publication_date", 
+                    article_id=article_id, 
+                    original_date=existing_date)
+            else:
+                # Nueva fecha de publicación
+                publication_date = datetime.utcnow().isoformat()
+                if existing_date:
+                    logger.info("updating_publication_date", 
+                        article_id=article_id, 
+                        old_date=existing_date, 
+                        new_date=publication_date)
+            
             # Publish immediately
             update_data = {
                 "estado": "publicado",
-                "fecha_publicacion": datetime.utcnow().isoformat(),
+                "fecha_publicacion": publication_date,
                 "updated_at": datetime.utcnow().isoformat()
             }
             scheduled_for = None

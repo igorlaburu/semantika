@@ -623,6 +623,30 @@ async def execute_redact_news_rich(
 
         result["category"] = category
 
+        # Generate excerpt from summary (truncate to ~150 characters for WordPress)
+        summary = result.get("summary", "")
+        if summary:
+            # Truncate at word boundary, max 150 chars
+            if len(summary) > 150:
+                truncated = summary[:147] + "..."
+                # Try to break at last word boundary
+                last_space = truncated.rfind(" ")
+                if last_space > 100:  # Ensure we don't cut too short
+                    excerpt = truncated[:last_space] + "..."
+                else:
+                    excerpt = truncated
+            else:
+                excerpt = summary
+            
+            result["excerpt"] = excerpt
+            logger.debug("excerpt_generated_from_summary",
+                summary_length=len(summary),
+                excerpt_length=len(excerpt)
+            )
+        else:
+            result["excerpt"] = ""
+            logger.warn("no_summary_available_for_excerpt")
+
         # Generate image_prompt from article content
         try:
             article_content = result.get("article", "")
