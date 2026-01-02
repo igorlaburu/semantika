@@ -4883,7 +4883,8 @@ async def update_publication_target(
         # Handle credential update
         if 'credentials' in target_data:
             credentials_encrypted = CredentialManager.encrypt_credentials(target_data['credentials'])
-            update_data['credentials_encrypted'] = credentials_encrypted
+            # Convert bytes to hex string for database storage
+            update_data['credentials_encrypted'] = credentials_encrypted.hex()
         
         # Handle other field updates
         updatable_fields = ['name', 'base_url', 'is_default']
