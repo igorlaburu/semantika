@@ -158,6 +158,89 @@ class WordPressPublisher(BasePublisher):
             logger.error("wordpress_image_upload_error", error=str(e))
             return None
     
+    async def _upload_featured_image_from_uuid(
+        self, 
+        session: aiohttp.ClientSession, 
+        imagen_uuid: str,
+        headers: Dict[str, str]
+    ) -> Optional[int]:
+        """Upload image to WordPress media library using imagen_uuid from unified endpoint.
+        
+        Implements caching to avoid re-uploading the same image multiple times.
+        """
+        try:
+            # Check if we already uploaded this image (simple caching)
+            cache_key = f"wp_image_{imagen_uuid}"
+            if hasattr(self, '_image_cache') and cache_key in self._image_cache:
+                cached_media_id = self._image_cache[cache_key]
+                logger.info("wordpress_image_cache_hit",
+                    imagen_uuid=imagen_uuid,
+                    cached_media_id=cached_media_id
+                )
+                return cached_media_id
+            
+            # Get image from unified endpoint (local call, no auth needed)
+            unified_image_url = f"http://localhost:8000/api/v1/images/{imagen_uuid}"
+            
+            async with session.get(unified_image_url) as img_response:
+                if img_response.status != 200:
+                    logger.warn("image_download_failed_from_unified", 
+                        imagen_uuid=imagen_uuid,
+                        status=img_response.status
+                    )
+                    return None
+                
+                image_data = await img_response.read()
+                content_type = img_response.headers.get('content-type', 'image/jpeg')
+            
+            # Generate filename based on UUID
+            filename = f"article-{imagen_uuid}.jpg"
+            
+            # Upload to WordPress
+            upload_headers = headers.copy()
+            upload_headers['Content-Type'] = content_type
+            upload_headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+            
+            upload_url = self._get_api_url('media')
+            
+            async with session.post(
+                upload_url, 
+                data=image_data, 
+                headers=upload_headers
+            ) as upload_response:
+                if upload_response.status == 201:
+                    media_data = await upload_response.json()
+                    media_id = media_data.get('id')
+                    
+                    # Cache the result to avoid re-upload
+                    if not hasattr(self, '_image_cache'):
+                        self._image_cache = {}
+                    self._image_cache[cache_key] = media_id
+                    
+                    logger.info("wordpress_image_uploaded_from_uuid",
+                        imagen_uuid=imagen_uuid,
+                        media_id=media_id,
+                        filename=filename,
+                        url=media_data.get('source_url')
+                    )
+                    
+                    return media_id
+                else:
+                    error_text = await upload_response.text()
+                    logger.warn("wordpress_image_upload_failed_from_uuid",
+                        imagen_uuid=imagen_uuid,
+                        status=upload_response.status,
+                        error=error_text[:200]
+                    )
+                    return None
+                    
+        except Exception as e:
+            logger.error("wordpress_image_upload_error_from_uuid", 
+                imagen_uuid=imagen_uuid,
+                error=str(e)
+            )
+            return None
+    
     async def publish_article(
         self,
         title: str,
@@ -165,10 +248,11 @@ class WordPressPublisher(BasePublisher):
         excerpt: Optional[str] = None,
         tags: Optional[list] = None,
         image_url: Optional[str] = None,
-        category: Optional[str] = None,
         status: str = "publish",
         slug: Optional[str] = None,
-        fecha_publicacion: Optional[str] = None
+        categoria: Optional[str] = None,
+        fecha_publicacion: Optional[str] = None,
+        imagen_uuid: Optional[str] = None
     ) -> PublicationResult:
         """Publish article to WordPress."""
         
@@ -182,7 +266,13 @@ class WordPressPublisher(BasePublisher):
                 featured_media_id = None
                 
                 # Upload featured image if provided
-                if image_url:
+                if imagen_uuid:
+                    # Use unified image endpoint with UUID (preferred method)
+                    featured_media_id = await self._upload_featured_image_from_uuid(
+                        session, imagen_uuid, headers
+                    )
+                elif image_url:
+                    # Fallback to URL-based method (legacy)
                     featured_media_id = await self._upload_featured_image(
                         session, image_url, headers
                     )
@@ -194,8 +284,8 @@ class WordPressPublisher(BasePublisher):
                 
                 # Handle category - get or create category ID
                 category_ids = []
-                if category:
-                    category_id = await self._get_or_create_category(session, category, headers)
+                if categoria:
+                    category_id = await self._get_or_create_category(session, categoria, headers)
                     if category_id:
                         category_ids.append(category_id)
                 

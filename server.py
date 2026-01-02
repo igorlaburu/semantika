@@ -3865,11 +3865,8 @@ async def publish_to_platforms(
             # Fallback to generated slug if missing
             slug = _generate_slug_from_title(title)
         
-        # Get image URL if available
-        image_url = None
-        if article.get('imagen_uuid'):
-            # Build public image URL for the article's featured image
-            image_url = f"https://press.ekimen.ai/api/images/{article['imagen_uuid']}"
+        # Get image UUID for unified image endpoint
+        imagen_uuid = article.get('imagen_uuid')
         
         # Publish to each target
         for target in targets:
@@ -3889,7 +3886,7 @@ async def publish_to_platforms(
                     content=content,
                     excerpt=excerpt,
                     tags=tags,
-                    image_url=image_url,
+                    imagen_uuid=imagen_uuid,
                     category=categoria,
                     status="publish",
                     slug=slug,

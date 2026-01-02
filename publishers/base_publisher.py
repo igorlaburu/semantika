@@ -53,7 +53,10 @@ class BasePublisher(ABC):
         tags: Optional[list] = None,
         image_url: Optional[str] = None,
         status: str = "publish",
-        slug: Optional[str] = None
+        slug: Optional[str] = None,
+        categoria: Optional[str] = None,
+        fecha_publicacion: Optional[str] = None,
+        imagen_uuid: Optional[str] = None
     ) -> PublicationResult:
         """Publish an article to the platform.
         
@@ -62,9 +65,12 @@ class BasePublisher(ABC):
             content: HTML content
             excerpt: Article summary/excerpt
             tags: List of tags
-            image_url: Featured image URL
+            image_url: Featured image URL (legacy, deprecated)
             status: Publication status ("draft" or "publish")
             slug: Article slug/URL identifier (optional)
+            categoria: Article category (optional)
+            fecha_publicacion: Publication date ISO string (optional)
+            imagen_uuid: Image UUID for unified image endpoint (preferred)
             
         Returns:
             PublicationResult with success/failure details
