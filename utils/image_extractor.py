@@ -272,7 +272,13 @@ def extract_first_article_image(soup: BeautifulSoup, page_url: str) -> Optional[
     - Icons (< 100x100px)
     - Logos (in header/footer)
     - Tracking pixels
+    - Images from different domains (cross-site images)
     """
+    from urllib.parse import urlparse
+    
+    # Get domain from page URL for same-domain preference
+    page_domain = urlparse(page_url).netloc.lower()
+    
     # Find article/main content area
     content_areas = (
         soup.find_all('article') +
@@ -284,6 +290,9 @@ def extract_first_article_image(soup: BeautifulSoup, page_url: str) -> Optional[
     # If no semantic tags, search whole body
     if not content_areas:
         content_areas = [soup.find('body')] if soup.find('body') else [soup]
+    
+    # Collect all valid images with scoring
+    candidate_images = []
     
     for area in content_areas:
         if not area:
@@ -306,6 +315,7 @@ def extract_first_article_image(soup: BeautifulSoup, page_url: str) -> Optional[
             # Skip tiny images (likely icons)
             width = img.get('width')
             height = img.get('height')
+            w, h = None, None
             if width and height:
                 try:
                     w = int(width)
@@ -321,31 +331,87 @@ def extract_first_article_image(soup: BeautifulSoup, page_url: str) -> Optional[
             if not is_valid_image_url(image_url):
                 continue
             
-            # Extract alt text
+            # Check domain - prefer same domain images
+            image_domain = urlparse(image_url).netloc.lower()
+            is_same_domain = image_domain == page_domain
+            
+            # Calculate score for image selection priority
+            score = 0
+            
+            # Same domain gets major bonus (prevents cross-site images)
+            if is_same_domain:
+                score += 100
+            else:
+                # Log cross-domain images for debugging
+                logger.debug("content_image_cross_domain", 
+                    page_domain=page_domain,
+                    image_domain=image_domain,
+                    image_url=image_url[:100]
+                )
+                # Still allow, but with lower score
+                score += 10
+            
+            # Size bonus (larger images preferred)
+            if w and h:
+                score += min(w + h, 50)  # Cap bonus at 50
+            
+            # Alt text bonus (indicates meaningful image)
             alt = img.get('alt', '').strip()
+            if alt and len(alt) > 10:
+                score += 20
             
-            result = {
+            candidate_images.append({
                 "url": image_url,
-                "source": "content"
-            }
-            
-            if alt:
-                result["alt"] = alt
-            if width:
-                try:
-                    result["width"] = int(width)
-                except (ValueError, TypeError):
-                    pass
-            if height:
-                try:
-                    result["height"] = int(height)
-                except (ValueError, TypeError):
-                    pass
-            
-            logger.debug("content_image_extracted", url=image_url)
-            return result
+                "source": "content",
+                "score": score,
+                "width": w,
+                "height": h,
+                "alt": alt,
+                "domain": image_domain,
+                "same_domain": is_same_domain
+            })
     
-    return None
+    # If no candidates found
+    if not candidate_images:
+        return None
+    
+    # Sort by score (highest first)
+    candidate_images.sort(key=lambda x: x["score"], reverse=True)
+    
+    # Take best candidate
+    best = candidate_images[0]
+    
+    # Log selection details for debugging
+    logger.debug("content_image_selected",
+        url=best["url"][:100],
+        score=best["score"],
+        same_domain=best["same_domain"],
+        total_candidates=len(candidate_images)
+    )
+    
+    # If the best image is cross-domain, log warning
+    if not best["same_domain"]:
+        logger.warn("content_image_cross_domain_selected",
+            page_domain=page_domain,
+            image_domain=best["domain"],
+            image_url=best["url"][:100],
+            score=best["score"]
+        )
+    
+    # Build result
+    result = {
+        "url": best["url"],
+        "source": "content"
+    }
+    
+    if best["alt"]:
+        result["alt"] = best["alt"]
+    if best["width"]:
+        result["width"] = best["width"]
+    if best["height"]:
+        result["height"] = best["height"]
+    
+    return result
 
 
 def is_valid_image_url(url: str) -> bool:
