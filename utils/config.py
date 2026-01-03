@@ -57,6 +57,10 @@ class Settings(BaseSettings):
         default="fast",
         description="Model for multi-source aggregation (fast | haiku | sonnet_premium | groq_fast)"
     )
+    llm_quick_commands_model: str = Field(
+        default="groq_fast",
+        description="Model for micro-edits and quick commands (groq_fast | fast | haiku)"
+    )
 
     # Groq Configuration
     groq_api_key: str = Field(

@@ -1356,8 +1356,8 @@ Formato exacto:
                 ("user", user_prompt)
             ])
 
-            # Use configured writer model for micro-edits
-            provider = self.registry.get(settings.llm_writer_model)
+            # Use configured quick commands model for micro-edits
+            provider = self.registry.get(settings.llm_quick_commands_model)
             
             config = {}
             if organization_id:
@@ -1373,8 +1373,25 @@ Formato exacto:
             )
 
             import json
+            import re
             try:
-                result = json.loads(response.content)
+                # Extract JSON from markdown code blocks if present
+                content = response.content
+                
+                # Check if response is wrapped in markdown code blocks
+                json_match = re.search(r'```(?:json)?\s*(.*?)\s*```', content, re.DOTALL)
+                if json_match:
+                    # Extract JSON content from code blocks
+                    json_content = json_match.group(1).strip()
+                    logger.debug("extracted_json_from_markdown", 
+                        original_length=len(content),
+                        extracted_length=len(json_content)
+                    )
+                else:
+                    # Use content as-is if no code blocks found
+                    json_content = content.strip()
+                
+                result = json.loads(json_content)
             except Exception as e:
                 logger.error("micro_edit_json_parsing_failed", error=str(e), content=response.content[:500])
                 return {
