@@ -3049,18 +3049,18 @@ async def serve_cached_email_image(
 async def get_image_unified(image_id: str):
     """Unified public image endpoint.
     
-    Serves cached images from /app/cache/images/{uuid}.jpg
+    Serves cached images from /app/cache/images/{uuid}.{ext}
     No authentication required - knowing the UUID is the protection.
     
     Images can be:
-    1. AI-generated (from POST /articles/{id}/generate-image)
-    2. Featured images (cached from GET /context-units/{id}/image)
+    1. AI-generated (from POST /articles/{id}/generate-image) - typically .jpg
+    2. Featured images (cached from GET /context-units/{id}/image) - .jpg, .png, .gif, .webp, .bmp
     
     Args:
         image_id: UUID of article or context unit
         
     Returns:
-        - JPEG image if cached (X-Image-Source: "cached")
+        - Image if cached (JPEG/PNG/GIF/WebP/BMP) (X-Image-Source: "cached")
         - SVG placeholder if not found (X-Image-Source: "placeholder")
         
     Headers:
@@ -3071,18 +3071,37 @@ async def get_image_unified(image_id: str):
     
     try:
         cache_dir = Path("/app/cache/images")
-        cache_file = cache_dir / f"{image_id}.jpg"
         
-        if cache_file.exists():
-            logger.debug("unified_image_cache_hit", image_id=image_id)
-            return Response(
-                content=cache_file.read_bytes(),
-                media_type="image/jpeg",
-                headers={
-                    "Cache-Control": "public, max-age=86400",
-                    "X-Image-Source": "cached"
+        # Check for cached image with multiple extensions
+        extensions = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"]
+        
+        for ext in extensions:
+            cache_file = cache_dir / f"{image_id}{ext}"
+            if cache_file.exists():
+                # Determine media type from extension
+                media_type_map = {
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg", 
+                    ".png": "image/png",
+                    ".webp": "image/webp",
+                    ".gif": "image/gif",
+                    ".bmp": "image/bmp"
                 }
-            )
+                media_type = media_type_map.get(ext, "image/jpeg")
+                
+                logger.debug("unified_image_cache_hit", 
+                    image_id=image_id,
+                    extension=ext,
+                    media_type=media_type
+                )
+                return Response(
+                    content=cache_file.read_bytes(),
+                    media_type=media_type,
+                    headers={
+                        "Cache-Control": "public, max-age=86400",
+                        "X-Image-Source": "cached"
+                    }
+                )
         
         # Not cached - return placeholder
         logger.debug("unified_image_not_found", image_id=image_id)
