@@ -1191,7 +1191,25 @@ Responde SOLO con JSON válido, sin texto adicional:
             # Parse JSON manually from response
             try:
                 import json
-                result = json.loads(llm_response.content)
+                import re
+                
+                # Extract JSON from markdown code blocks if present
+                content = llm_response.content
+                
+                # Check if response is wrapped in markdown code blocks
+                json_match = re.search(r'```(?:json)?\s*(.*?)\s*```', content, re.DOTALL)
+                if json_match:
+                    # Extract JSON content from code blocks
+                    json_content = json_match.group(1).strip()
+                    logger.debug("extracted_json_from_markdown", 
+                        original_length=len(content),
+                        extracted_length=len(json_content)
+                    )
+                else:
+                    # Use content as-is if no code blocks found
+                    json_content = content.strip()
+                
+                result = json.loads(json_content)
             except Exception as e:
                 logger.error("micro_edit_json_parsing_failed", 
                     error=str(e),
