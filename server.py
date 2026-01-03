@@ -2771,15 +2771,7 @@ async def get_context_unit_image(
         
         if not result.data:
             logger.debug("context_unit_not_found_for_image", context_unit_id=context_unit_id)
-            placeholder = generate_placeholder_image()
-            return Response(
-                content=placeholder,
-                media_type="image/svg+xml",
-                headers={
-                    "Cache-Control": "public, max-age=86400",
-                    "X-Image-Source": "placeholder"
-                }
-            )
+            raise HTTPException(status_code=404, detail="Context unit not found")
         
         context_unit = result.data
         source_metadata = context_unit.get("source_metadata") or {}
@@ -2787,15 +2779,7 @@ async def get_context_unit_image(
         
         if not featured_image or not featured_image.get("url"):
             logger.debug("no_featured_image", context_unit_id=context_unit_id)
-            placeholder = generate_placeholder_image()
-            return Response(
-                content=placeholder,
-                media_type="image/svg+xml",
-                headers={
-                    "Cache-Control": "public, max-age=86400",
-                    "X-Image-Source": "placeholder"
-                }
-            )
+            raise HTTPException(status_code=404, detail="No featured image available for this context unit")
         
         image_url = featured_image["url"]
         
@@ -2838,15 +2822,7 @@ async def get_context_unit_image(
                 context_unit_id=context_unit_id, 
                 file_url=image_url
             )
-            placeholder = generate_placeholder_image()
-            return Response(
-                content=placeholder,
-                media_type="image/svg+xml",
-                headers={
-                    "Cache-Control": "public, max-age=3600",
-                    "X-Image-Source": "placeholder"
-                }
-            )
+            raise HTTPException(status_code=400, detail="File URLs are not supported")
         
         # Cache miss - download and cache
         logger.debug("image_cache_miss", context_unit_id=context_unit_id)
