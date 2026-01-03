@@ -688,7 +688,7 @@ class SemanticSearchRequest(BaseModel):
     limit: int = Field(default=10, ge=1, le=100, description="Maximum number of results")
     threshold: float = Field(default=0.18, ge=0.0, le=1.0, description="Minimum similarity score (0.0-1.0, default 0.18 for high recall)")
     max_days: Optional[int] = Field(default=None, ge=1, description="Maximum age of context units in days (e.g., 30 = last 30 days)")
-    filters: Optional[Dict[str, Any]] = Field(default=None, description="Optional filters (categoria, source_type, etc.)")
+    filters: Optional[Dict[str, Any]] = Field(default=None, description="Optional filters (category, source_type, etc.)")
     include_pool: bool = Field(default=False, description="Include pool content (company_id = 99999999-9999-9999-9999-999999999999)")
 
 
@@ -1433,7 +1433,7 @@ async def create_context_unit(
             raw_text=request.text,
             title=request.title,  # Pre-generated title (optional)
 
-            # LLM will generate: summary, tags, categoria, atomic_statements (if needed)
+            # LLM will generate: summary, tags, category, atomic_statements (if needed)
 
             # Required metadata
             company_id=company["id"],
@@ -1568,7 +1568,7 @@ async def create_context_unit_from_url(
     5. Filter content (decide if should ingest)
     6. Save to monitored_urls (tracking)
     7. Save to url_content_units (content)
-    8. Create press_context_unit (with embeddings + categoria)
+    8. Create press_context_unit (with embeddings + category)
     
     Features:
     - Intelligent change detection
@@ -2475,7 +2475,7 @@ async def save_enriched_statements(
                     "source_id": None,
                     "title": None,  # Inherit from base
                     "summary": None,  # Inherit from base
-                    "categoria": None,  # Inherit from base
+                    "category": None,  # Inherit from base
                     "tags": [],
                     "atomic_statements": [],
                     "enriched_statements": final_statements,
@@ -3285,7 +3285,7 @@ async def list_context_units(
     timePeriod: str = "24h",
     source: str = "all",
     topic: str = "all",
-    categoria: str = "all",
+    category: str = "all",
     starred: bool = False,
     include_pool: bool = False
 ) -> Dict:
@@ -3340,8 +3340,8 @@ async def list_context_units(
             query = query.contains("tags", [topic])
 
         # Category filter
-        if categoria != "all":
-            query = query.eq("category", categoria)
+        if category != "all":
+            query = query.eq("category", category)
 
         # Starred filter
         if starred:
@@ -3402,9 +3402,9 @@ async def get_filter_options(
             for tag in unit.get("tags") or []:
                 topics_map[tag] = topics_map.get(tag, 0) + 1
 
-            categoria = unit.get("category")
-            if categoria:
-                categories_map[categoria] = categories_map.get(categoria, 0) + 1
+            category = unit.get("category")
+            if category:
+                categories_map[category] = categories_map.get(category, 0) + 1
 
         sources = [{"value": k, "label": k, "count": v} for k, v in sources_map.items()]
         topics = [{"value": k, "label": k, "count": v} for k, v in topics_map.items()]
@@ -3503,7 +3503,7 @@ async def get_context_unit(
 async def list_articles(
     company_id: str = Depends(get_company_id_from_auth),
     status: str = "all",
-    categoria: str = "all",
+    category: str = "all",
     limit: int = 20,
     offset: int = 0
 ) -> Dict:
@@ -3529,8 +3529,8 @@ async def list_articles(
             query = query.eq("estado", status)
 
         # Category filter
-        if categoria != "all":
-            query = query.eq("category", categoria)
+        if category != "all":
+            query = query.eq("category", category)
 
         # Order and paginate
         result = query.order("updated_at", desc=True)\
@@ -3607,9 +3607,6 @@ async def create_or_update_article(
 
         clean_data = {k: v for k, v in article_data.items() if v is not None}
         
-        # Map 'categoria' parameter to 'category' database field
-        if "categoria" in clean_data:
-            clean_data["category"] = clean_data.pop("categoria")
         
         clean_data["company_id"] = company_id
         clean_data["updated_at"] = datetime.utcnow().isoformat()
@@ -3853,7 +3850,7 @@ async def publish_to_platforms(
         content = article.get('contenido', '')
         excerpt = article.get('excerpt', '')
         tags = article.get('tags', [])
-        categoria = article.get('categoria', None)
+        category = article.get('category', None)
         
         # Use article slug (required field in press_articles)
         slug = article.get('slug')
@@ -3887,7 +3884,7 @@ async def publish_to_platforms(
                     excerpt=excerpt,
                     tags=tags,
                     imagen_uuid=imagen_uuid,
-                    category=categoria,
+                    category=category,
                     status="publish",
                     slug=slug,
                     fecha_publicacion=article.get('fecha_publicacion')

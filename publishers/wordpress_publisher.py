@@ -250,7 +250,7 @@ class WordPressPublisher(BasePublisher):
         image_url: Optional[str] = None,
         status: str = "publish",
         slug: Optional[str] = None,
-        categoria: Optional[str] = None,
+        category: Optional[str] = None,
         fecha_publicacion: Optional[str] = None,
         imagen_uuid: Optional[str] = None
     ) -> PublicationResult:
@@ -284,8 +284,8 @@ class WordPressPublisher(BasePublisher):
                 
                 # Handle category - get or create category ID
                 category_ids = []
-                if categoria:
-                    category_id = await self._get_or_create_category(session, categoria, headers)
+                if category:
+                    category_id = await self._get_or_create_category(session, category, headers)
                     if category_id:
                         category_ids.append(category_id)
                 

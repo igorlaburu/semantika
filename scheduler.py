@@ -738,7 +738,7 @@ async def generate_articles_for_company(
                 "excerpt": article_data['summary'],
                 "contenido": article_data['article'],
                 "tags": article_data['tags'],
-                "categoria": unit.get('category', 'general'),
+                "category": unit.get('category', 'general'),
                 "estado": "borrador",
                 "imagen_uuid": image_uuid,
                 "style_id": style_id,
