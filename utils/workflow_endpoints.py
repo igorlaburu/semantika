@@ -623,6 +623,25 @@ async def execute_redact_news_rich(
 
         result["category"] = category
 
+        # IMAGE INHERITANCE LOGIC
+        # Assign imagen_uuid from first context unit that has a featured image
+        imagen_uuid = None
+        for cu in context_units:
+            source_metadata = cu.get("source_metadata") or {}
+            featured_image = source_metadata.get("featured_image")
+            if featured_image:
+                # Extract UUID from context unit
+                imagen_uuid = cu["id"]
+                logger.info(
+                    "article_image_inherited",
+                    imagen_uuid=imagen_uuid,
+                    from_context_unit=cu["id"],
+                    image_url=featured_image.get("url") if isinstance(featured_image, dict) else str(featured_image)
+                )
+                break
+        
+        result["imagen_uuid"] = imagen_uuid
+
         # Generate excerpt from summary (truncate to ~150 characters for WordPress)
         summary = result.get("summary", "")
         if summary:
