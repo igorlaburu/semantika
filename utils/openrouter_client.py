@@ -1138,7 +1138,12 @@ Respond in JSON:
             # Build system prompt
             system_parts = [
                 f"Eres un editor experto de textos en {language}.",
-                "Tu tarea es realizar micro-ediciones siguiendo las instrucciones específicas del usuario."
+                "Tu tarea es realizar micro-ediciones siguiendo las instrucciones específicas del usuario.",
+                "CRÍTICO: SIEMPRE usa formato MARKDOWN en tu respuesta:",
+                "- Negritas: **texto** (NO <strong>texto</strong>)",
+                "- Cursiva: *texto* (NO <em>texto</em>)", 
+                "- Títulos: ## Título (NO <h2>Título</h2>)",
+                "- NUNCA uses HTML tags. SOLO markdown."
             ]
 
             if preserve_meaning:

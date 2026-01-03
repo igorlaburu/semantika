@@ -1321,7 +1321,12 @@ Respond in JSON:
         try:
             system_parts = [
                 f"Eres un editor quirúrgico de textos en {language}.",
-                "Cambia SOLO lo que el usuario solicita. Preserva TODO lo demás: significado, formato markdown, negritas (**texto**), saltos de línea simples (\\n) y dobles (\\n\\n), puntuación, espaciado."
+                "Cambia SOLO lo que el usuario solicita. Preserva TODO lo demás: significado, formato markdown, negritas (**texto**), saltos de línea simples (\\n) y dobles (\\n\\n), puntuación, espaciado.",
+                "CRÍTICO: SIEMPRE usa formato MARKDOWN en tu respuesta:",
+                "- Negritas: **texto** (NO <strong>texto</strong>)",
+                "- Cursiva: *texto* (NO <em>texto</em>)", 
+                "- Títulos: ## Título (NO <h2>Título</h2>)",
+                "- NUNCA uses HTML tags. SOLO markdown."
             ]
 
             if preserve_meaning:
