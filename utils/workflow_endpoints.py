@@ -722,25 +722,7 @@ async def execute_redact_news_rich(
         
         result["imagen_url"] = imagen_url
 
-        # Add references section to article content
-        from utils.article_references import append_references_to_content
-        
-        # Get enrichment references if any
-        enrichments = []
-        for cu in context_units:
-            enriched_statements = cu.get("enriched_statements") or []
-            for stmt in enriched_statements:
-                if isinstance(stmt, dict) and stmt.get("url"):
-                    enrichments.append({"url": stmt["url"]})
-        
-        # Append references to article content (field is "article" not "content")
-        if "article" in result:
-            result["article"] = append_references_to_content(
-                content=result["article"],
-                context_units=context_units,
-                enrichments=enrichments if enrichments else None,
-                image_info=image_info
-            )
+        # References section removed - articles no longer include automatic references
 
         return result
         

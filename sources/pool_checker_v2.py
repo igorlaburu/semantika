@@ -60,30 +60,66 @@ async def get_next_healthy_source() -> Optional[Dict[str, Any]]:
         if reset_result.data:
             logger.info("circuit_breakers_auto_reset", count=len(reset_result.data))
         
-        # Get next 1 healthy source (reduced from 2 to save API costs)
-        result = supabase.client.table("discovered_sources")\
+        # 1. Get 2 sources normal rotation (oldest scraped first)
+        normal_result = supabase.client.table("discovered_sources")\
             .select("*")\
             .eq("company_id", POOL_COMPANY_ID)\
             .eq("is_active", True)\
             .eq("circuit_breaker_open", False)\
             .order("last_scraped_at", desc=False, nullsfirst=True)\
-            .limit(1)\
+            .limit(2)\
             .execute()
         
-        if not result.data:
+        sources = list(normal_result.data) if normal_result.data else []
+        
+        # 2. Get high-frequency sources (top sources reviewed every 5 cycles)
+        # Check if any high-activity source needs frequent review
+        high_freq_result = supabase.client.table("discovered_sources")\
+            .select("*")\
+            .eq("company_id", POOL_COMPANY_ID)\
+            .eq("is_active", True)\
+            .eq("circuit_breaker_open", False)\
+            .gte("content_count_7d", 5)\
+            .order("content_count_7d", desc=True)\
+            .limit(10)\
+            .execute()
+        
+        if high_freq_result.data:
+            # Find sources that haven't been scraped in the last 5 cycles (50 minutes)
+            from datetime import datetime, timedelta
+            cutoff_time = datetime.utcnow() - timedelta(minutes=50)
+            
+            high_freq_candidates = [
+                s for s in high_freq_result.data
+                if not s.get("last_scraped_at") or 
+                datetime.fromisoformat(s["last_scraped_at"].replace("Z", "+00:00")) < cutoff_time
+            ]
+            
+            if high_freq_candidates:
+                # Pick the most active one that needs review
+                bonus_source = max(high_freq_candidates, key=lambda s: s.get("content_count_7d", 0))
+                
+                # Avoid duplicates - check if bonus source already in normal sources
+                source_ids = {s["source_id"] for s in sources}
+                if bonus_source["source_id"] not in source_ids:
+                    sources.append(bonus_source)
+        
+        if not sources:
             logger.warn("no_healthy_sources", 
                 message="All sources have circuit breaker open or are inactive")
             return []
         
-        sources = result.data
-        
-        logger.info("next_sources_selected",
-            count=len(sources),
+        logger.info("smart_sources_selected",
+            normal_count=len(normal_result.data) if normal_result.data else 0,
+            high_freq_added=len(sources) > 2,
+            total_sources=len(sources),
             sources=[{
                 "source_id": s["source_id"],
                 "source_name": s["source_name"],
-                "last_scraped_at": s.get("last_scraped_at")
-            } for s in sources]
+                "activity_7d": s.get("content_count_7d", 0),
+                "last_scraped_at": s.get("last_scraped_at"),
+                "type": "high_frequency" if i >= 2 else "normal"
+            } for i, s in enumerate(sources)]
         )
         
         return sources
@@ -297,7 +333,11 @@ async def check_source_robust(source: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def check_next_sources():
-    """Main function: Check next 2 healthy sources in parallel.
+    """Main function: Check next 2-3 sources in parallel (2 normal + 1 high-frequency).
+    
+    Strategy:
+    - 2 sources: Normal rotation (oldest scraped first)
+    - 1 source: High-frequency from top 10 sources with 5+ content_count_7d (every 5 cycles = 50min)
     
     Called by scheduler every 10 minutes.
     """

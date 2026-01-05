@@ -410,6 +410,16 @@ async def ingest_context_unit(
                 context_unit_id = str(uuid.uuid4())
             now = datetime.utcnow().isoformat()
 
+            # DEBUG LOG: Track source_metadata before saving
+            if company_id == "99999999-9999-9999-9999-999999999999":  # Pool company
+                logger.info("unified_ingester_pool_metadata_received",
+                    source_metadata_keys=list((source_metadata or {}).keys()),
+                    has_url=bool((source_metadata or {}).get("url")),
+                    has_connector_type=bool((source_metadata or {}).get("connector_type")),
+                    metadata_preview=str(source_metadata or {})[:200],
+                    title=title[:50] if title else "NO_TITLE"
+                )
+
             context_unit_data = {
                 "id": context_unit_id,
                 "base_id": context_unit_id,  # Self-reference: this is the base unit

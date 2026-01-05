@@ -169,6 +169,8 @@ def migrate_old_metadata(old_metadata: Dict[str, Any]) -> Dict[str, Any]:
             connector_type = "scraping"
         elif "subject" in old_metadata or "from" in old_metadata:
             connector_type = "email"
+        elif "source_code" in old_metadata and old_metadata.get("is_pool"):
+            connector_type = "pool_scraping"
     
     # Perplexity migration
     if connector_type == "perplexity_news":
@@ -215,6 +217,21 @@ def migrate_old_metadata(old_metadata: Dict[str, Any]) -> Dict[str, Any]:
                 "from": old_metadata.get("from"),
                 "message_id": old_metadata.get("message_id"),
                 "has_attachments": old_metadata.get("has_attachments")
+            }
+        )
+    
+    # Pool scraping migration
+    elif connector_type == "pool_scraping":
+        return normalize_source_metadata(
+            url=None,  # Pool sources usually don't have individual URLs
+            source_name=old_metadata.get("source_name"),
+            published_at=None,  # Pool sources usually don't have specific publish dates
+            scraped_at=None,
+            connector_type="pool_scraping",
+            connector_specific={
+                "source_code": old_metadata.get("source_code"),
+                "quality_score": old_metadata.get("quality_score"),
+                "is_pool": old_metadata.get("is_pool")
             }
         )
     

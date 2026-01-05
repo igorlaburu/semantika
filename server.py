@@ -2752,8 +2752,7 @@ async def get_article_image(
 
 @app.get("/api/v1/context-units/{context_unit_id}/image")
 async def get_context_unit_image(
-    context_unit_id: str,
-    company_id: str = Depends(get_company_id_from_auth)
+    context_unit_id: str
 ):
     """Get featured image for context unit (scraped from source).
     

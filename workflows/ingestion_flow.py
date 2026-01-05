@@ -46,6 +46,7 @@ from utils.logger import get_logger
 from utils.supabase_client import get_supabase_client
 from utils.unified_context_ingester import ingest_context_unit
 from utils.unified_content_enricher import enrich_content
+from utils.source_metadata_schema import normalize_source_metadata
 
 logger = get_logger("ingestion_flow")
 
@@ -249,25 +250,44 @@ class IngestionFlow:
                     "statement_count": statement_count
                 }
             
+            # Normalize metadata to standard schema for pool sources
+            metadata = normalize_source_metadata(
+                url=url,
+                source_name=source["source_name"],
+                published_at=item.get("published_at"),
+                scraped_at=None,  # Will auto-generate current time
+                connector_type="pool_scraping",
+                connector_specific={
+                    "source_code": source["source_code"],
+                    "quality_score": quality_score,
+                    "is_pool": True,
+                    "ingestion_flow": True
+                }
+            )
+            
+            # DEBUG LOG: Track metadata creation
+            logger.info("ingestion_flow_metadata_created",
+                source_code=source["source_code"],
+                url=url,
+                has_url_in_metadata=bool(metadata.get("url")),
+                metadata_url_preview=metadata.get("url", "NO_URL")[:100],
+                connector_type=metadata.get("connector_type"),
+                title=title[:50]
+            )
+            
             # Ingest to PostgreSQL via unified ingester
             pool_company_id = "99999999-9999-9999-9999-999999999999"
             result = await ingest_context_unit(
                 company_id=pool_company_id,
                 source_id=source["source_id"],
                 raw_text=raw_text,
-                url=url,
                 title=enriched.get("title"),
                 summary=enriched.get("summary"),
                 category=enriched.get("category"),
                 tags=enriched.get("tags", []),
                 atomic_statements=enriched.get("atomic_statements", []),
                 source_type="scraping",
-                source_metadata={
-                    "source_name": source["source_name"],
-                    "source_code": source["source_code"],
-                    "quality_score": quality_score,
-                    "is_pool": True
-                }
+                source_metadata=metadata
             )
             
             if result.get("success"):
