@@ -4067,38 +4067,26 @@ async def _add_article_footer(content: str, article_id: str, company_id: str) ->
         footer_parts = []
         
         # Get context units used in this article
-        context_units_query = supabase.client.table("press_context_units")\
-            .select("source_metadata, id")\
-            .eq("company_id", company_id)
+        # Get article data to find context_unit_ids
+        article_data = supabase.client.table("press_articles")\
+            .select("context_unit_ids")\
+            .eq("id", article_id)\
+            .maybe_single()\
+            .execute()
         
-        # For articles, we need to get context units through article_context_units relation
-        # If that table doesn't exist, we'll get all recent context units as fallback
-        try:
-            article_units_query = supabase.client.table("article_context_units")\
-                .select("context_unit_id")\
-                .eq("article_id", article_id)
-            
-            article_units_result = article_units_query.execute()
-            
-            if article_units_result.data:
-                context_unit_ids = [row["context_unit_id"] for row in article_units_result.data]
+        context_units_result = {"data": []}
+        
+        if article_data.data and article_data.data.get("context_unit_ids"):
+            # Use context units linked to this article
+            context_unit_ids = article_data.data["context_unit_ids"]
+            if context_unit_ids:
                 context_units_result = supabase.client.table("press_context_units")\
                     .select("source_metadata, id")\
                     .in_("id", context_unit_ids)\
                     .execute()
-            else:
-                # Fallback: get recent context units from same company (last 24 hours)
-                from datetime import datetime, timedelta
-                yesterday = (datetime.utcnow() - timedelta(days=1)).isoformat()
-                context_units_result = supabase.client.table("press_context_units")\
-                    .select("source_metadata, id")\
-                    .eq("company_id", company_id)\
-                    .gte("created_at", yesterday)\
-                    .order("created_at", desc=True)\
-                    .limit(5)\
-                    .execute()
-        except:
-            # If article_context_units table doesn't exist, use fallback approach
+        
+        # If no context units found, use fallback to recent units from same company
+        if not context_units_result.data:
             from datetime import datetime, timedelta
             yesterday = (datetime.utcnow() - timedelta(days=1)).isoformat()
             context_units_result = supabase.client.table("press_context_units")\
@@ -4138,16 +4126,22 @@ async def _add_article_footer(content: str, article_id: str, company_id: str) ->
                 except:
                     continue
         
-        # Check if article has AI generated images
+        # Check if article has AI generated images by looking at working_json.generated_images
         article_result = supabase.client.table("press_articles")\
-            .select("imagen_uuid, image_generated_with_ai")\
+            .select("imagen_uuid, working_json")\
             .eq("id", article_id)\
             .maybe_single()\
             .execute()
         
         has_ai_image = False
-        if article_result.data:
-            has_ai_image = article_result.data.get("image_generated_with_ai", False)
+        if article_result.data and article_result.data.get("imagen_uuid"):
+            imagen_uuid = article_result.data["imagen_uuid"]
+            working_json = article_result.data.get("working_json") or {}
+            generated_images = working_json.get("article", {}).get("generated_images", [])
+            
+            # Check if the article's imagen_uuid is in the generated_images list
+            ai_image_uuids = [img.get("uuid") for img in generated_images if img.get("uuid")]
+            has_ai_image = imagen_uuid in ai_image_uuids
         
         # Build footer
         if references:
