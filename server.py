@@ -4152,10 +4152,19 @@ async def publish_article(
                         old_date=existing_date, 
                         new_date=publication_date)
             
+            # Extract primary publication URL (first successful publication)
+            published_url = None
+            for target_id, result in publication_results.items():
+                if result.get("success") and result.get("url"):
+                    published_url = result["url"]
+                    break  # Use first successful URL as primary
+            
             # Publish immediately
             update_data = {
                 "estado": "publicado",
                 "fecha_publicacion": publication_date,
+                "published_url": published_url,
+                "published_date": datetime.utcnow().isoformat(),
                 "updated_at": datetime.utcnow().isoformat()
             }
             scheduled_for = None
