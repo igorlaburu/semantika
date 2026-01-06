@@ -1520,7 +1520,7 @@ async def create_context_unit(
                         "has_manual_images": True,
                         "image_count": len(images_saved),
                         "image_sources": ["user_upload"] * len(images_saved),
-                        "cached_images": [Path(p).name for p in images_saved]
+                        "cached_images": [Path(p).stem for p in images_saved]  # Remove extension, keep only filename
                     }
                     
                     # Update source_metadata
