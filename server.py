@@ -12,7 +12,7 @@ import io
 import re
 from pathlib import Path
 
-from fastapi import FastAPI, Request, Header, HTTPException, Depends
+from fastapi import FastAPI, Request, Header, HTTPException, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse, Response
 from pydantic import BaseModel, Field
@@ -748,6 +748,16 @@ class CreateContextUnitRequest(BaseModel):
     """Request model for creating context unit from text."""
     text: str
     title: Optional[str] = None
+    images: Optional[List[Dict[str, str]]] = Field(
+        default=None, 
+        description="Array of images with base64 data and filename",
+        example=[
+            {
+                "base64": "data:image/jpeg;base64,/9j/4AAQ...",
+                "filename": "imagen1.jpg"
+            }
+        ]
+    )
 
 
 class CreateContextUnitFromURLRequest(BaseModel):
@@ -1488,6 +1498,54 @@ async def create_context_unit(
             title=created_unit.get("title", "")
         )
         
+        # Process images if provided
+        images_saved = []
+        if request.images:
+            try:
+                from utils.context_unit_images import ContextUnitImageProcessor
+                
+                logger.info("processing_context_unit_images",
+                    context_unit_id=created_unit["id"],
+                    image_count=len(request.images)
+                )
+                
+                images_saved = await ContextUnitImageProcessor.save_context_unit_images(
+                    context_unit_id=created_unit["id"],
+                    images=request.images
+                )
+                
+                # Update context unit metadata with image info
+                if images_saved:
+                    image_metadata = {
+                        "has_manual_images": True,
+                        "image_count": len(images_saved),
+                        "image_sources": ["user_upload"] * len(images_saved),
+                        "cached_images": [Path(p).name for p in images_saved]
+                    }
+                    
+                    # Update source_metadata
+                    current_metadata = created_unit.get("source_metadata", {})
+                    current_metadata.update(image_metadata)
+                    
+                    supabase.client.table("press_context_units")\
+                        .update({"source_metadata": current_metadata})\
+                        .eq("id", created_unit["id"])\
+                        .execute()
+                    
+                    created_unit["source_metadata"] = current_metadata
+                    
+                    logger.info("context_unit_images_metadata_updated",
+                        context_unit_id=created_unit["id"],
+                        images_saved=len(images_saved)
+                    )
+                
+            except Exception as e:
+                logger.error("process_context_unit_images_error",
+                    context_unit_id=created_unit["id"],
+                    error=str(e)
+                )
+                # Don't fail the whole request if image processing fails
+        
         # Log execution
         duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
         await supabase.log_execution(
@@ -1511,7 +1569,9 @@ async def create_context_unit(
         
         return {
             "success": True,
-            "context_unit": created_unit
+            "context_unit": created_unit,
+            "images_saved": len(images_saved),
+            "image_paths": images_saved if images_saved else None
         }
         
     except HTTPException:
@@ -2752,11 +2812,23 @@ async def get_article_image(
 
 @app.get("/api/v1/context-units/{context_unit_id}/image")
 async def get_context_unit_image(
-    context_unit_id: str
+    context_unit_id: str,
+    index: int = Query(0, ge=0, le=10, description="Image index (0 = first image)")
 ):
-    """Get featured image for context unit (scraped from source).
+    """Get featured or manual image for context unit.
     
-    Returns the featured_image from source_metadata or placeholder.
+    Args:
+        context_unit_id: UUID of context unit
+        index: Image index (0 = first image, 1 = second, etc.)
+        
+    Returns:
+        Image file or placeholder.
+        
+    Sources (in priority order):
+        1. Manual uploaded images (index-based: {context_unit_id}_{index}.ext)
+        2. Legacy format (backward compatibility: {context_unit_id}.ext - index=0 only)
+        3. Featured images from scraping (index=0 only)
+        4. Placeholder SVG
     """
     from pathlib import Path
     
@@ -2766,7 +2838,7 @@ async def get_context_unit_image(
         
         result = supabase_client.client.table("press_context_units").select(
             "id, source_metadata, company_id"
-        ).eq("id", context_unit_id).in_("company_id", [company_id, pool_company_id]).maybe_single().execute()
+        ).eq("id", context_unit_id).maybe_single().execute()
         
         if not result.data:
             logger.debug("context_unit_not_found_for_image", context_unit_id=context_unit_id)
@@ -2774,130 +2846,174 @@ async def get_context_unit_image(
         
         context_unit = result.data
         source_metadata = context_unit.get("source_metadata") or {}
-        featured_image = source_metadata.get("featured_image")
         
-        if not featured_image or not featured_image.get("url"):
-            logger.debug("no_featured_image", context_unit_id=context_unit_id)
-            raise HTTPException(status_code=404, detail="No featured image available for this context unit")
-        
-        image_url = featured_image["url"]
-        
-        # Check cache first - try different extensions
+        # Priority 1: Check for manual uploaded images (indexed)
         cache_dir = Path("/app/cache/images")
         cache_dir.mkdir(parents=True, exist_ok=True)
         
-        # For email attachments, try multiple extensions
-        for ext in [".jpg", ".jpeg", ".png", ".webp", ".gif"]:
-            cache_file = cache_dir / f"{context_unit_id}{ext}"
-            if cache_file.exists():
+        # Try manual images with index: {context_unit_id}_{index}.ext
+        for ext in [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"]:
+            indexed_cache_file = cache_dir / f"{context_unit_id}_{index}{ext}"
+            if indexed_cache_file.exists():
                 # Determine media type from extension
                 media_type_map = {
                     ".jpg": "image/jpeg",
-                    ".jpeg": "image/jpeg",
+                    ".jpeg": "image/jpeg", 
                     ".png": "image/png",
-                    ".webp": "image/webp", 
-                    ".gif": "image/gif"
+                    ".webp": "image/webp",
+                    ".gif": "image/gif",
+                    ".bmp": "image/bmp"
                 }
                 media_type = media_type_map.get(ext, "image/jpeg")
                 
-                logger.debug("image_cache_hit", 
+                logger.debug("manual_image_cache_hit",
                     context_unit_id=context_unit_id,
-                    cache_file=str(cache_file),
-                    extension=ext
+                    index=index,
+                    cache_file=str(indexed_cache_file)
                 )
+                
                 return Response(
-                    content=cache_file.read_bytes(),
+                    content=indexed_cache_file.read_bytes(),
                     media_type=media_type,
                     headers={
                         "Cache-Control": "public, max-age=86400",
-                        "X-Image-Source": "cached",
-                        "X-Image-Cache": "hit"
+                        "X-Image-Source": "manual_upload",
+                        "X-Image-Index": str(index)
                     }
                 )
         
-        # Handle file:// URLs (email attachments) - should not reach here if cache works
-        if image_url.startswith("file://"):
-            logger.warn("file_url_without_cache", 
-                context_unit_id=context_unit_id, 
-                file_url=image_url
-            )
-            raise HTTPException(status_code=400, detail="File URLs are not supported")
+        # Priority 2: For index=0, try old format without index (backward compatibility)
+        if index == 0:
+            for ext in [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"]:
+                legacy_cache_file = cache_dir / f"{context_unit_id}{ext}"
+                if legacy_cache_file.exists():
+                    # Determine media type from extension
+                    media_type_map = {
+                        ".jpg": "image/jpeg",
+                        ".jpeg": "image/jpeg",
+                        ".png": "image/png",
+                        ".webp": "image/webp", 
+                        ".gif": "image/gif",
+                        ".bmp": "image/bmp"
+                    }
+                    media_type = media_type_map.get(ext, "image/jpeg")
+                
+                    logger.debug("legacy_image_cache_hit", 
+                        context_unit_id=context_unit_id,
+                        cache_file=str(legacy_cache_file),
+                        extension=ext
+                    )
+                    return Response(
+                        content=legacy_cache_file.read_bytes(),
+                        media_type=media_type,
+                        headers={
+                            "Cache-Control": "public, max-age=86400",
+                            "X-Image-Source": "legacy_format",
+                            "X-Image-Cache": "hit"
+                        }
+                    )
         
-        # Cache miss - download and cache
-        logger.debug("image_cache_miss", context_unit_id=context_unit_id)
-        try:
-            import ssl
-            ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-            
-            connector = aiohttp.TCPConnector(ssl=ssl_context)
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.get(
-                    image_url,
-                    headers={
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                        'Accept': 'image/*',
-                        'Referer': source_metadata.get("url", "https://ekimen.ai")
-                    },
-                    timeout=aiohttp.ClientTimeout(total=10)
-                ) as response:
-                    
-                    if response.status == 200:
-                        image_bytes = await response.read()
-                        content_type = response.headers.get("Content-Type", "image/jpeg")
+        # Priority 3: For index=0, try featured image from scraping
+        if index == 0:
+            featured_image = source_metadata.get("featured_image")
+            if featured_image and featured_image.get("url"):
+                image_url = featured_image["url"]
+                
+                # Skip file:// URLs (should be cached already)
+                if image_url.startswith("file://"):
+                    logger.warn("file_url_without_cache", 
+                        context_unit_id=context_unit_id, 
+                        file_url=image_url
+                    )
+                    # Fall through to placeholder
+                else:
+                    # Try to fetch and cache featured image
+                    try:
+                        import ssl
+                        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                        ssl_context.check_hostname = False
+                        ssl_context.verify_mode = ssl.CERT_NONE
                         
-                        # Cache to disk
-                        try:
-                            cache_file.write_bytes(image_bytes)
-                            logger.info("image_cached", 
-                                context_unit_id=context_unit_id,
-                                size_bytes=len(image_bytes),
-                                cache_path=str(cache_file)
-                            )
-                        except Exception as e:
-                            logger.warn("image_cache_write_failed", 
-                                context_unit_id=context_unit_id,
-                                error=str(e)
-                            )
-                        
-                        return Response(
-                            content=image_bytes,
-                            media_type=content_type,
-                            headers={
-                                "Cache-Control": "public, max-age=86400",
-                                "X-Image-Source": "original",
-                                "X-Image-Cache": "miss"
-                            }
+                        connector = aiohttp.TCPConnector(ssl=ssl_context)
+                        async with aiohttp.ClientSession(connector=connector) as session:
+                            async with session.get(
+                                image_url,
+                                headers={
+                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                                    'Accept': 'image/*',
+                                    'Referer': source_metadata.get("url", "https://ekimen.ai")
+                                },
+                                timeout=aiohttp.ClientTimeout(total=10)
+                            ) as response:
+                                
+                                if response.status == 200:
+                                    image_bytes = await response.read()
+                                    content_type = response.headers.get("Content-Type", "image/jpeg")
+                                    
+                                    # Try to cache to disk (optional - don't fail if this fails)
+                                    try:
+                                        # Determine extension from content type
+                                        ext_map = {
+                                            "image/jpeg": ".jpg",
+                                            "image/png": ".png",
+                                            "image/webp": ".webp",
+                                            "image/gif": ".gif",
+                                            "image/bmp": ".bmp"
+                                        }
+                                        ext = ext_map.get(content_type, ".jpg")
+                                        cache_file = cache_dir / f"{context_unit_id}{ext}"
+                                        
+                                        cache_file.write_bytes(image_bytes)
+                                        logger.info("featured_image_cached", 
+                                            context_unit_id=context_unit_id,
+                                            size_bytes=len(image_bytes),
+                                            cache_path=str(cache_file)
+                                        )
+                                    except Exception as e:
+                                        logger.warn("featured_image_cache_write_failed", 
+                                            context_unit_id=context_unit_id,
+                                            error=str(e)
+                                        )
+                                    
+                                    return Response(
+                                        content=image_bytes,
+                                        media_type=content_type,
+                                        headers={
+                                            "Cache-Control": "public, max-age=86400",
+                                            "X-Image-Source": "featured_image",
+                                            "X-Image-Extraction": featured_image.get("source", "unknown")
+                                        }
+                                    )
+                                else:
+                                    logger.warn("featured_image_fetch_failed", 
+                                        context_unit_id=context_unit_id,
+                                        status=response.status,
+                                        url=image_url
+                                    )
+                    except Exception as e:
+                        logger.warn("featured_image_proxy_error", 
+                            context_unit_id=context_unit_id, 
+                            error=str(e),
+                            url=image_url
                         )
-                    else:
-                        logger.warn("image_fetch_failed", 
-                            context_unit_id=context_unit_id,
-                            status=response.status
-                        )
-                        placeholder = generate_placeholder_image()
-                        return Response(
-                            content=placeholder,
-                            media_type="image/svg+xml",
-                            headers={
-                                "Cache-Control": "public, max-age=3600",
-                                "X-Image-Source": "placeholder"
-                            }
-                        )
-        except Exception as e:
-            logger.warn("image_proxy_error", context_unit_id=context_unit_id, error=str(e))
-            placeholder = generate_placeholder_image()
-            return Response(
-                content=placeholder,
-                media_type="image/svg+xml",
-                headers={
-                    "Cache-Control": "public, max-age=3600",
-                    "X-Image-Source": "placeholder"
-                }
-            )
+        
+        # Priority 4: Return placeholder
+        logger.debug("image_not_found_using_placeholder", 
+            context_unit_id=context_unit_id,
+            index=index
+        )
+        placeholder = generate_placeholder_image()
+        return Response(
+            content=placeholder,
+            media_type="image/svg+xml",
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "X-Image-Source": "placeholder"
+            }
+        )
             
     except Exception as e:
-        logger.error("get_context_unit_image_error", context_unit_id=context_unit_id, error=str(e))
+        logger.error("get_context_unit_image_error", context_unit_id=context_unit_id, index=index, error=str(e))
         placeholder = generate_placeholder_image()
         return Response(
             content=placeholder,
