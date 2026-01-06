@@ -3975,6 +3975,9 @@ async def publish_to_platforms(
         # Get image UUID for unified image endpoint
         imagen_uuid = article.get('imagen_uuid')
         
+        # Add references and image attribution footer
+        content = await _add_article_footer(content, article.get('id'), company_id)
+        
         # Publish to each target
         for target in targets:
             target_id = target['id']
@@ -4053,6 +4056,135 @@ async def publish_to_platforms(
         # Return empty dict on error rather than failing the whole publication
     
     return publication_results
+
+
+async def _add_article_footer(content: str, article_id: str, company_id: str) -> str:
+    """Add references and image attribution footer to article content."""
+    from urllib.parse import urlparse
+    
+    try:
+        supabase = get_supabase_client()
+        footer_parts = []
+        
+        # Get context units used in this article
+        context_units_query = supabase.client.table("press_context_units")\
+            .select("source_metadata, id")\
+            .eq("company_id", company_id)
+        
+        # For articles, we need to get context units through article_context_units relation
+        # If that table doesn't exist, we'll get all recent context units as fallback
+        try:
+            article_units_query = supabase.client.table("article_context_units")\
+                .select("context_unit_id")\
+                .eq("article_id", article_id)
+            
+            article_units_result = article_units_query.execute()
+            
+            if article_units_result.data:
+                context_unit_ids = [row["context_unit_id"] for row in article_units_result.data]
+                context_units_result = supabase.client.table("press_context_units")\
+                    .select("source_metadata, id")\
+                    .in_("id", context_unit_ids)\
+                    .execute()
+            else:
+                # Fallback: get recent context units from same company (last 24 hours)
+                from datetime import datetime, timedelta
+                yesterday = (datetime.utcnow() - timedelta(days=1)).isoformat()
+                context_units_result = supabase.client.table("press_context_units")\
+                    .select("source_metadata, id")\
+                    .eq("company_id", company_id)\
+                    .gte("created_at", yesterday)\
+                    .order("created_at", desc=True)\
+                    .limit(5)\
+                    .execute()
+        except:
+            # If article_context_units table doesn't exist, use fallback approach
+            from datetime import datetime, timedelta
+            yesterday = (datetime.utcnow() - timedelta(days=1)).isoformat()
+            context_units_result = supabase.client.table("press_context_units")\
+                .select("source_metadata, id")\
+                .eq("company_id", company_id)\
+                .gte("created_at", yesterday)\
+                .order("created_at", desc=True)\
+                .limit(5)\
+                .execute()
+        
+        context_units = context_units_result.data or []
+        
+        # Collect unique references (URLs)
+        references = set()
+        image_sources = []
+        
+        for unit in context_units:
+            metadata = unit.get("source_metadata") or {}
+            url = metadata.get("url")
+            
+            if url and url.startswith("http"):
+                try:
+                    parsed = urlparse(url)
+                    domain = parsed.netloc
+                    references.add((domain, url))
+                except:
+                    continue
+            
+            # Check for featured images
+            featured_image = metadata.get("featured_image")
+            if featured_image and featured_image.get("url"):
+                image_url = featured_image["url"]
+                try:
+                    parsed = urlparse(image_url)
+                    image_domain = parsed.netloc
+                    image_sources.append((image_domain, image_url))
+                except:
+                    continue
+        
+        # Check if article has AI generated images
+        article_result = supabase.client.table("press_articles")\
+            .select("imagen_uuid, image_generated_with_ai")\
+            .eq("id", article_id)\
+            .maybe_single()\
+            .execute()
+        
+        has_ai_image = False
+        if article_result.data:
+            has_ai_image = article_result.data.get("image_generated_with_ai", False)
+        
+        # Build footer
+        if references:
+            footer_parts.append("<strong>Referencias:</strong>")
+            for domain, url in sorted(references):
+                footer_parts.append(f'<a href="{url}">{domain}</a>')
+        
+        # Add image attribution
+        if image_sources or has_ai_image:
+            footer_parts.append("<strong>Imagen:</strong>")
+            
+            if has_ai_image:
+                footer_parts.append("Generada con IA")
+            
+            for image_domain, image_url in sorted(set(image_sources)):
+                footer_parts.append(f'<a href="{image_url}">{image_domain}</a>')
+        
+        if footer_parts:
+            footer_html = "<br>".join(footer_parts) + "<br>"
+            content = f"{content}<br><br>{footer_html}"
+            
+            logger.info("article_footer_added",
+                article_id=article_id,
+                references_count=len(references),
+                image_sources_count=len(image_sources),
+                has_ai_image=has_ai_image
+            )
+        
+        return content
+        
+    except Exception as e:
+        logger.error("add_article_footer_error",
+            article_id=article_id,
+            error=str(e)
+        )
+        # Return original content if footer generation fails
+        return content
 
 
 @app.post("/api/v1/articles/{article_id}/publish")
