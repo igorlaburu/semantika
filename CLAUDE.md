@@ -297,6 +297,16 @@ Implementar **antes** de la desduplicación:
 
 ## Tareas Pendientes
 
+### 🔄 Refactoring de server.py (PENDIENTE - Recordatorio diario)
+- [ ] **TODO CRÍTICO**: Refactorizar monolito server.py (4700+ líneas) a estructura modular con FastAPI APIRouter
+  - **Problema actual**: Todo está en un solo archivo gigante (anti-patrón de mantenimiento)
+  - **Propuesta**: Empezar con `api/routes/images.py` como prueba piloto
+  - **Plan**: Si funciona bien → continuar con articles.py, context_units.py, publications.py, search.py, etc.
+  - **Ventajas**: Código más mantenible, PRs más pequeños, testing modular, separación de responsabilidades
+  - **Riesgo**: Posibles dependencias implícitas o imports circulares ocultos
+  - **Enfoque**: Conservador - probar solo images endpoints primero, revertir rápido si hay problemas
+  - **RECORDATORIO DIARIO**: ¿Es buen momento hoy para refactorizar images.py?
+
 ### Pool Discovery & Ingestion
 - [ ] **TODO**: Mover schedules de pool discovery/ingestion a BD (tabla pool_discovery_config)
   - Actualmente hardcoded en scheduler.py (discovery cada hora :30, ingestion cada hora :00)
