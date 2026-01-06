@@ -325,10 +325,22 @@ class IngestionFlow:
             avg_quality: Average quality score
         """
         try:
-            # Update stats
+            # Get current content_count_7d and increment it
+            current_result = self.supabase.client.table("discovered_sources")\
+                .select("content_count_7d")\
+                .eq("source_id", source_id)\
+                .execute()
+            
+            current_count = 0
+            if current_result.data:
+                current_count = current_result.data[0].get("content_count_7d", 0)
+            
+            new_count = current_count + items_ingested
+            
+            # Update stats with incremented content_count_7d
             self.supabase.client.table("discovered_sources")\
                 .update({
-                    "content_count_7d": items_ingested,
+                    "content_count_7d": new_count,
                     "avg_quality_score": avg_quality,
                     "last_scraped_at": datetime.utcnow().isoformat(),
                     "last_evaluated_at": datetime.utcnow().isoformat()
@@ -339,6 +351,7 @@ class IngestionFlow:
             logger.info("source_stats_updated",
                 source_id=source_id,
                 items_ingested=items_ingested,
+                new_count=new_count,
                 avg_quality=avg_quality
             )
         
@@ -445,6 +458,37 @@ class IngestionFlow:
                 "success": False,
                 "error": str(e)
             }
+
+
+async def reset_weekly_counters():
+    """
+    Reset content_count_7d counters weekly (every Monday at 00:00 UTC).
+    
+    Called by scheduler.
+    """
+    try:
+        logger.info("resetting_weekly_counters")
+        
+        supabase = get_supabase_client()
+        
+        # Reset all content_count_7d to 0
+        result = supabase.client.table("discovered_sources")\
+            .update({"content_count_7d": 0})\
+            .eq("company_id", "99999999-9999-9999-9999-999999999999")\
+            .execute()
+        
+        reset_count = len(result.data) if result.data else 0
+        
+        logger.info("weekly_counters_reset", sources_reset=reset_count)
+        
+        return {
+            "success": True,
+            "sources_reset": reset_count
+        }
+    
+    except Exception as e:
+        logger.error("reset_weekly_counters_error", error=str(e))
+        return {"success": False, "error": str(e)}
 
 
 async def execute_ingestion_job() -> Dict[str, Any]:

@@ -79,7 +79,7 @@ async def get_next_healthy_source() -> Optional[Dict[str, Any]]:
             .eq("company_id", POOL_COMPANY_ID)\
             .eq("is_active", True)\
             .eq("circuit_breaker_open", False)\
-            .gte("content_count_7d", 5)\
+            .gte("content_count_7d", 2)\
             .order("content_count_7d", desc=True)\
             .limit(10)\
             .execute()
@@ -337,7 +337,7 @@ async def check_next_sources():
     
     Strategy:
     - 2 sources: Normal rotation (oldest scraped first)
-    - 1 source: High-frequency from top 10 sources with 5+ content_count_7d (every 5 cycles = 50min)
+    - 1 source: High-frequency from top 10 sources with 2+ content_count_7d (every 5 cycles = 50min)
     
     Called by scheduler every 10 minutes.
     """
