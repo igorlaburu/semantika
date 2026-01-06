@@ -351,7 +351,49 @@ async def ingest_context_unit(
                 )
                 # Continue without embedding if generation fails
 
-        # Step 5: Check for semantic duplicates using embedding similarity
+        # Step 5A: Check for URL duplicates first (fast and precise)
+        if check_duplicates and source_metadata and source_metadata.get("url"):
+            try:
+                supabase = get_supabase_client()
+                url = source_metadata.get("url")
+                
+                # Check for exact URL match
+                url_duplicate_result = supabase.client.table("press_context_units")\
+                    .select("id, title, created_at")\
+                    .eq("company_id", company_id)\
+                    .eq("source_metadata->>url", url)\
+                    .limit(1)\
+                    .execute()
+                
+                if url_duplicate_result.data and len(url_duplicate_result.data) > 0:
+                    url_duplicate = url_duplicate_result.data[0]
+                    
+                    if not force_save:
+                        logger.warn("url_duplicate_found_skipping_save",
+                            title=title[:50],
+                            url=url[:100],
+                            duplicate_id=url_duplicate['id'],
+                            duplicate_title=url_duplicate.get('title', '')[:50],
+                            duplicate_created_at=url_duplicate.get('created_at')
+                        )
+                        return {
+                            "success": False,
+                            "context_unit_id": None,
+                            "duplicate": True,
+                            "duplicate_id": url_duplicate['id'],
+                            "duplicate_title": url_duplicate.get('title'),
+                            "duplicate_type": "url_exact_match",
+                            "generated_fields": generated_fields
+                        }
+                        
+            except Exception as e:
+                logger.error("url_duplicate_check_error",
+                    title=title[:50],
+                    error=str(e)
+                )
+                # Continue - safer to have duplicates than miss content
+
+        # Step 5B: Check for semantic duplicates using embedding similarity
         if check_duplicates and embedding:
             try:
                 supabase = get_supabase_client()
@@ -379,7 +421,7 @@ async def ingest_context_unit(
                     duplicate = result.data[0]
 
                     if not force_save:
-                        logger.warn("duplicate_found_skipping_save",
+                        logger.warn("semantic_duplicate_found_skipping_save",
                             title=title[:50],
                             duplicate_id=duplicate['id'],
                             similarity=duplicate.get('similarity')
@@ -390,6 +432,7 @@ async def ingest_context_unit(
                             "duplicate": True,
                             "duplicate_id": duplicate['id'],
                             "duplicate_title": duplicate.get('title'),
+                            "duplicate_type": "semantic_similarity",
                             "similarity": duplicate.get('similarity'),
                             "generated_fields": generated_fields
                         }
