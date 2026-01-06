@@ -12,7 +12,7 @@ import io
 import re
 from pathlib import Path
 
-from fastapi import FastAPI, Request, Header, HTTPException, Depends, Query
+from fastapi import FastAPI, Request, Header, HTTPException, Depends, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse, Response
 from pydantic import BaseModel, Field
@@ -4496,6 +4496,196 @@ async def hybrid_semantic_search(
             error=str(e)
         )
         raise HTTPException(status_code=500, detail=f"Hybrid search failed: {str(e)}")
+
+
+# ============================================
+# IMAGE ENDPOINTS
+# ============================================
+
+class ImageUploadRequest(BaseModel):
+    """Request model for base64 image upload."""
+    base64: str = Field(..., description="Base64 encoded image data (with or without data URI prefix)")
+    filename: Optional[str] = Field(None, description="Original filename (optional, used for extension detection)")
+
+@app.put("/api/v1/images")
+async def upload_image(
+    image_file: Optional[UploadFile] = File(None),
+    company_id: str = Depends(get_company_id_from_auth)
+) -> Dict[str, Any]:
+    """
+    Upload an independent image and get a UUID to retrieve it later.
+    
+    Supports two methods:
+    1. Multipart form upload: PUT /api/v1/images with file in 'image_file' field
+    2. Base64 JSON: PUT /api/v1/images with JSON body containing base64 data
+    
+    **Authentication**: Accepts either JWT or API Key
+    
+    Returns:
+        {
+            "success": true,
+            "image_id": "uuid-generated",
+            "size_bytes": 1024,
+            "format": "png",
+            "url": "/api/v1/images/uuid-generated"
+        }
+    """
+    import uuid
+    from utils.context_unit_images import ContextUnitImageProcessor
+    
+    try:
+        # Generate unique UUID for this image
+        image_uuid = str(uuid.uuid4())
+        
+        if image_file:
+            # Method 1: Multipart file upload
+            if not image_file.content_type or not image_file.content_type.startswith('image/'):
+                raise HTTPException(status_code=400, detail="File must be an image")
+            
+            # Read file content
+            image_data = await image_file.read()
+            
+            # Validate size
+            if len(image_data) > ContextUnitImageProcessor.MAX_FILE_SIZE:
+                raise HTTPException(
+                    status_code=413, 
+                    detail=f"Image too large. Max size: {ContextUnitImageProcessor.MAX_FILE_SIZE} bytes"
+                )
+            
+            # Validate image format and dimensions
+            if not ContextUnitImageProcessor.validate_image(image_data):
+                raise HTTPException(status_code=400, detail="Invalid image format or dimensions")
+            
+            # Detect format
+            extension = ContextUnitImageProcessor.detect_image_format(image_data)
+            if not extension:
+                # Fallback to filename extension
+                extension = ContextUnitImageProcessor.get_extension_from_filename(image_file.filename or "")
+                if not extension:
+                    extension = ".jpg"  # Default
+            
+        else:
+            # Method 2: JSON request with base64 (read from request body)
+            raise HTTPException(
+                status_code=400, 
+                detail="Multipart file upload required. Send image as 'image_file' field."
+            )
+        
+        # Save to cache directory with UUID
+        cache_dir = Path("/app/cache/images")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        cache_filename = f"{image_uuid}{extension}"
+        cache_path = cache_dir / cache_filename
+        
+        # Write to disk
+        with open(cache_path, "wb") as f:
+            f.write(image_data)
+        
+        logger.info("independent_image_uploaded",
+            image_uuid=image_uuid,
+            filename=cache_filename,
+            size_bytes=len(image_data),
+            content_type=image_file.content_type if image_file else "unknown",
+            company_id=company_id
+        )
+        
+        return {
+            "success": True,
+            "image_id": image_uuid,
+            "size_bytes": len(image_data),
+            "format": extension[1:],  # Remove dot from extension
+            "url": f"/api/v1/images/{image_uuid}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("upload_image_error", error=str(e), company_id=company_id)
+        raise HTTPException(status_code=500, detail=f"Failed to upload image: {str(e)}")
+
+@app.post("/api/v1/images")
+async def upload_image_base64(
+    request: ImageUploadRequest,
+    company_id: str = Depends(get_company_id_from_auth)
+) -> Dict[str, Any]:
+    """
+    Upload an image using base64 encoding.
+    
+    **Authentication**: Accepts either JWT or API Key
+    
+    Body:
+        {
+            "base64": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA...",
+            "filename": "my-image.png"  // optional
+        }
+    
+    Returns:
+        {
+            "success": true,
+            "image_id": "uuid-generated",
+            "size_bytes": 1024,
+            "format": "png",
+            "url": "/api/v1/images/uuid-generated"
+        }
+    """
+    import uuid
+    from utils.context_unit_images import ContextUnitImageProcessor
+    
+    try:
+        # Generate unique UUID for this image
+        image_uuid = str(uuid.uuid4())
+        
+        # Decode base64 image
+        try:
+            image_data = ContextUnitImageProcessor.decode_base64_image(request.base64)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        
+        # Validate image format and dimensions
+        if not ContextUnitImageProcessor.validate_image(image_data):
+            raise HTTPException(status_code=400, detail="Invalid image format or dimensions")
+        
+        # Detect format
+        extension = ContextUnitImageProcessor.detect_image_format(image_data)
+        if not extension:
+            # Fallback to filename extension
+            extension = ContextUnitImageProcessor.get_extension_from_filename(request.filename or "")
+            if not extension:
+                extension = ".jpg"  # Default
+        
+        # Save to cache directory with UUID
+        cache_dir = Path("/app/cache/images")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        cache_filename = f"{image_uuid}{extension}"
+        cache_path = cache_dir / cache_filename
+        
+        # Write to disk
+        with open(cache_path, "wb") as f:
+            f.write(image_data)
+        
+        logger.info("independent_image_uploaded_base64",
+            image_uuid=image_uuid,
+            filename=cache_filename,
+            size_bytes=len(image_data),
+            original_filename=request.filename,
+            company_id=company_id
+        )
+        
+        return {
+            "success": True,
+            "image_id": image_uuid,
+            "size_bytes": len(image_data),
+            "format": extension[1:],  # Remove dot from extension
+            "url": f"/api/v1/images/{image_uuid}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("upload_image_base64_error", error=str(e), company_id=company_id)
+        raise HTTPException(status_code=500, detail=f"Failed to upload image: {str(e)}")
 
 
 # ============================================
