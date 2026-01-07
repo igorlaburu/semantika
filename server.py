@@ -4166,7 +4166,6 @@ async def _add_article_footer(content: str, article_id: str, company_id: str) ->
         
         # Collect unique references (URLs)
         references = set()
-        image_sources = []
         
         for unit in context_units:
             metadata = unit.get("source_metadata") or {}
@@ -4179,34 +4178,33 @@ async def _add_article_footer(content: str, article_id: str, company_id: str) ->
                     references.add((domain, url))
                 except:
                     continue
-            
-            # Check for featured images
-            featured_image = metadata.get("featured_image")
-            if featured_image and featured_image.get("url"):
-                image_url = featured_image["url"]
-                try:
-                    parsed = urlparse(image_url)
-                    image_domain = parsed.netloc
-                    image_sources.append((image_domain, image_url))
-                except:
-                    continue
         
-        # Check if article has AI generated images by looking at working_json.generated_images
+        # Get article image info for attribution
         article_result = supabase.client.table("press_articles")\
             .select("imagen_uuid, working_json")\
             .eq("id", article_id)\
             .maybe_single()\
             .execute()
         
-        has_ai_image = False
+        image_attribution = None
         if article_result.data and article_result.data.get("imagen_uuid"):
             imagen_uuid = article_result.data["imagen_uuid"]
-            working_json = article_result.data.get("working_json") or {}
-            generated_images = working_json.get("article", {}).get("generated_images", [])
             
-            # Check if the article's imagen_uuid is in the generated_images list
-            ai_image_uuids = [img.get("uuid") for img in generated_images if img.get("uuid")]
-            has_ai_image = imagen_uuid in ai_image_uuids
+            # Check if it's a featured image from a source (has _0, _1, etc suffix)
+            if '_' in imagen_uuid and imagen_uuid.split('_')[-1].isdigit():
+                # Featured image from source - use first reference domain
+                if references:
+                    first_domain, first_url = next(iter(references))
+                    image_attribution = first_domain
+            else:
+                # Check if it's AI generated
+                working_json = article_result.data.get("working_json") or {}
+                generated_images = working_json.get("article", {}).get("generated_images", [])
+                ai_image_uuids = [img.get("uuid") for img in generated_images if img.get("uuid")]
+                
+                if imagen_uuid in ai_image_uuids:
+                    image_attribution = "Generada con IA"
+                # If neither featured nor AI → manual upload, no attribution needed
         
         # Build footer
         if references:
@@ -4214,15 +4212,10 @@ async def _add_article_footer(content: str, article_id: str, company_id: str) ->
             for domain, url in sorted(references):
                 footer_parts.append(f'<a href="{url}">{domain}</a>')
         
-        # Add image attribution
-        if image_sources or has_ai_image:
+        # Add image attribution (only if we have attribution info)
+        if image_attribution:
             footer_parts.append("<strong>Imagen:</strong>")
-            
-            if has_ai_image:
-                footer_parts.append("Generada con IA")
-            
-            for image_domain, image_url in sorted(set(image_sources)):
-                footer_parts.append(f'<a href="{image_url}">{image_domain}</a>')
+            footer_parts.append(image_attribution)
         
         if footer_parts:
             footer_html = "<br>".join(footer_parts) + "<br>"
@@ -4231,8 +4224,7 @@ async def _add_article_footer(content: str, article_id: str, company_id: str) ->
             logger.info("article_footer_added",
                 article_id=article_id,
                 references_count=len(references),
-                image_sources_count=len(image_sources),
-                has_ai_image=has_ai_image
+                image_attribution=image_attribution
             )
         
         return content
