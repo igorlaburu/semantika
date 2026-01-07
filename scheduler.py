@@ -734,9 +734,15 @@ async def generate_articles_for_company(
             # Create article
             article_id = str(uuid.uuid4())
             
+            # Generate slug from title
+            import re
+            slug = re.sub(r'[^\w\s-]', '', article_data['title']).strip()
+            slug = re.sub(r'[\s_-]+', '-', slug).lower()[:50]
+            
             article_insert_data = {
                 "id": article_id,
                 "titulo": article_data['title'],
+                "slug": slug,
                 "excerpt": article_data['excerpt'],
                 "contenido": article_data['article'],
                 "tags": article_data['tags'],
