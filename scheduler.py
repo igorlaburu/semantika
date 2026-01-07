@@ -683,8 +683,9 @@ async def generate_articles_for_company(
         )
         return 0
     
-    # Evaluate quality if configured
-    company_settings = company.get('settings', {})
+    # Get company settings to check quality threshold
+    company_result = supabase.client.table("companies").select("settings").eq("id", company_id).execute()
+    company_settings = company_result.data[0].get('settings', {}) if company_result.data else {}
     min_quality = company_settings.get('autogenerate_min_quality', 3.0)
     
     if min_quality > 0:
