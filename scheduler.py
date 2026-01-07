@@ -717,7 +717,7 @@ async def generate_articles_for_company(
                 client_id=company_id
             )
             
-            # Create article using public API endpoint for better logic
+            # Create article directly in database (endpoint is stateless)
             article_id = str(uuid.uuid4())
             
             # Generate slug from title
@@ -725,52 +725,49 @@ async def generate_articles_for_company(
             slug = re.sub(r'[^\w\s-]', '', article_data['title']).strip()
             slug = re.sub(r'[\s_-]+', '-', slug).lower()[:50]
             
-            # Generate image prompt
+            # Generate image prompt and AI image
+            image_uuid = None
             image_prompt = None
             try:
+                # Generate image prompt with LLM
                 prompt_result = await llm_client.generate_image_prompt(
                     title=article_data['title'],
                     content=article_data['article']
                 )
                 image_prompt = prompt_result.get('prompt', 'A professional news image')
-                logger.debug("image_prompt_generated",
-                    article_id=article_id,
-                    prompt=image_prompt[:100]
-                )
-            except Exception as e:
-                logger.error("image_prompt_generation_failed", 
-                    article_id=article_id,
-                    error=str(e)
-                )
-                image_prompt = 'A professional news image'
-            
-            # Generate image using the prompt
-            image_uuid = None
-            try:
+                
+                # Generate AI image
                 from utils.image_generator import generate_image_from_prompt
-                result = await generate_image_from_prompt(
+                image_result = await generate_image_from_prompt(
                     context_unit_id=article_id,
                     image_prompt=image_prompt
                 )
                 
-                if result['success']:
-                    image_uuid = result['image_uuid']
-                    logger.info("article_image_generated",
+                if image_result['success']:
+                    image_uuid = image_result['image_uuid']
+                    logger.info("ai_image_generated_for_article",
                         article_id=article_id,
                         image_uuid=image_uuid,
                         prompt=image_prompt[:50]
                     )
-                else:
-                    logger.error("article_image_generation_failed",
-                        article_id=article_id,
-                        error=result.get('error')
-                    )
+                
             except Exception as e:
-                logger.error("image_generation_error", 
-                    article_id=article_id,
+                logger.error("image_generation_failed", 
+                    article_id=article_id, 
                     error=str(e)
                 )
             
+            # Get default style for company
+            default_style = supabase.client.table("press_styles")\
+                .select("id")\
+                .eq("company_id", company_id)\
+                .eq("predeterminado", True)\
+                .maybe_single()\
+                .execute()
+            
+            style_id = default_style.data["id"] if default_style.data else None
+            
+            # Create article record
             article_insert_data = {
                 "id": article_id,
                 "titulo": article_data['title'],
@@ -782,6 +779,7 @@ async def generate_articles_for_company(
                 "category": unit.get('category', 'general'),
                 "estado": "borrador",
                 "imagen_uuid": image_uuid,
+                "style_id": style_id,
                 "company_id": company_id,
                 "created_at": datetime.utcnow().isoformat(),
                 "updated_at": datetime.utcnow().isoformat(),
@@ -795,7 +793,7 @@ async def generate_articles_for_company(
                     "llm_model": settings.llm_writer_model,
                     "article": {
                         "contenido_markdown": article_data['article'],  # Original markdown
-                        "image_prompt": image_prompt  # Store the image prompt for reference
+                        "image_prompt": image_prompt  # Store the generated prompt
                     }
                 }
             }
@@ -1035,15 +1033,15 @@ async def main():
         # Schedule periodic garbage collection (every 30 minutes)
         await schedule_garbage_collection(scheduler)
         
-        # Schedule daily article generation at 17:15 UTC (5 articles)
+        # Schedule daily article generation at 08:00 UTC (5 articles)
         scheduler.add_job(
             daily_article_generation,
-            trigger=CronTrigger(hour=17, minute=15),
+            trigger=CronTrigger(hour=8, minute=0),
             id="daily_article_generation",
             replace_existing=True,
             max_instances=1
         )
-        logger.info("daily_article_generation_scheduled", time="17:15 UTC")
+        logger.info("daily_article_generation_scheduled", time="08:00 UTC")
         
         # Schedule publication check every 5 minutes
         scheduler.add_job(
