@@ -743,6 +743,7 @@ async def generate_articles_for_company(
                 "id": article_id,
                 "titulo": article_data['title'],
                 "slug": slug,
+                "autor": article_data.get('author', 'Redacción'),
                 "excerpt": article_data['excerpt'],
                 "contenido": article_data['article'],
                 "tags": article_data['tags'],
