@@ -389,38 +389,42 @@ class WordPressPublisher(BasePublisher):
                 if category_ids:
                     post_data["categories"] = category_ids
                 
-                # Add custom publication date if provided
-                if fecha_publicacion:
-                    try:
-                        # Convert ISO 8601 to WordPress format
-                        from datetime import datetime
-                        dt = datetime.fromisoformat(fecha_publicacion.replace('Z', '+00:00'))
-                        wordpress_date = dt.strftime('%Y-%m-%dT%H:%M:%S')
-                        post_data["date"] = wordpress_date
-                        
-                        logger.info("wordpress_custom_publication_date", 
-                            article_title=title[:50],
-                            original_date=fecha_publicacion,
-                            wordpress_date=wordpress_date
-                        )
-                    except ValueError as e:
-                        logger.warn("wordpress_invalid_date_format",
-                            article_title=title[:50],
-                            fecha_publicacion=fecha_publicacion,
-                            error=str(e)
-                        )
-                
                 # Update existing post or create new one
                 posts_url = self._get_api_url('posts')
                 if existing_post_id:
-                    # Update existing post
+                    # Update existing post - preserve original publication date
                     posts_url = f"{posts_url}/{existing_post_id}"
                     method = session.put
                     action = "updated"
+                    logger.info("wordpress_updating_existing_post",
+                        post_id=existing_post_id,
+                        article_title=title[:50],
+                        message="Preserving original WordPress publication date"
+                    )
                 else:
-                    # Create new post
+                    # Create new post - set custom publication date if provided
                     method = session.post
                     action = "created"
+                    
+                    if fecha_publicacion:
+                        try:
+                            # Convert ISO 8601 to WordPress format
+                            from datetime import datetime
+                            dt = datetime.fromisoformat(fecha_publicacion.replace('Z', '+00:00'))
+                            wordpress_date = dt.strftime('%Y-%m-%dT%H:%M:%S')
+                            post_data["date"] = wordpress_date
+                            
+                            logger.info("wordpress_custom_publication_date", 
+                                article_title=title[:50],
+                                original_date=fecha_publicacion,
+                                wordpress_date=wordpress_date
+                            )
+                        except ValueError as e:
+                            logger.warn("wordpress_invalid_date_format",
+                                article_title=title[:50],
+                                fecha_publicacion=fecha_publicacion,
+                                error=str(e)
+                            )
                 
                 async with method(
                     posts_url,
