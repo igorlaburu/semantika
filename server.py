@@ -4375,13 +4375,9 @@ async def _add_article_footer(content: str, article_id: str, company_id: str) ->
                     image_attribution = "Generada con IA"
                 # If neither featured nor AI → manual upload, no attribution needed
         
-        # Build footer
-        if references:
-            footer_parts.append("<strong>Referencias:</strong>")
-            for domain, url in sorted(references):
-                footer_parts.append(f'<a href="{url}">{domain}</a>')
+        # Build footer - NEW ORDER: Related Articles → References → Image
         
-        # Add related articles section
+        # Add related articles section (FIRST)
         try:
             # Get the current article's embedding
             current_article = supabase.client.table("press_articles")\
@@ -4414,27 +4410,34 @@ async def _add_article_footer(content: str, article_id: str, company_id: str) ->
                         if published_url and published_url.startswith("http"):
                             footer_parts.append(f'<a href="{published_url}">{title}</a>')
                     
-                    logger.debug("related_articles_added_to_footer",
+                    logger.info("related_articles_added_to_footer",
                         article_id=article_id,
                         related_count=len(similar_result.data)
                     )
                 else:
-                    logger.debug("no_related_articles_found_for_footer",
-                        article_id=article_id
+                    logger.info("no_related_articles_found_for_footer",
+                        article_id=article_id,
+                        threshold=0.55
                     )
             else:
-                logger.debug("no_embedding_available_for_related_articles",
+                logger.info("no_embedding_available_for_related_articles",
                     article_id=article_id
                 )
                 
         except Exception as e:
-            logger.warn("failed_to_add_related_articles_to_footer",
+            logger.error("failed_to_add_related_articles_to_footer",
                 article_id=article_id,
                 error=str(e)
             )
             # Don't fail footer generation if related articles fail
         
-        # Add image attribution (only if we have attribution info)
+        # Add references (SECOND)
+        if references:
+            footer_parts.append("<strong>Referencias:</strong>")
+            for domain, url in sorted(references):
+                footer_parts.append(f'<a href="{url}">{domain}</a>')
+        
+        # Add image attribution (THIRD, only if we have attribution info)
         if image_attribution:
             footer_parts.append("<strong>Imagen:</strong>")
             footer_parts.append(image_attribution)
