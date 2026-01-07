@@ -308,8 +308,13 @@ def extract_first_article_image(soup: BeautifulSoup, page_url: str) -> Optional[
             if src.startswith('data:'):
                 continue
             
-            # Skip common icon/logo patterns
-            if any(skip in src.lower() for skip in ['icon', 'logo', 'avatar', 'pixel', '1x1']):
+            # Skip common icon/logo patterns in URL
+            if any(skip in src.lower() for skip in ['icon', 'logo', 'avatar', 'pixel', '1x1', 'back.png']):
+                continue
+            
+            # Skip common icon/logo patterns in alt text
+            alt = img.get('alt', '').strip().lower()
+            if any(skip in alt for skip in ['icono', 'icon', 'logo', 'avatar', 'ver más', 'ver mas', 'back', 'arrow']):
                 continue
             
             # Skip tiny images (likely icons)
@@ -355,8 +360,7 @@ def extract_first_article_image(soup: BeautifulSoup, page_url: str) -> Optional[
             if w and h:
                 score += min(w + h, 50)  # Cap bonus at 50
             
-            # Alt text bonus (indicates meaningful image)
-            alt = img.get('alt', '').strip()
+            # Alt text bonus (indicates meaningful image) - already extracted above
             if alt and len(alt) > 10:
                 score += 20
             
