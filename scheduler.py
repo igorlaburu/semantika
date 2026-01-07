@@ -791,8 +791,8 @@ def get_unused_context_units(company_id: str, limit: int) -> list:
     
     supabase = get_supabase_client()
     
-    # Get IDs already used (from working_json)
-    articles = supabase.client.table("press_articles").select("working_json").eq("company_id", company_id).neq("working_json", None).execute()
+    # Get IDs already used (from working_json) 
+    articles = supabase.client.table("press_articles").select("working_json").eq("company_id", company_id).not_("working_json", "is", "null").execute()
     
     used_unit_ids = set()
     for article in articles.data:
