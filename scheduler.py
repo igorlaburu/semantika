@@ -765,7 +765,7 @@ async def generate_articles_for_company(
                 }
             }
             
-            insert_result = await supabase.client.table("press_articles").insert(article_insert_data).execute()
+            insert_result = supabase.client.table("press_articles").insert(article_insert_data).execute()
             
             generated_count += 1
             
