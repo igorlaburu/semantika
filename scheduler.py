@@ -761,7 +761,10 @@ async def generate_articles_for_company(
                     "source_context_units": [unit['id']],
                     "context_unit_title": unit['title'],
                     "quality_score": unit.get('quality_score'),
-                    "llm_model": settings.llm_writer_model
+                    "llm_model": settings.llm_writer_model,
+                    "article": {
+                        "contenido_markdown": article_data['article']
+                    }
                 }
             }
             
