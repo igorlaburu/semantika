@@ -792,11 +792,7 @@ def get_unused_context_units(company_id: str, limit: int) -> list:
     supabase = get_supabase_client()
     
     # Get IDs already used (from working_json)
-    articles = supabase.client.table("press_articles")\
-        .select("working_json")\
-        .eq("company_id", company_id)\
-        .not_("working_json", "is", None)\
-        .execute()
+    articles = supabase.client.table("press_articles").select("working_json").eq("company_id", company_id).not_("working_json", "is", None).execute()
     
     used_unit_ids = set()
     for article in articles.data:
@@ -809,13 +805,7 @@ def get_unused_context_units(company_id: str, limit: int) -> list:
     cutoff_date = (datetime.utcnow() - timedelta(days=30)).isoformat()
     pool_id = "99999999-9999-9999-9999-999999999999"
     
-    all_units = supabase.client.table("press_context_units")\
-        .select("*")\
-        .in_("company_id", [company_id, pool_id])\
-        .gte("created_at", cutoff_date)\
-        .order("created_at", desc=True)\
-        .limit(limit * 3)\
-        .execute()
+    all_units = supabase.client.table("press_context_units").select("*").in_("company_id", [company_id, pool_id]).gte("created_at", cutoff_date).order("created_at", desc=True).limit(limit * 3).execute()
     
     # Filter unused
     unused = [u for u in all_units.data if u['id'] not in used_unit_ids]
