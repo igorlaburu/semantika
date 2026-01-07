@@ -29,46 +29,7 @@ from utils.image_generator import generate_image_from_prompt
 from utils.image_extractor import extract_featured_image
 import uuid
 import aiohttp
-import markdown
-
 logger = get_logger("scheduler")
-
-
-def convert_markdown_to_html(markdown_content: str) -> str:
-    """Convert markdown content to HTML for frontend compatibility.
-    
-    Args:
-        markdown_content: Markdown formatted text
-        
-    Returns:
-        HTML formatted text
-    """
-    if not markdown_content:
-        return ""
-    
-    try:
-        # Configure markdown with extensions for better HTML output
-        md = markdown.Markdown(
-            extensions=['extra', 'codehilite', 'toc'],
-            extension_configs={
-                'codehilite': {
-                    'css_class': 'highlight'
-                }
-            }
-        )
-        html_content = md.convert(markdown_content)
-        
-        logger.debug("markdown_converted_to_html", 
-            markdown_length=len(markdown_content),
-            html_length=len(html_content)
-        )
-        
-        return html_content
-        
-    except Exception as e:
-        logger.error("markdown_conversion_failed", error=str(e))
-        # Fallback: return markdown as-is with basic paragraph wrapping
-        return f"<p>{markdown_content.replace(chr(10), '</p><p>')}</p>"
 
 
 async def run_file_monitor():
@@ -777,16 +738,13 @@ async def generate_articles_for_company(
             slug = re.sub(r'[^\w\s-]', '', article_data['title']).strip()
             slug = re.sub(r'[\s_-]+', '-', slug).lower()[:50]
             
-            # Convert markdown to HTML for contenido field
-            html_content = convert_markdown_to_html(article_data['article'])
-            
             article_insert_data = {
                 "id": article_id,
                 "titulo": article_data['title'],
                 "slug": slug,
                 "autor": article_data.get('author', 'Redacción'),
                 "excerpt": article_data['excerpt'],
-                "contenido": html_content,  # HTML content (converted from markdown)
+                "contenido": article_data['article'],  # Keep markdown in contenido field
                 "tags": article_data['tags'],
                 "category": unit.get('category', 'general'),
                 "estado": "borrador",
@@ -804,11 +762,7 @@ async def generate_articles_for_company(
                     "quality_score": unit.get('quality_score'),
                     "llm_model": settings.llm_writer_model,
                     "article": {
-                        "titulo": article_data['title'],
-                        "excerpt": article_data['excerpt'],
-                        "contenido_markdown": article_data['article'],  # Original markdown
-                        "tags": article_data.get('tags', []),
-                        "autor": article_data.get('author', 'Sistema')
+                        "contenido_markdown": article_data['article']  # Original markdown
                     }
                 }
             }
