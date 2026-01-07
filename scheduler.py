@@ -717,26 +717,59 @@ async def generate_articles_for_company(
                 client_id=company_id
             )
             
-            # Handle image
-            image_uuid = await handle_article_image(unit, article_data, llm_client)
-            
-            # Get default style for this company
-            default_style = supabase.client.table("press_styles")\
-                .select("id")\
-                .eq("company_id", company_id)\
-                .eq("predeterminado", True)\
-                .maybe_single()\
-                .execute()
-            
-            style_id = default_style.data["id"] if default_style.data else None
-            
-            # Create article
+            # Create article using public API endpoint for better logic
             article_id = str(uuid.uuid4())
             
             # Generate slug from title
             import re
             slug = re.sub(r'[^\w\s-]', '', article_data['title']).strip()
             slug = re.sub(r'[\s_-]+', '-', slug).lower()[:50]
+            
+            # Generate image prompt
+            image_prompt = None
+            try:
+                prompt_result = await llm_client.generate_image_prompt(
+                    title=article_data['title'],
+                    content=article_data['article']
+                )
+                image_prompt = prompt_result.get('prompt', 'A professional news image')
+                logger.debug("image_prompt_generated",
+                    article_id=article_id,
+                    prompt=image_prompt[:100]
+                )
+            except Exception as e:
+                logger.error("image_prompt_generation_failed", 
+                    article_id=article_id,
+                    error=str(e)
+                )
+                image_prompt = 'A professional news image'
+            
+            # Generate image using the prompt
+            image_uuid = None
+            try:
+                from utils.image_generator import generate_image_from_prompt
+                result = await generate_image_from_prompt(
+                    context_unit_id=article_id,
+                    image_prompt=image_prompt
+                )
+                
+                if result['success']:
+                    image_uuid = result['image_uuid']
+                    logger.info("article_image_generated",
+                        article_id=article_id,
+                        image_uuid=image_uuid,
+                        prompt=image_prompt[:50]
+                    )
+                else:
+                    logger.error("article_image_generation_failed",
+                        article_id=article_id,
+                        error=result.get('error')
+                    )
+            except Exception as e:
+                logger.error("image_generation_error", 
+                    article_id=article_id,
+                    error=str(e)
+                )
             
             article_insert_data = {
                 "id": article_id,
@@ -749,7 +782,6 @@ async def generate_articles_for_company(
                 "category": unit.get('category', 'general'),
                 "estado": "borrador",
                 "imagen_uuid": image_uuid,
-                "style_id": style_id,
                 "company_id": company_id,
                 "created_at": datetime.utcnow().isoformat(),
                 "updated_at": datetime.utcnow().isoformat(),
@@ -762,7 +794,8 @@ async def generate_articles_for_company(
                     "quality_score": unit.get('quality_score'),
                     "llm_model": settings.llm_writer_model,
                     "article": {
-                        "contenido_markdown": article_data['article']  # Original markdown
+                        "contenido_markdown": article_data['article'],  # Original markdown
+                        "image_prompt": image_prompt  # Store the image prompt for reference
                     }
                 }
             }
@@ -874,66 +907,6 @@ Noticias:
     
     return units
 
-
-async def handle_article_image(unit: dict, article_data: dict, llm_client) -> str:
-    """Generate or copy featured image for article."""
-    
-    # Check if unit has featured image
-    featured = unit.get('source_metadata', {}).get('featured_image')
-    
-    if featured and featured.get('url'):
-        try:
-            # Download and cache featured image
-            image_uuid = str(uuid.uuid4())
-            cache_path = f"/app/cache/images/{image_uuid}.jpg"
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(featured['url']) as response:
-                    if response.status == 200:
-                        image_data = await response.read()
-                        with open(cache_path, 'wb') as f:
-                            f.write(image_data)
-                        
-                        logger.info("featured_image_cached",
-                            image_uuid=image_uuid,
-                            source_url=featured['url']
-                        )
-                        
-                        return image_uuid
-        except Exception as e:
-            logger.error("featured_image_download_failed", 
-                error=str(e),
-                url=featured['url']
-            )
-    
-    # Generate with AI
-    try:
-        # Generate prompt
-        prompt_result = await llm_client.generate_image_prompt(
-            title=article_data['title'],
-            content=article_data['article']
-        )
-        
-        image_prompt = prompt_result.get('prompt', 'A professional news image')
-        
-        # Generate image
-        result = await generate_image_from_prompt(
-            context_unit_id=str(uuid.uuid4()),
-            image_prompt=image_prompt
-        )
-        
-        if result['success']:
-            return result['image_uuid']
-        else:
-            # Return None if image generation fails
-            logger.error("image_generation_failed_for_article",
-                error=result.get('error')
-            )
-            return None
-            
-    except Exception as e:
-        logger.error("image_generation_error", error=str(e))
-        return None
 
 
 async def publish_scheduled_articles():
