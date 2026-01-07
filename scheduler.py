@@ -737,7 +737,7 @@ async def generate_articles_for_company(
             article_insert_data = {
                 "id": article_id,
                 "titulo": article_data['title'],
-                "excerpt": article_data['summary'],
+                "excerpt": article_data['excerpt'],
                 "contenido": article_data['article'],
                 "tags": article_data['tags'],
                 "category": unit.get('category', 'general'),
