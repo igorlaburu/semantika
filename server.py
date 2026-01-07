@@ -4022,16 +4022,12 @@ async def backfill_article_embeddings(
             query = supabase.client.table("press_articles")\
                 .select("id, titulo, excerpt, company_id")\
                 .eq("company_id", company_id)\
-                .is_not("titulo", "null")\
-                .is_not("excerpt", "null")\
                 .limit(limit)
         else:
             # Only process articles without embeddings
             query = supabase.client.table("press_articles")\
                 .select("id, titulo, excerpt, company_id")\
                 .eq("company_id", company_id)\
-                .is_not("titulo", "null")\
-                .is_not("excerpt", "null")\
                 .is_("embedding", "null")\
                 .limit(limit)
         
@@ -4101,8 +4097,6 @@ async def backfill_article_embeddings(
         remaining_result = supabase.client.table("press_articles")\
             .select("id", count="exact")\
             .eq("company_id", company_id)\
-            .is_not("titulo", "null")\
-            .is_not("excerpt", "null")\
             .is_("embedding", "null")\
             .execute()
         
