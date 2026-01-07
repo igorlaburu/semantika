@@ -684,7 +684,8 @@ async def generate_articles_for_company(
         return 0
     
     # Evaluate quality if configured
-    min_quality = settings.autogenerate_min_quality if hasattr(settings, 'autogenerate_min_quality') else 3.0
+    company_settings = company.get('settings', {})
+    min_quality = company_settings.get('autogenerate_min_quality', 3.0)
     
     if min_quality > 0:
         evaluated_units = await evaluate_units_quality(unused_units, llm_client)
@@ -791,7 +792,7 @@ async def get_unused_context_units(company_id: str, limit: int) -> list:
     supabase = get_supabase_client()
     
     # Get IDs already used (from working_json)
-    articles = await supabase.client.table("press_articles")\
+    articles = supabase.client.table("press_articles")\
         .select("working_json")\
         .eq("company_id", company_id)\
         .not_("working_json", "is", None)\
@@ -808,7 +809,7 @@ async def get_unused_context_units(company_id: str, limit: int) -> list:
     cutoff_date = (datetime.utcnow() - timedelta(days=30)).isoformat()
     pool_id = "99999999-9999-9999-9999-999999999999"
     
-    all_units = await supabase.client.table("press_context_units")\
+    all_units = supabase.client.table("press_context_units")\
         .select("*")\
         .in_("company_id", [company_id, pool_id])\
         .gte("created_at", cutoff_date)\
