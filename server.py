@@ -3929,7 +3929,7 @@ async def get_related_articles(
         
         # Find similar articles using pgvector cosine similarity
         # Exclude the current article and use a reasonable similarity threshold
-        similarity_threshold = 0.3  # Adjust as needed (0.0-1.0)
+        similarity_threshold = 0.55  # Adjusted for better relevance (0.0-1.0)
         
         similar_result = supabase.client.rpc(
             'find_similar_articles',
