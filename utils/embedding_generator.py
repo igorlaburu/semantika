@@ -440,3 +440,27 @@ async def generate_url_content_embedding(
         company_id=url_content.get("company_id"),
         context_unit_id=url_content.get("id")
     )
+
+
+async def generate_article_embedding(
+    article: Dict[str, Any],
+    force_openai: bool = False
+) -> List[float]:
+    """Generate embedding for a press article.
+
+    Uses titulo + excerpt for optimal similarity matching between articles.
+
+    Args:
+        article: Dict with 'titulo', 'excerpt', 'id', 'company_id'
+        force_openai: Force use of OpenAI API (not recommended)
+
+    Returns:
+        768-dimensional embedding vector
+    """
+    return await generate_embedding(
+        title=article.get("titulo", ""),
+        summary=article.get("excerpt"),
+        force_openai=force_openai,
+        company_id=article.get("company_id"),
+        context_unit_id=article.get("id")
+    )

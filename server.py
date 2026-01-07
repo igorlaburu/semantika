@@ -3772,14 +3772,59 @@ async def create_or_update_article(
         if not result.data:
             raise HTTPException(status_code=500, detail="Failed to save article")
 
+        saved_article = result.data[0]
+        
+        # Generate embedding for article similarity search
+        # Only generate if titulo and excerpt are present (required for meaningful embeddings)
+        if saved_article.get("titulo") and saved_article.get("excerpt"):
+            try:
+                from utils.embedding_generator import generate_article_embedding
+                
+                embedding = await generate_article_embedding(saved_article)
+                embedding_generated_at = datetime.utcnow().isoformat()
+                
+                # Update article with embedding
+                embedding_result = supabase.client.table("press_articles")\
+                    .update({
+                        "embedding": embedding,
+                        "embedding_generated_at": embedding_generated_at
+                    })\
+                    .eq("id", saved_article["id"])\
+                    .eq("company_id", company_id)\
+                    .execute()
+                
+                if embedding_result.data:
+                    logger.info("article_embedding_generated",
+                        article_id=saved_article["id"],
+                        company_id=company_id,
+                        titulo=saved_article.get("titulo", "")[:50],
+                        embedding_dimensions=len(embedding)
+                    )
+                    # Update the returned article with embedding info
+                    saved_article["embedding_generated_at"] = embedding_generated_at
+                else:
+                    logger.warn("article_embedding_update_failed",
+                        article_id=saved_article["id"],
+                        company_id=company_id
+                    )
+                    
+            except Exception as e:
+                logger.error("article_embedding_generation_failed",
+                    article_id=saved_article["id"],
+                    company_id=company_id,
+                    titulo=saved_article.get("titulo", "")[:50],
+                    error=str(e)
+                )
+                # Don't fail the article save if embedding generation fails
+
         logger.info(
             "article_saved",
-            article_id=result.data[0].get("id"),
+            article_id=saved_article.get("id"),
             company_id=company_id,
             titulo=clean_data.get("titulo", "")[:50]
         )
 
-        return result.data[0]
+        return saved_article
 
     except HTTPException:
         raise
@@ -3818,6 +3863,276 @@ async def get_article(
     except Exception as e:
         logger.error("get_article_error", error=str(e), article_id=article_id)
         raise HTTPException(status_code=500, detail="Failed to fetch article")
+
+
+@app.get("/api/v1/articles/{article_id}/related")
+async def get_related_articles(
+    article_id: str,
+    company_id: str = Depends(get_company_id_from_auth),
+    limit: int = Query(default=5, ge=1, le=20)
+) -> Dict[str, Any]:
+    """
+    Get related articles based on semantic similarity.
+    
+    Uses pgvector cosine similarity on article embeddings (titulo + excerpt).
+    
+    **Authentication**: Accepts either JWT (Authorization: Bearer) or API Key (X-API-Key)
+    
+    **Query params**:
+        - limit: Max number of related articles (default: 5, max: 20)
+    
+    **Returns**:
+        {
+            "article_id": "uuid",
+            "related_articles": [
+                {
+                    "id": "uuid",
+                    "titulo": "Related Article Title",
+                    "excerpt": "Article excerpt...",
+                    "similarity_score": 0.85,
+                    "published_date": "2025-01-07T12:00:00Z",
+                    "slug": "article-slug"
+                }
+            ],
+            "total_found": 3
+        }
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        # First, get the current article and its embedding
+        article_result = supabase.client.table("press_articles")\
+            .select("id, titulo, excerpt, embedding, embedding_generated_at")\
+            .eq("id", article_id)\
+            .eq("company_id", company_id)\
+            .single()\
+            .execute()
+        
+        if not article_result.data:
+            raise HTTPException(status_code=404, detail="Article not found")
+        
+        current_article = article_result.data
+        
+        # Check if embedding exists
+        if not current_article.get("embedding"):
+            logger.warn("article_no_embedding",
+                article_id=article_id,
+                company_id=company_id,
+                titulo=current_article.get("titulo", "")[:50]
+            )
+            return {
+                "article_id": article_id,
+                "related_articles": [],
+                "total_found": 0,
+                "message": "Article embedding not available. Related articles unavailable."
+            }
+        
+        # Find similar articles using pgvector cosine similarity
+        # Exclude the current article and use a reasonable similarity threshold
+        similarity_threshold = 0.3  # Adjust as needed (0.0-1.0)
+        
+        similar_result = supabase.client.rpc(
+            'find_similar_articles',
+            {
+                'target_embedding': current_article["embedding"],
+                'target_company_id': company_id,
+                'target_article_id': article_id,
+                'similarity_threshold': similarity_threshold,
+                'max_results': limit
+            }
+        ).execute()
+        
+        if similar_result.data:
+            related_articles = []
+            for article in similar_result.data:
+                related_articles.append({
+                    "id": article["id"],
+                    "titulo": article["titulo"],
+                    "excerpt": article["excerpt"],
+                    "similarity_score": round(article["similarity_score"], 3),
+                    "published_date": article.get("published_date"),
+                    "slug": article["slug"]
+                })
+            
+            logger.info("related_articles_found",
+                article_id=article_id,
+                company_id=company_id,
+                related_count=len(related_articles),
+                similarity_threshold=similarity_threshold
+            )
+            
+            return {
+                "article_id": article_id,
+                "related_articles": related_articles,
+                "total_found": len(related_articles)
+            }
+        else:
+            logger.info("no_related_articles_found",
+                article_id=article_id,
+                company_id=company_id,
+                similarity_threshold=similarity_threshold
+            )
+            return {
+                "article_id": article_id,
+                "related_articles": [],
+                "total_found": 0
+            }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("get_related_articles_error", 
+            error=str(e), 
+            article_id=article_id,
+            company_id=company_id
+        )
+        raise HTTPException(status_code=500, detail="Failed to fetch related articles")
+
+
+@app.post("/api/v1/articles/backfill-embeddings")
+async def backfill_article_embeddings(
+    company_id: str = Depends(get_company_id_from_auth),
+    limit: int = Query(default=10, ge=1, le=50),
+    force_regenerate: bool = Query(default=False)
+) -> Dict[str, Any]:
+    """
+    Backfill embeddings for articles that don't have them.
+    
+    **Authentication**: Accepts either JWT (Authorization: Bearer) or API Key (X-API-Key)
+    
+    **Query params**:
+        - limit: Max articles to process per batch (default: 10, max: 50)
+        - force_regenerate: Regenerate embeddings even if they exist (default: false)
+    
+    **Returns**:
+        {
+            "processed": 8,
+            "successful": 7,
+            "failed": 1,
+            "remaining": 143,
+            "batch_complete": false
+        }
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        # Find articles needing embeddings
+        if force_regenerate:
+            # Process all articles regardless of existing embeddings
+            query = supabase.client.table("press_articles")\
+                .select("id, titulo, excerpt, company_id")\
+                .eq("company_id", company_id)\
+                .is_not("titulo", "null")\
+                .is_not("excerpt", "null")\
+                .limit(limit)
+        else:
+            # Only process articles without embeddings
+            query = supabase.client.table("press_articles")\
+                .select("id, titulo, excerpt, company_id")\
+                .eq("company_id", company_id)\
+                .is_not("titulo", "null")\
+                .is_not("excerpt", "null")\
+                .is_("embedding", "null")\
+                .limit(limit)
+        
+        articles_result = query.execute()
+        
+        if not articles_result.data:
+            return {
+                "processed": 0,
+                "successful": 0,
+                "failed": 0,
+                "remaining": 0,
+                "batch_complete": True,
+                "message": "No articles need embedding generation"
+            }
+        
+        articles = articles_result.data
+        successful = 0
+        failed = 0
+        
+        logger.info("backfill_embeddings_start",
+            company_id=company_id,
+            batch_size=len(articles),
+            force_regenerate=force_regenerate
+        )
+        
+        # Process articles in batch
+        for article in articles:
+            try:
+                from utils.embedding_generator import generate_article_embedding
+                
+                embedding = await generate_article_embedding(article)
+                embedding_generated_at = datetime.utcnow().isoformat()
+                
+                # Update article with embedding
+                embedding_result = supabase.client.table("press_articles")\
+                    .update({
+                        "embedding": embedding,
+                        "embedding_generated_at": embedding_generated_at
+                    })\
+                    .eq("id", article["id"])\
+                    .eq("company_id", company_id)\
+                    .execute()
+                
+                if embedding_result.data:
+                    successful += 1
+                    logger.debug("backfill_embedding_success",
+                        article_id=article["id"],
+                        titulo=article.get("titulo", "")[:50],
+                        embedding_dimensions=len(embedding)
+                    )
+                else:
+                    failed += 1
+                    logger.warn("backfill_embedding_update_failed",
+                        article_id=article["id"],
+                        titulo=article.get("titulo", "")[:50]
+                    )
+                    
+            except Exception as e:
+                failed += 1
+                logger.error("backfill_embedding_failed",
+                    article_id=article["id"],
+                    titulo=article.get("titulo", "")[:50],
+                    error=str(e)
+                )
+        
+        # Count remaining articles
+        remaining_result = supabase.client.table("press_articles")\
+            .select("id", count="exact")\
+            .eq("company_id", company_id)\
+            .is_not("titulo", "null")\
+            .is_not("excerpt", "null")\
+            .is_("embedding", "null")\
+            .execute()
+        
+        remaining = remaining_result.count if remaining_result.count is not None else 0
+        
+        batch_complete = remaining == 0
+        
+        logger.info("backfill_embeddings_complete",
+            company_id=company_id,
+            processed=len(articles),
+            successful=successful,
+            failed=failed,
+            remaining=remaining,
+            batch_complete=batch_complete
+        )
+        
+        return {
+            "processed": len(articles),
+            "successful": successful,
+            "failed": failed,
+            "remaining": remaining,
+            "batch_complete": batch_complete
+        }
+    
+    except Exception as e:
+        logger.error("backfill_embeddings_error", 
+            error=str(e),
+            company_id=company_id
+        )
+        raise HTTPException(status_code=500, detail="Failed to backfill embeddings")
 
 
 @app.patch("/api/v1/articles/{article_id}")
