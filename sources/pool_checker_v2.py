@@ -86,7 +86,6 @@ async def get_next_healthy_source() -> Optional[Dict[str, Any]]:
         
         if high_freq_result.data:
             # Find sources that haven't been scraped in the last 5 cycles (50 minutes)
-            from datetime import datetime, timedelta
             cutoff_time = datetime.utcnow() - timedelta(minutes=50)
             
             high_freq_candidates = [
