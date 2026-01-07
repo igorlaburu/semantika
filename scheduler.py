@@ -781,19 +781,25 @@ async def generate_articles_for_company(
                 "imagen_uuid": image_uuid,
                 "style_id": style_id,
                 "company_id": company_id,
+                "context_unit_ids": [unit['id']],  # IMPORTANT: Set context_unit_ids for footer generation
                 "created_at": datetime.utcnow().isoformat(),
                 "updated_at": datetime.utcnow().isoformat(),
                 "working_json": {
                     "auto_generated": True,
                     "generation_date": datetime.utcnow().isoformat(),
                     "generation_batch_id": generation_batch_id,
-                    "source_context_units": [unit['id']],
+                    "source_context_units": [unit['id']],  # Keep for compatibility
                     "context_unit_title": unit['title'],
                     "quality_score": unit.get('quality_score'),
                     "llm_model": settings.llm_writer_model,
                     "article": {
                         "contenido_markdown": article_data['article'],  # Original markdown
-                        "image_prompt": image_prompt  # Store the generated prompt
+                        "image_prompt": image_prompt,  # Store the generated prompt
+                        "generated_images": [{
+                            "uuid": image_uuid,
+                            "prompt": image_prompt,
+                            "timestamp": datetime.utcnow().timestamp()
+                        }] if image_uuid else []  # Mark AI-generated images
                     }
                 }
             }
