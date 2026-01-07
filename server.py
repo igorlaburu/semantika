@@ -4375,7 +4375,7 @@ async def _add_article_footer(content: str, article_id: str, company_id: str) ->
                     image_attribution = "Generada con IA"
                 # If neither featured nor AI → manual upload, no attribution needed
         
-        # Build footer - NEW ORDER: Related Articles → References → Image
+        # Build footer - ORDER: Related Articles → References → Image
         
         # Add related articles section (FIRST)
         try:
