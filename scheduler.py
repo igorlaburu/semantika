@@ -671,7 +671,7 @@ async def generate_articles_for_company(
     llm_client = LLMClient()
     
     # Get unused context units
-    unused_units = await get_unused_context_units(
+    unused_units = get_unused_context_units(
         company_id=company_id,
         limit=max_articles * 2  # Get extra to have choice
     )
@@ -786,7 +786,7 @@ async def generate_articles_for_company(
     return generated_count
 
 
-async def get_unused_context_units(company_id: str, limit: int) -> list:
+def get_unused_context_units(company_id: str, limit: int) -> list:
     """Get context units not used in any article (includes pool units)."""
     
     supabase = get_supabase_client()
