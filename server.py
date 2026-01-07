@@ -4381,6 +4381,59 @@ async def _add_article_footer(content: str, article_id: str, company_id: str) ->
             for domain, url in sorted(references):
                 footer_parts.append(f'<a href="{url}">{domain}</a>')
         
+        # Add related articles section
+        try:
+            # Get the current article's embedding
+            current_article = supabase.client.table("press_articles")\
+                .select("embedding")\
+                .eq("id", article_id)\
+                .eq("company_id", company_id)\
+                .maybe_single()\
+                .execute()
+            
+            if current_article.data and current_article.data.get("embedding"):
+                # Get related articles using similarity search
+                similar_result = supabase.client.rpc(
+                    'find_similar_articles',
+                    {
+                        'target_embedding': current_article.data["embedding"],
+                        'target_company_id': company_id,
+                        'target_article_id': article_id,
+                        'similarity_threshold': 0.55,
+                        'max_results': 3
+                    }
+                ).execute()
+                
+                if similar_result.data and len(similar_result.data) > 0:
+                    footer_parts.append("<strong>Artículos relacionados:</strong>")
+                    for related_article in similar_result.data:
+                        published_url = related_article.get("published_url")
+                        title = related_article.get("titulo", "Artículo relacionado")
+                        
+                        # Only include if we have a published URL
+                        if published_url and published_url.startswith("http"):
+                            footer_parts.append(f'<a href="{published_url}">{title}</a>')
+                    
+                    logger.debug("related_articles_added_to_footer",
+                        article_id=article_id,
+                        related_count=len(similar_result.data)
+                    )
+                else:
+                    logger.debug("no_related_articles_found_for_footer",
+                        article_id=article_id
+                    )
+            else:
+                logger.debug("no_embedding_available_for_related_articles",
+                    article_id=article_id
+                )
+                
+        except Exception as e:
+            logger.warn("failed_to_add_related_articles_to_footer",
+                article_id=article_id,
+                error=str(e)
+            )
+            # Don't fail footer generation if related articles fail
+        
         # Add image attribution (only if we have attribution info)
         if image_attribution:
             footer_parts.append("<strong>Imagen:</strong>")
