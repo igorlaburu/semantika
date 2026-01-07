@@ -4468,7 +4468,7 @@ async def _add_article_footer(content: str, article_id: str, company_id: str) ->
                     .execute()
         
         # If no context units found, use fallback to recent units from same company (no time limit)
-        if not context_units_result.data:
+        if not context_units_result.data or len(context_units_result.data) == 0:
             context_units_result = supabase.client.table("press_context_units")\
                 .select("source_metadata, id")\
                 .eq("company_id", company_id)\
