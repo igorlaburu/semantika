@@ -241,6 +241,65 @@ class WordPressPublisher(BasePublisher):
             )
             return None
     
+    async def _upload_from_temp_file(
+        self, 
+        session: aiohttp.ClientSession, 
+        temp_file_path: str,
+        headers: Dict[str, str]
+    ) -> Optional[int]:
+        """Upload image to WordPress media library from temporary file."""
+        try:
+            import os
+            from pathlib import Path
+            
+            # Read file data
+            with open(temp_file_path, 'rb') as f:
+                image_data = f.read()
+            
+            # Extract filename and ensure .webp extension for transformed images
+            filename = f"article-{Path(temp_file_path).stem}.webp"
+            
+            # Upload to WordPress
+            upload_headers = headers.copy()
+            upload_headers['Content-Type'] = 'image/webp'
+            upload_headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+            
+            upload_url = self._get_api_url('media')
+            
+            async with session.post(
+                upload_url, 
+                data=image_data, 
+                headers=upload_headers
+            ) as upload_response:
+                if upload_response.status == 201:
+                    media_data = await upload_response.json()
+                    media_id = media_data.get('id')
+                    
+                    logger.info("wordpress_image_uploaded_from_temp",
+                        media_id=media_id,
+                        filename=filename,
+                        temp_file_path=temp_file_path,
+                        url=media_data.get('source_url'),
+                        size_kb=round(len(image_data) / 1024, 2)
+                    )
+                    
+                    return media_id
+                else:
+                    error_text = await upload_response.text()
+                    logger.warn("wordpress_temp_image_upload_failed",
+                        temp_file_path=temp_file_path,
+                        status=upload_response.status,
+                        error=error_text[:200]
+                    )
+                    return None
+                    
+        except Exception as e:
+            logger.error("wordpress_temp_image_upload_error", 
+                temp_file_path=temp_file_path,
+                error=str(e)
+            )
+            return None
+    
     async def publish_article(
         self,
         title: str,
@@ -252,7 +311,8 @@ class WordPressPublisher(BasePublisher):
         slug: Optional[str] = None,
         category: Optional[str] = None,
         fecha_publicacion: Optional[str] = None,
-        imagen_uuid: Optional[str] = None
+        imagen_uuid: Optional[str] = None,
+        temp_image_path: Optional[str] = None
     ) -> PublicationResult:
         """Publish article to WordPress."""
         
@@ -266,8 +326,13 @@ class WordPressPublisher(BasePublisher):
                 featured_media_id = None
                 
                 # Upload featured image if provided
-                if imagen_uuid:
-                    # Use unified image endpoint with UUID (preferred method)
+                if temp_image_path:
+                    # Use temporary transformed image file (preferred method)
+                    featured_media_id = await self._upload_from_temp_file(
+                        session, temp_image_path, headers
+                    )
+                elif imagen_uuid:
+                    # Fallback to unified image endpoint with UUID
                     featured_media_id = await self._upload_featured_image_from_uuid(
                         session, imagen_uuid, headers
                     )

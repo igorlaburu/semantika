@@ -56,7 +56,8 @@ class BasePublisher(ABC):
         slug: Optional[str] = None,
         category: Optional[str] = None,
         fecha_publicacion: Optional[str] = None,
-        imagen_uuid: Optional[str] = None
+        imagen_uuid: Optional[str] = None,
+        temp_image_path: Optional[str] = None
     ) -> PublicationResult:
         """Publish an article to the platform.
         
@@ -70,7 +71,8 @@ class BasePublisher(ABC):
             slug: Article slug/URL identifier (optional)
             category: Article category (optional)
             fecha_publicacion: Publication date ISO string (optional)
-            imagen_uuid: Image UUID for unified image endpoint (preferred)
+            imagen_uuid: Image UUID for unified image endpoint (fallback method)
+            temp_image_path: Path to temporary transformed image file (preferred method)
             
         Returns:
             PublicationResult with success/failure details

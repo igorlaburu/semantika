@@ -3974,6 +3974,50 @@ async def publish_to_platforms(
         
         # Get image UUID for unified image endpoint
         imagen_uuid = article.get('imagen_uuid')
+        temp_image_path = None
+        
+        # Transform image for publication if present
+        if imagen_uuid:
+            try:
+                from utils.image_transformer import ImageTransformer
+                import os
+                
+                # Read image from cache
+                original_image_data = ImageTransformer.read_cached_image(imagen_uuid)
+                
+                if original_image_data:
+                    # Transform image to temporary file with brand consistency and uniqueness
+                    temp_image_path = ImageTransformer.transform_for_publication(
+                        image_data=original_image_data,
+                        platform="wordpress",  # TODO: Make dynamic per platform
+                        image_uuid=imagen_uuid
+                    )
+                    
+                    if temp_image_path:
+                        temp_size_kb = round(os.path.getsize(temp_image_path) / 1024, 2)
+                        logger.info("publication_image_transformed",
+                            article_id=article.get('id'),
+                            imagen_uuid=imagen_uuid,
+                            temp_image_path=temp_image_path,
+                            transformed_size_kb=temp_size_kb
+                        )
+                    else:
+                        logger.error("publication_image_transformation_returned_none",
+                            article_id=article.get('id'),
+                            imagen_uuid=imagen_uuid
+                        )
+                else:
+                    logger.warn("publication_image_not_found_in_cache",
+                        article_id=article.get('id'),
+                        imagen_uuid=imagen_uuid
+                    )
+            except Exception as e:
+                logger.error("publication_image_transformation_failed",
+                    article_id=article.get('id'),
+                    imagen_uuid=imagen_uuid,
+                    error=str(e)
+                )
+                # Continue without transformed image (fallback to UUID method)
         
         # Add references and image attribution footer
         content = await _add_article_footer(content, article.get('id'), company_id)
@@ -3990,18 +4034,25 @@ async def publish_to_platforms(
                     target['credentials_encrypted']
                 )
                 
-                # Publish article
-                result = await publisher.publish_article(
-                    title=title,
-                    content=content,
-                    excerpt=excerpt,
-                    tags=tags,
-                    imagen_uuid=imagen_uuid,
-                    category=category,
-                    status="publish",
-                    slug=slug,
-                    fecha_publicacion=article.get('fecha_publicacion')
-                )
+                # Publish article with transformed image
+                publish_kwargs = {
+                    "title": title,
+                    "content": content,
+                    "excerpt": excerpt,
+                    "tags": tags,
+                    "category": category,
+                    "status": "publish",
+                    "slug": slug,
+                    "fecha_publicacion": article.get('fecha_publicacion')
+                }
+                
+                # Use temporary transformed image file if available, fallback to UUID method
+                if temp_image_path:
+                    publish_kwargs["temp_image_path"] = temp_image_path
+                else:
+                    publish_kwargs["imagen_uuid"] = imagen_uuid
+                
+                result = await publisher.publish_article(**publish_kwargs)
                 
                 publication_results[target_id] = {
                     "success": result.success,
@@ -4034,6 +4085,22 @@ async def publish_to_platforms(
                     article_id=article['id'],
                     target_id=target_id,
                     platform=target['platform_type'],
+                    error=str(e)
+                )
+        
+        # Clean up temporary image file if created
+        if temp_image_path:
+            try:
+                import os
+                os.unlink(temp_image_path)
+                logger.info("temp_image_file_cleaned_up", 
+                    temp_image_path=temp_image_path,
+                    article_id=article['id']
+                )
+            except Exception as e:
+                logger.warn("temp_image_file_cleanup_failed",
+                    temp_image_path=temp_image_path,
+                    article_id=article['id'],
                     error=str(e)
                 )
         
@@ -4085,16 +4152,14 @@ async def _add_article_footer(content: str, article_id: str, company_id: str) ->
                     .in_("id", context_unit_ids)\
                     .execute()
         
-        # If no context units found, use fallback to recent units from same company
+        # If no context units found, use fallback to recent units from same company (no time limit)
         if not context_units_result.data:
-            from datetime import datetime, timedelta
-            yesterday = (datetime.utcnow() - timedelta(days=1)).isoformat()
             context_units_result = supabase.client.table("press_context_units")\
                 .select("source_metadata, id")\
                 .eq("company_id", company_id)\
-                .gte("created_at", yesterday)\
+                .is_not("source_metadata->url", "null")\
                 .order("created_at", desc=True)\
-                .limit(5)\
+                .limit(10)\
                 .execute()
         
         context_units = context_units_result.data or []
