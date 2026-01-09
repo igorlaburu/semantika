@@ -38,6 +38,72 @@ from utils.geocoder import geocode_with_context
 logger = get_logger("scraper_workflow")
 
 
+async def auto_cache_featured_image(context_unit_id: str, featured_image: Dict[str, Any]):
+    """Auto-cache featured image immediately after context unit creation.
+    
+    Args:
+        context_unit_id: Context unit UUID
+        featured_image: Featured image metadata dict
+    """
+    try:
+        from pathlib import Path
+        
+        image_url = featured_image.get("url")
+        if not image_url:
+            return
+        
+        cache_dir = Path("/app/cache/images")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Download and cache with ordinal suffix format
+        timeout = aiohttp.ClientTimeout(total=10)  # Quick timeout for background caching
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (compatible; SemantikaScraper/1.0)',
+            'Accept': 'image/*,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5'
+        }
+        
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(image_url, headers=headers) as response:
+                if response.status == 200:
+                    image_bytes = await response.read()
+                    content_type = response.headers.get("Content-Type", "image/jpeg")
+                    
+                    # Determine extension
+                    ext_map = {
+                        "image/jpeg": ".jpg",
+                        "image/png": ".png", 
+                        "image/webp": ".webp",
+                        "image/gif": ".gif",
+                        "image/bmp": ".bmp"
+                    }
+                    ext = ext_map.get(content_type, ".jpg")
+                    
+                    # Cache with ordinal suffix (always _0 for featured images)
+                    cache_file = cache_dir / f"{context_unit_id}_0{ext}"
+                    cache_file.write_bytes(image_bytes)
+                    
+                    logger.info("featured_image_auto_cached",
+                        context_unit_id=context_unit_id,
+                        image_url=image_url,
+                        size_bytes=len(image_bytes),
+                        cache_path=str(cache_file),
+                        extraction_source=featured_image.get("source", "unknown")
+                    )
+                else:
+                    logger.warn("featured_image_auto_cache_failed",
+                        context_unit_id=context_unit_id,
+                        image_url=image_url,
+                        status=response.status
+                    )
+    except Exception as e:
+        logger.warn("featured_image_auto_cache_error",
+            context_unit_id=context_unit_id,
+            image_url=image_url,
+            error=str(e)
+        )
+
+
 # Workflow state
 class ScraperState(TypedDict):
     """State for scraper workflow."""
@@ -1253,6 +1319,13 @@ async def ingest_to_context(state: ScraperState) -> ScraperState:
                     url=url,
                     context_unit_id=result["context_unit_id"]
                 )
+                
+                # Auto-cache featured image if present
+                if item.get("featured_image"):
+                    await auto_cache_featured_image(
+                        result["context_unit_id"],
+                        item["featured_image"]
+                    )
             elif result["duplicate"]:
                 logger.info("context_unit_duplicate_skipped",
                     url=url,
