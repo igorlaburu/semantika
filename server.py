@@ -2997,32 +2997,19 @@ async def get_context_unit_image(
                             url=image_url
                         )
         
-        # Priority 4: Return placeholder
-        logger.debug("image_not_found_using_placeholder", 
+        # Priority 4: Return 400 error (no image available)
+        logger.debug("image_not_found_return_400", 
             context_unit_id=context_unit_id,
             index=index
         )
-        placeholder = generate_placeholder_image()
-        return Response(
-            content=placeholder,
-            media_type="image/svg+xml",
-            headers={
-                "Cache-Control": "public, max-age=3600",
-                "X-Image-Source": "placeholder"
-            }
-        )
+        raise HTTPException(status_code=400, detail=f"No image available for context unit {context_unit_id} at index {index}")
             
+    except HTTPException:
+        # Re-raise HTTP exceptions (404, 400) without placeholder
+        raise
     except Exception as e:
         logger.error("get_context_unit_image_error", context_unit_id=context_unit_id, index=index, error=str(e))
-        placeholder = generate_placeholder_image()
-        return Response(
-            content=placeholder,
-            media_type="image/svg+xml",
-            headers={
-                "Cache-Control": "public, max-age=3600",
-                "X-Image-Source": "placeholder"
-            }
-        )
+        raise HTTPException(status_code=500, detail="Internal error while fetching image")
 
 
 def generate_placeholder_image() -> bytes:
