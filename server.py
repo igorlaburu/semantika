@@ -2961,7 +2961,7 @@ async def get_context_unit_image(
                                             "image/bmp": ".bmp"
                                         }
                                         ext = ext_map.get(content_type, ".jpg")
-                                        cache_file = cache_dir / f"{context_unit_id}{ext}"
+                                        cache_file = cache_dir / f"{context_unit_id}_{index}{ext}"
                                         
                                         cache_file.write_bytes(image_bytes)
                                         logger.info("featured_image_cached", 
