@@ -1326,6 +1326,10 @@ async def ingest_to_context(state: ScraperState) -> ScraperState:
                         result["context_unit_id"],
                         item["featured_image"]
                     )
+                    
+                    # Update image_count after caching
+                    from utils.context_unit_saver import update_image_count
+                    await update_image_count(result["context_unit_id"])
             elif result["duplicate"]:
                 logger.info("context_unit_duplicate_skipped",
                     url=url,

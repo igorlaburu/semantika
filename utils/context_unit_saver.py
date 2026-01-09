@@ -179,6 +179,11 @@ async def save_context_unit(
         context_unit_id = str(uuid.uuid4())
         now = datetime.utcnow().isoformat()
         
+        # Calculate image_count (featured_image counts as 1)
+        image_count = 0
+        if source_metadata and source_metadata.get("featured_image"):
+            image_count = 1
+        
         context_unit_data = {
             "id": context_unit_id,
             "base_id": context_unit_id,  # Self-reference for base context units
@@ -193,6 +198,7 @@ async def save_context_unit(
             "source_metadata": source_metadata or {},
             "category": category,
             "status": "pending",
+            "image_count": image_count,
             "created_at": now
         }
         
@@ -457,6 +463,76 @@ async def backfill_embeddings(
             error=str(e)
         )
         return {"total": 0, "updated": 0, "errors": 0, "error": str(e)}
+
+
+async def update_image_count(context_unit_id: str) -> Dict[str, Any]:
+    """Update image_count by counting physical files and featured_image.
+    
+    Args:
+        context_unit_id: Context unit UUID
+        
+    Returns:
+        Dict with success status and count
+    """
+    try:
+        from pathlib import Path
+        supabase = get_supabase_client()
+        
+        # Get featured_image from metadata
+        result = supabase.client.table("press_context_units").select(
+            "source_metadata"
+        ).eq("id", context_unit_id).execute()
+        
+        if not result.data:
+            logger.error("context_unit_not_found_for_image_count", context_unit_id=context_unit_id)
+            return {"success": False, "error": "Context unit not found"}
+        
+        source_metadata = result.data[0].get("source_metadata") or {}
+        
+        # Count featured_image (0 or 1)
+        featured_count = 1 if source_metadata.get("featured_image") else 0
+        
+        # Count manual images on disk
+        cache_dir = Path("/app/cache/images")
+        manual_count = 0
+        
+        if cache_dir.exists():
+            for ext in [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"]:
+                # Count files matching pattern: {context_unit_id}_{index}.ext
+                pattern = f"{context_unit_id}_*{ext}"
+                matching_files = list(cache_dir.glob(pattern))
+                manual_count += len(matching_files)
+        
+        total_count = featured_count + manual_count
+        
+        # Update database
+        update_result = supabase.client.table("press_context_units").update({
+            "image_count": total_count
+        }).eq("id", context_unit_id).execute()
+        
+        if update_result.data:
+            logger.info("image_count_updated",
+                context_unit_id=context_unit_id,
+                featured_count=featured_count,
+                manual_count=manual_count,
+                total_count=total_count
+            )
+            return {
+                "success": True,
+                "featured_count": featured_count,
+                "manual_count": manual_count,
+                "total_count": total_count
+            }
+        else:
+            logger.error("image_count_update_failed", context_unit_id=context_unit_id)
+            return {"success": False, "error": "Update failed"}
+        
+    except Exception as e:
+        logger.error("update_image_count_error",
+            context_unit_id=context_unit_id,
+            error=str(e)
+        )
+        return {"success": False, "error": str(e)}
 
 
 # Convenience functions for specific source types
