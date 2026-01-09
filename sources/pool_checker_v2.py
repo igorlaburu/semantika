@@ -16,7 +16,7 @@ Design:
 """
 
 from typing import Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import asyncio
 
 from utils.logger import get_logger
@@ -86,7 +86,7 @@ async def get_next_healthy_source() -> Optional[Dict[str, Any]]:
         
         if high_freq_result.data:
             # Find sources that haven't been scraped in the last 5 cycles (50 minutes)
-            cutoff_time = datetime.utcnow() - timedelta(minutes=50)
+            cutoff_time = datetime.utcnow().replace(tzinfo=timezone.utc) - timedelta(minutes=50)
             
             high_freq_candidates = [
                 s for s in high_freq_result.data
