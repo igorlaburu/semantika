@@ -642,135 +642,47 @@ async def auth_get_user() -> Dict:
 
 # OAuth 1.0a Twitter Integration Endpoints
 
-# TTL for oauth_state tokens (5 minutes)
-OAUTH_STATE_TTL_SECONDS = 300
-
-
-@app.post("/oauth/twitter/init")
-async def twitter_oauth_init(
-    company_id: str = Depends(get_company_id_from_auth)
-) -> Dict:
-    """
-    Initialize Twitter OAuth flow (Step 0: Generate temporary state).
-
-    This endpoint generates a short-lived state token that can be used
-    to open the OAuth popup without exposing the JWT in the URL.
-
-    Requires: Authentication (JWT or API Key in header)
-
-    Returns:
-        {
-            "state": "uuid-string",
-            "url": "https://api.ekimen.ai/oauth/twitter/start?state=uuid",
-            "expires_in": 300
-        }
-    """
-    import uuid
-
-    # Generate unique state
-    oauth_state = str(uuid.uuid4())
-
-    # Store state with company_id and timestamp
-    oauth_states_cache = getattr(app.state, 'oauth_states', {})
-    oauth_states_cache[oauth_state] = {
-        'company_id': company_id,
-        'timestamp': datetime.utcnow().timestamp()
-    }
-    app.state.oauth_states = oauth_states_cache
-
-    # Clean up expired states (older than TTL)
-    current_time = datetime.utcnow().timestamp()
-    expired_states = [
-        state for state, data in oauth_states_cache.items()
-        if current_time - data['timestamp'] > OAUTH_STATE_TTL_SECONDS
-    ]
-    for state in expired_states:
-        del oauth_states_cache[state]
-
-    base_url = os.getenv('API_BASE_URL', 'https://api.ekimen.ai')
-
-    logger.info("twitter_oauth_init",
-        company_id=company_id,
-        state=oauth_state[:8] + "..."
-    )
-
-    return {
-        "state": oauth_state,
-        "url": f"{base_url}/oauth/twitter/start?state={oauth_state}",
-        "expires_in": OAUTH_STATE_TTL_SECONDS
-    }
-
-
 @app.get("/oauth/twitter/start")
 async def twitter_oauth_start(
-    state: str = Query(..., description="OAuth state from /oauth/twitter/init")
+    company_id: str = Depends(get_company_id_from_auth)
 ) -> HTMLResponse:
     """
     Start Twitter OAuth flow (Step 1: Request Token).
     Opens in popup window for user authorization.
-
-    Requires: Valid state token from POST /oauth/twitter/init
-
-    Query Parameters:
-        - state: Temporary token from /oauth/twitter/init (5 min TTL)
-
+    
+    Requires: Authentication (JWT or API Key)
+    
     Returns:
         HTML page that redirects to Twitter authorization
     """
     try:
-        # Validate state token
-        oauth_states_cache = getattr(app.state, 'oauth_states', {})
-        state_data = oauth_states_cache.get(state)
-
-        if not state_data:
-            logger.error("twitter_oauth_invalid_state", state=state[:8] + "..." if state else "none")
-            return HTMLResponse(
-                content="<html><body><h1>Error: Invalid or expired state token</h1><p>Please try connecting again.</p><script>setTimeout(() => window.close(), 3000);</script></body></html>",
-                status_code=400
-            )
-
-        # Check if state is expired
-        current_time = datetime.utcnow().timestamp()
-        if current_time - state_data['timestamp'] > OAUTH_STATE_TTL_SECONDS:
-            del oauth_states_cache[state]
-            logger.error("twitter_oauth_expired_state", state=state[:8] + "...")
-            return HTMLResponse(
-                content="<html><body><h1>Error: State token expired</h1><p>Please try connecting again.</p><script>setTimeout(() => window.close(), 3000);</script></body></html>",
-                status_code=400
-            )
-
-        company_id = state_data['company_id']
-
-        # Consume the state (one-time use)
-        del oauth_states_cache[state]
-
         # Get Consumer Keys from environment
         consumer_key = os.getenv('TWITTER_CONSUMER_KEY')
         consumer_secret = os.getenv('TWITTER_CONSUMER_SECRET')
-
+        
         if not consumer_key or not consumer_secret:
             logger.error("twitter_oauth_missing_credentials")
             return HTMLResponse(
                 content="<html><body><h1>Error: Twitter credentials not configured</h1><script>window.close();</script></body></html>",
                 status_code=500
             )
-
+        
         # Generate callback URL
         callback_url = f"{os.getenv('API_BASE_URL', 'https://api.ekimen.ai')}/oauth/twitter/callback?company_id={company_id}"
-
+        
         # Step 1: Get request token
         result = await TwitterPublisher.get_request_token(consumer_key, consumer_secret, callback_url)
-
+        
         if not result.get('success'):
             logger.error("twitter_request_token_failed", error=result.get('error'))
             return HTMLResponse(
                 content=f"<html><body><h1>Error: {result.get('error')}</h1><script>window.close();</script></body></html>",
                 status_code=500
             )
-
+        
         oauth_token = result['oauth_token']
         oauth_token_secret = result['oauth_token_secret']
-
+        
         # Store request token temporarily in session/cache (simplified for demo)
         # In production, use Redis or session store
         request_tokens_cache = getattr(app.state, 'request_tokens', {})
@@ -780,15 +692,15 @@ async def twitter_oauth_start(
             'timestamp': datetime.utcnow().timestamp()
         }
         app.state.request_tokens = request_tokens_cache
-
+        
         # Step 2: Generate authorization URL
         auth_url = TwitterPublisher.get_authorization_url(oauth_token)
-
-        logger.info("twitter_oauth_redirect",
+        
+        logger.info("twitter_oauth_redirect", 
             company_id=company_id,
             oauth_token=oauth_token[:10] + "..."
         )
-
+        
         # Return HTML that redirects to Twitter
         html_content = f"""
         <html>
@@ -809,11 +721,11 @@ async def twitter_oauth_start(
         </body>
         </html>
         """
-
+        
         return HTMLResponse(content=html_content)
-
+        
     except Exception as e:
-        logger.error("twitter_oauth_start_error", error=str(e))
+        logger.error("twitter_oauth_start_error", company_id=company_id, error=str(e))
         return HTMLResponse(
             content=f"<html><body><h1>Error: {str(e)}</h1><script>window.close();</script></body></html>",
             status_code=500
