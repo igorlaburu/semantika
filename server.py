@@ -4569,20 +4569,33 @@ async def publish_to_platforms(
         
         # Add references and image attribution footer
         content = await _add_article_footer(content, article.get('id'), company_id)
-        
-        # Publish to each target
-        for target in targets:
+
+        # Separate targets: WordPress (destinations) vs Social Media (RRSS)
+        SOCIAL_PLATFORMS = ('twitter', 'linkedin', 'facebook', 'instagram')
+        wordpress_targets = [t for t in targets if t['platform_type'] == 'wordpress']
+        social_targets = [t for t in targets if t['platform_type'] in SOCIAL_PLATFORMS]
+
+        logger.info("publication_targets_separated",
+            article_id=article['id'],
+            wordpress_count=len(wordpress_targets),
+            social_count=len(social_targets),
+            wordpress_names=[t['name'] for t in wordpress_targets],
+            social_names=[t['name'] for t in social_targets]
+        )
+
+        # Step 1: Publish to WordPress first (to get URL for social media)
+        wordpress_url = None
+
+        for target in wordpress_targets:
             target_id = target['id']
-            
+
             try:
-                # Create publisher
                 publisher = PublisherFactory.create_publisher(
                     target['platform_type'],
                     target['base_url'],
                     target['credentials_encrypted']
                 )
-                
-                # Publish article with transformed image
+
                 publish_kwargs = {
                     "title": title,
                     "content": content,
@@ -4593,15 +4606,14 @@ async def publish_to_platforms(
                     "slug": slug,
                     "fecha_publicacion": article.get('fecha_publicacion')
                 }
-                
-                # Use temporary transformed image file if available, fallback to UUID method
+
                 if temp_image_path:
                     publish_kwargs["temp_image_path"] = temp_image_path
                 else:
                     publish_kwargs["imagen_uuid"] = imagen_uuid
-                
+
                 result = await publisher.publish_article(**publish_kwargs)
-                
+
                 publication_results[target_id] = {
                     "success": result.success,
                     "platform": target['platform_type'],
@@ -4612,7 +4624,11 @@ async def publish_to_platforms(
                     "error": result.error,
                     "metadata": result.metadata
                 }
-                
+
+                # Capture WordPress URL for social media
+                if result.success and result.url and not wordpress_url:
+                    wordpress_url = result.url
+
                 logger.info("article_published_to_platform",
                     article_id=article['id'],
                     target_id=target_id,
@@ -4620,7 +4636,7 @@ async def publish_to_platforms(
                     success=result.success,
                     url=result.url
                 )
-                
+
             except Exception as e:
                 publication_results[target_id] = {
                     "success": False,
@@ -4628,13 +4644,103 @@ async def publish_to_platforms(
                     "target_name": target['name'],
                     "error": f"Publication error: {str(e)}"
                 }
-                
+
                 logger.error("platform_publication_failed",
                     article_id=article['id'],
                     target_id=target_id,
                     platform=target['platform_type'],
                     error=str(e)
                 )
+
+        # Step 2: Publish to Social Media with WordPress URL
+        if social_targets:
+            # Format hashtags from tags
+            hashtags = ""
+            if tags:
+                import re
+                formatted_tags = []
+                for tag in tags[:5]:  # Limit to 5 hashtags
+                    clean_tag = re.sub(r'[^a-zA-Z0-9áéíóúñüÁÉÍÓÚÑÜ]', '', str(tag))
+                    if clean_tag and len(clean_tag) > 1:
+                        formatted_tags.append(f"#{clean_tag}")
+                hashtags = " ".join(formatted_tags)
+
+            # Build social media content
+            if wordpress_url:
+                social_content = f"📰 {title}\n\n{wordpress_url}"
+                if hashtags:
+                    social_content += f"\n\n{hashtags}"
+
+                logger.info("social_content_with_wordpress_url",
+                    article_id=article['id'],
+                    wordpress_url=wordpress_url,
+                    hashtags=hashtags
+                )
+            else:
+                # No WordPress URL available, use excerpt
+                social_content = f"📰 {title}\n\n{excerpt[:200] if excerpt else ''}"
+                if hashtags:
+                    social_content += f"\n\n{hashtags}"
+
+                logger.warn("social_content_without_wordpress_url",
+                    article_id=article['id'],
+                    reason="No WordPress publication succeeded or no WordPress targets"
+                )
+
+            for target in social_targets:
+                target_id = target['id']
+
+                try:
+                    publisher = PublisherFactory.create_publisher(
+                        target['platform_type'],
+                        target['base_url'],
+                        target['credentials_encrypted']
+                    )
+
+                    # Social media uses simplified content (no full article)
+                    result = await publisher.publish_article(
+                        title=title,
+                        content=social_content,
+                        excerpt=excerpt,
+                        tags=tags,
+                        status="publish"
+                    )
+
+                    publication_results[target_id] = {
+                        "success": result.success,
+                        "platform": target['platform_type'],
+                        "target_name": target['name'],
+                        "url": result.url,
+                        "external_id": result.external_id,
+                        "published_at": result.published_at,
+                        "error": result.error,
+                        "metadata": result.metadata,
+                        "wordpress_url_included": bool(wordpress_url)
+                    }
+
+                    logger.info("article_published_to_platform",
+                        article_id=article['id'],
+                        target_id=target_id,
+                        platform=target['platform_type'],
+                        success=result.success,
+                        url=result.url,
+                        wordpress_url_included=bool(wordpress_url)
+                    )
+
+                except Exception as e:
+                    publication_results[target_id] = {
+                        "success": False,
+                        "platform": target['platform_type'],
+                        "target_name": target['name'],
+                        "error": f"Publication error: {str(e)}"
+                    }
+
+                    logger.error("platform_publication_failed",
+                        article_id=article['id'],
+                        target_id=target_id,
+                        platform=target['platform_type'],
+                        error=str(e)
+                    )
         
         # Clean up temporary image file if created
         if temp_image_path:
