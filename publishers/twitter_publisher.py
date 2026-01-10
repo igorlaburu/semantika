@@ -194,27 +194,42 @@ class TwitterPublisher(BasePublisher):
         imagen_uuid: Optional[str] = None,
         temp_image_path: Optional[str] = None
     ) -> PublicationResult:
-        """Publish article to Twitter as a thread."""
+        """Publish article to Twitter as a single tweet."""
         try:
-            # Build tweet content
-            tweet_content = f"📰 {title}\n\n"
-            
-            # Add excerpt or first part of content
-            if excerpt:
-                tweet_content += f"{excerpt}\n\n"
+            # Check if content is pre-formatted (contains URL from chained publication)
+            # Pre-formatted content starts with 📰 and contains http
+            is_preformatted = content.startswith("📰") and "http" in content
+
+            if is_preformatted:
+                # Use content directly (already formatted with URL and hashtags)
+                tweet_content = content
+                logger.info("twitter_using_preformatted_content",
+                    content_length=len(content)
+                )
             else:
-                # Use first paragraph of content
-                clean_content = re.sub(r'<[^>]+>', '', content)
-                first_para = clean_content.split('\n\n')[0][:200]
-                tweet_content += f"{first_para}...\n\n"
-            
-            # Add hashtags
-            hashtags = self._extract_hashtags_and_mentions(tags or [])
-            if hashtags:
-                tweet_content += hashtags
-            
-            # Split into tweets if necessary
-            tweets = self._split_into_tweets(tweet_content)
+                # Build tweet content from scratch (standalone publication)
+                tweet_content = f"📰 {title}\n\n"
+
+                # Add excerpt or first part of content
+                if excerpt:
+                    tweet_content += f"{excerpt[:150]}...\n\n"
+                else:
+                    # Use first paragraph of content
+                    clean_content = re.sub(r'<[^>]+>', '', content)
+                    first_para = clean_content.split('\n\n')[0][:150]
+                    tweet_content += f"{first_para}...\n\n"
+
+                # Add hashtags
+                hashtags = self._extract_hashtags_and_mentions(tags or [])
+                if hashtags:
+                    tweet_content += hashtags
+
+            # For social sharing with URL, we want a single tweet (no thread)
+            # Only split if content is too long and doesn't have a URL
+            if is_preformatted or len(tweet_content) <= 280:
+                tweets = [tweet_content]
+            else:
+                tweets = self._split_into_tweets(tweet_content)
             
             logger.info("twitter_publish_start", 
                 title=title[:50], 
