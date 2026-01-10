@@ -4,6 +4,7 @@ import json
 from typing import Dict, Any, Optional
 from .base_publisher import BasePublisher
 from .wordpress_publisher import WordPressPublisher
+from .twitter_publisher import TwitterPublisher
 from utils.logger import get_logger
 from utils.config import settings
 
@@ -54,6 +55,8 @@ class PublisherFactory:
         # Create publisher based on platform type
         if platform_type == "wordpress":
             return WordPressPublisher(credentials, base_url)
+        elif platform_type == "twitter":
+            return TwitterPublisher(credentials, base_url)
         # elif platform_type == "medium":
         #     return MediumPublisher(credentials, base_url)
         # elif platform_type == "substack":
@@ -64,4 +67,4 @@ class PublisherFactory:
     @staticmethod
     def get_supported_platforms() -> list:
         """Get list of supported platform types."""
-        return ["wordpress"]  # Add more as we implement them
+        return ["wordpress", "twitter"]  # Add more as we implement them
