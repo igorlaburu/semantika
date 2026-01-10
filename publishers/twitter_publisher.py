@@ -2,10 +2,10 @@
 
 import aiohttp
 import asyncio
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 import json
 import re
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 import hashlib
 import hmac
 import base64
@@ -337,3 +337,194 @@ class TwitterPublisher(BasePublisher):
     def format_tags(self, tags: list) -> str:
         """Format tags as Twitter hashtags."""
         return self._extract_hashtags_and_mentions(tags)
+    
+    # OAuth 1.0a Flow Methods
+    @staticmethod
+    async def get_request_token(consumer_key: str, consumer_secret: str, callback_url: str) -> Dict[str, Any]:
+        """Step 1: Get request token for OAuth flow."""
+        try:
+            url = "https://api.twitter.com/oauth/request_token"
+            
+            # OAuth parameters
+            oauth_params = {
+                'oauth_callback': callback_url,
+                'oauth_consumer_key': consumer_key,
+                'oauth_signature_method': 'HMAC-SHA1',
+                'oauth_timestamp': str(int(time.time())),
+                'oauth_nonce': secrets.token_hex(16),
+                'oauth_version': '1.0'
+            }
+            
+            # Create signature base string
+            normalized_params = '&'.join([
+                f'{urllib.parse.quote_plus(str(k))}={urllib.parse.quote_plus(str(v))}'
+                for k, v in sorted(oauth_params.items())
+            ])
+            
+            base_string = f'POST&{urllib.parse.quote_plus(url)}&{urllib.parse.quote_plus(normalized_params)}'
+            
+            # Create signing key (consumer_secret + "&" for request token)
+            signing_key = f'{urllib.parse.quote_plus(consumer_secret)}&'
+            
+            # Generate signature
+            signature = base64.b64encode(
+                hmac.new(signing_key.encode(), base_string.encode(), hashlib.sha1).digest()
+            ).decode()
+            
+            oauth_params['oauth_signature'] = signature
+            
+            # Build authorization header
+            auth_header = 'OAuth ' + ', '.join([
+                f'{k}="{urllib.parse.quote_plus(str(v))}"'
+                for k, v in sorted(oauth_params.items())
+            ])
+            
+            # Make request
+            headers = {
+                'Authorization': auth_header,
+                'Content-Type': 'application/x-www-form-urlencoded'
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers) as response:
+                    if response.status == 200:
+                        response_text = await response.text()
+                        
+                        # Parse response
+                        parsed = dict(urllib.parse.parse_qsl(response_text))
+                        
+                        if 'oauth_token' in parsed and 'oauth_token_secret' in parsed:
+                            logger.info("twitter_request_token_success", 
+                                oauth_token=parsed['oauth_token'][:10] + "..."
+                            )
+                            return {
+                                "success": True,
+                                "oauth_token": parsed['oauth_token'],
+                                "oauth_token_secret": parsed['oauth_token_secret'],
+                                "oauth_callback_confirmed": parsed.get('oauth_callback_confirmed', 'true')
+                            }
+                        else:
+                            logger.error("twitter_request_token_invalid_response", response=response_text)
+                            return {
+                                "success": False,
+                                "error": "Invalid response format from Twitter"
+                            }
+                    else:
+                        error_text = await response.text()
+                        logger.error("twitter_request_token_failed", 
+                            status=response.status,
+                            error=error_text
+                        )
+                        return {
+                            "success": False,
+                            "error": f"Twitter API error {response.status}: {error_text}"
+                        }
+                        
+        except Exception as e:
+            logger.error("twitter_request_token_exception", error=str(e))
+            return {
+                "success": False,
+                "error": f"Request token error: {str(e)}"
+            }
+    
+    @staticmethod
+    def get_authorization_url(oauth_token: str) -> str:
+        """Step 2: Generate authorization URL for user."""
+        return f"https://api.twitter.com/oauth/authorize?oauth_token={oauth_token}"
+    
+    @staticmethod
+    async def get_access_token(
+        consumer_key: str, 
+        consumer_secret: str, 
+        oauth_token: str, 
+        oauth_token_secret: str, 
+        oauth_verifier: str
+    ) -> Dict[str, Any]:
+        """Step 3: Exchange request token + verifier for access token."""
+        try:
+            url = "https://api.twitter.com/oauth/access_token"
+            
+            # OAuth parameters
+            oauth_params = {
+                'oauth_consumer_key': consumer_key,
+                'oauth_token': oauth_token,
+                'oauth_signature_method': 'HMAC-SHA1',
+                'oauth_timestamp': str(int(time.time())),
+                'oauth_nonce': secrets.token_hex(16),
+                'oauth_version': '1.0',
+                'oauth_verifier': oauth_verifier
+            }
+            
+            # Create signature base string
+            normalized_params = '&'.join([
+                f'{urllib.parse.quote_plus(str(k))}={urllib.parse.quote_plus(str(v))}'
+                for k, v in sorted(oauth_params.items())
+            ])
+            
+            base_string = f'POST&{urllib.parse.quote_plus(url)}&{urllib.parse.quote_plus(normalized_params)}'
+            
+            # Create signing key
+            signing_key = f'{urllib.parse.quote_plus(consumer_secret)}&{urllib.parse.quote_plus(oauth_token_secret)}'
+            
+            # Generate signature
+            signature = base64.b64encode(
+                hmac.new(signing_key.encode(), base_string.encode(), hashlib.sha1).digest()
+            ).decode()
+            
+            oauth_params['oauth_signature'] = signature
+            
+            # Build authorization header
+            auth_header = 'OAuth ' + ', '.join([
+                f'{k}="{urllib.parse.quote_plus(str(v))}"'
+                for k, v in sorted(oauth_params.items())
+            ])
+            
+            # Make request
+            headers = {
+                'Authorization': auth_header,
+                'Content-Type': 'application/x-www-form-urlencoded'
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers) as response:
+                    if response.status == 200:
+                        response_text = await response.text()
+                        
+                        # Parse response
+                        parsed = dict(urllib.parse.parse_qsl(response_text))
+                        
+                        if 'oauth_token' in parsed and 'oauth_token_secret' in parsed:
+                            logger.info("twitter_access_token_success", 
+                                username=parsed.get('screen_name', 'unknown'),
+                                user_id=parsed.get('user_id', 'unknown')
+                            )
+                            return {
+                                "success": True,
+                                "oauth_token": parsed['oauth_token'],
+                                "oauth_token_secret": parsed['oauth_token_secret'],
+                                "user_id": parsed.get('user_id'),
+                                "screen_name": parsed.get('screen_name')
+                            }
+                        else:
+                            logger.error("twitter_access_token_invalid_response", response=response_text)
+                            return {
+                                "success": False,
+                                "error": "Invalid access token response from Twitter"
+                            }
+                    else:
+                        error_text = await response.text()
+                        logger.error("twitter_access_token_failed", 
+                            status=response.status,
+                            error=error_text
+                        )
+                        return {
+                            "success": False,
+                            "error": f"Twitter API error {response.status}: {error_text}"
+                        }
+                        
+        except Exception as e:
+            logger.error("twitter_access_token_exception", error=str(e))
+            return {
+                "success": False,
+                "error": f"Access token error: {str(e)}"
+            }
