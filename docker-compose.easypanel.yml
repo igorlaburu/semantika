@@ -9,6 +9,9 @@ services:
       - QDRANT_API_KEY
       - OPENROUTER_API_KEY
       - FAL_AI_API_KEY
+      - TWITTER_CONSUMER_KEY
+      - TWITTER_CONSUMER_SECRET
+      - API_BASE_URL
       - QDRANT_COLLECTION_NAME=semantika_prod
       - LOG_LEVEL=INFO
     volumes:
@@ -33,6 +36,9 @@ services:
       - QDRANT_API_KEY
       - OPENROUTER_API_KEY
       - FAL_AI_API_KEY
+      - TWITTER_CONSUMER_KEY
+      - TWITTER_CONSUMER_SECRET
+      - API_BASE_URL
       - QDRANT_COLLECTION_NAME=semantika_prod
       - LOG_LEVEL=INFO
     volumes:
