@@ -5,6 +5,7 @@ from typing import Dict, Any, Optional
 from .base_publisher import BasePublisher
 from .wordpress_publisher import WordPressPublisher
 from .twitter_publisher import TwitterPublisher
+from .linkedin_publisher import LinkedInPublisher
 from utils.logger import get_logger
 from utils.config import settings
 
@@ -57,14 +58,16 @@ class PublisherFactory:
             return WordPressPublisher(credentials, base_url)
         elif platform_type == "twitter":
             return TwitterPublisher(credentials, base_url)
+        elif platform_type == "linkedin":
+            return LinkedInPublisher(credentials, base_url)
         # elif platform_type == "medium":
         #     return MediumPublisher(credentials, base_url)
         # elif platform_type == "substack":
         #     return SubstackPublisher(credentials, base_url)
         else:
             raise ValueError(f"Unsupported platform type: {platform_type}")
-    
+
     @staticmethod
     def get_supported_platforms() -> list:
         """Get list of supported platform types."""
-        return ["wordpress", "twitter"]  # Add more as we implement them
+        return ["wordpress", "twitter", "linkedin"]
