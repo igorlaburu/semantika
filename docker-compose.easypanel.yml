@@ -12,6 +12,7 @@ services:
       - TWITTER_CONSUMER_KEY
       - TWITTER_CONSUMER_SECRET
       - API_BASE_URL
+      - CREDENTIALS_ENCRYPTION_KEY
       - QDRANT_COLLECTION_NAME=semantika_prod
       - LOG_LEVEL=INFO
     volumes:
@@ -39,6 +40,7 @@ services:
       - TWITTER_CONSUMER_KEY
       - TWITTER_CONSUMER_SECRET
       - API_BASE_URL
+      - CREDENTIALS_ENCRYPTION_KEY
       - QDRANT_COLLECTION_NAME=semantika_prod
       - LOG_LEVEL=INFO
     volumes:
