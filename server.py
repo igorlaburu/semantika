@@ -825,29 +825,25 @@ async def twitter_oauth_callback(
             # Encrypt credentials
             encrypted_credentials = CredentialManager.encrypt_credentials(credentials)
             
-            # Save to publication_targets table
+            # Save to press_publication_targets table
             supabase = get_supabase_client()
             
             # Check if Twitter target already exists for this company
-            existing = supabase.client.table('publication_targets').select('*').eq('company_id', company_id).eq('platform_type', 'twitter').execute()
+            existing = supabase.client.table('press_publication_targets').select('*').eq('company_id', company_id).eq('platform_type', 'twitter').execute()
             
             target_data = {
                 'company_id': company_id,
                 'platform_type': 'twitter',
+                'name': f'Twitter @{twitter_username}',
                 'base_url': f'@{twitter_username}',
                 'credentials_encrypted': encrypted_credentials.hex(),
-                'is_active': True,
-                'metadata': {
-                    'twitter_user_id': twitter_user_id,
-                    'twitter_username': twitter_username,
-                    'connected_at': datetime.utcnow().isoformat()
-                }
+                'is_active': True
             }
             
             if existing.data:
                 # Update existing target
-                target_id = existing.data[0]['target_id']
-                supabase.client.table('publication_targets').update(target_data).eq('target_id', target_id).execute()
+                target_id = existing.data[0]['id']
+                supabase.client.table('press_publication_targets').update(target_data).eq('id', target_id).execute()
                 logger.info("twitter_target_updated", 
                     company_id=company_id,
                     username=twitter_username,
@@ -855,8 +851,8 @@ async def twitter_oauth_callback(
                 )
             else:
                 # Create new target
-                insert_result = supabase.client.table('publication_targets').insert(target_data).execute()
-                target_id = insert_result.data[0]['target_id']
+                insert_result = supabase.client.table('press_publication_targets').insert(target_data).execute()
+                target_id = insert_result.data[0]['id']
                 logger.info("twitter_target_created", 
                     company_id=company_id,
                     username=twitter_username,
@@ -952,18 +948,17 @@ async def twitter_oauth_status(
         supabase = get_supabase_client()
         
         # Check for active Twitter publication target
-        result = supabase.client.table('publication_targets').select('*').eq('company_id', company_id).eq('platform_type', 'twitter').eq('is_active', True).execute()
+        result = supabase.client.table('press_publication_targets').select('*').eq('company_id', company_id).eq('platform_type', 'twitter').eq('is_active', True).execute()
         
         if result.data:
             target = result.data[0]
-            metadata = target.get('metadata', {})
             
             return {
                 "connected": True,
                 "username": target.get('base_url', ''),
-                "user_id": metadata.get('twitter_user_id'),
-                "connected_at": metadata.get('connected_at'),
-                "target_id": target.get('target_id')
+                "target_id": target.get('id'),
+                "name": target.get('name'),
+                "created_at": target.get('created_at')
             }
         else:
             return {
@@ -991,9 +986,8 @@ async def twitter_oauth_disconnect(
         supabase = get_supabase_client()
         
         # Deactivate Twitter publication target
-        result = supabase.client.table('publication_targets').update({
-            'is_active': False,
-            'metadata': supabase.client.table('publication_targets').select('metadata').eq('company_id', company_id).eq('platform_type', 'twitter').execute().data[0].get('metadata', {}) | {'disconnected_at': datetime.utcnow().isoformat()}
+        result = supabase.client.table('press_publication_targets').update({
+            'is_active': False
         }).eq('company_id', company_id).eq('platform_type', 'twitter').execute()
         
         if result.data:
