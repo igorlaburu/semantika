@@ -644,17 +644,39 @@ async def auth_get_user() -> Dict:
 
 @app.get("/oauth/twitter/start")
 async def twitter_oauth_start(
-    company_id: str = Depends(get_company_id_from_auth)
+    token: Optional[str] = Query(None, description="JWT token (for popup flow)"),
+    authorization: Optional[str] = Header(None)
 ) -> HTMLResponse:
     """
     Start Twitter OAuth flow (Step 1: Request Token).
     Opens in popup window for user authorization.
-    
-    Requires: Authentication (JWT or API Key)
-    
+
+    Accepts authentication via:
+    - Query param: ?token=JWT (for popup window)
+    - Header: Authorization: Bearer JWT
+
     Returns:
         HTML page that redirects to Twitter authorization
     """
+    # Extract company_id from token (query param or header)
+    jwt_token = token or (authorization[7:] if authorization and authorization.startswith("Bearer ") else authorization)
+
+    if not jwt_token:
+        return HTMLResponse(
+            content="<html><body><h1>Error: Authentication required</h1><script>window.close();</script></body></html>",
+            status_code=401
+        )
+
+    try:
+        user = await get_current_user_from_jwt(f"Bearer {jwt_token}")
+        company_id = user.get("company_id")
+        if not company_id:
+            raise HTTPException(status_code=401, detail="No company_id in token")
+    except Exception as e:
+        return HTMLResponse(
+            content=f"<html><body><h1>Error: Invalid token</h1><script>window.close();</script></body></html>",
+            status_code=401
+        )
     try:
         # Get Consumer Keys from environment
         consumer_key = os.getenv('TWITTER_CONSUMER_KEY')
