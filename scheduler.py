@@ -658,44 +658,47 @@ async def generate_articles_for_company(
     company_name: str,
     max_articles: int
 ) -> int:
-    """Generate articles for a specific company."""
-    
+    """Generate articles for a specific company using /process/redact-news-rich endpoint.
+
+    Uses the same endpoint and flow as the frontend with save_article=true.
+    """
+
     logger.info("company_generation_start",
         company_id=company_id,
         company_name=company_name,
         max_articles=max_articles
     )
-    
+
     supabase = get_supabase_client()
     llm_client = LLMClient()
-    
+
     # Get unused context units
     unused_units = get_unused_context_units(
         company_id=company_id,
         limit=max_articles * 2  # Get extra to have choice
     )
-    
+
     if not unused_units:
         logger.info("no_unused_context_units",
             company_id=company_id,
             company_name=company_name
         )
         return 0
-    
+
     # Get company settings to check quality threshold
     company_result = supabase.client.table("companies").select("settings").eq("id", company_id).execute()
     company_settings = company_result.data[0].get('settings', {}) if company_result.data else {}
     min_quality = company_settings.get('autogenerate_min_quality', 3.0)
-    
+
     if min_quality > 0:
         evaluated_units = await evaluate_units_quality(unused_units, llm_client)
         selected_units = [
-            u for u in evaluated_units 
+            u for u in evaluated_units
             if u.get('quality_score', 0) >= min_quality
         ][:max_articles]
     else:
         selected_units = unused_units[:max_articles]
-    
+
     if not selected_units:
         logger.info("no_quality_units",
             company_id=company_id,
@@ -703,125 +706,113 @@ async def generate_articles_for_company(
             min_quality=min_quality
         )
         return 0
-    
-    # Generate articles
+
+    # Get API key for this company
+    client_result = supabase.client.table("clients")\
+        .select("api_key")\
+        .eq("company_id", company_id)\
+        .eq("is_active", True)\
+        .limit(1)\
+        .execute()
+
+    if not client_result.data:
+        logger.error("no_api_key_found_for_company",
+            company_id=company_id,
+            company_name=company_name
+        )
+        return 0
+
+    api_key = client_result.data[0]['api_key']
+
+    # Generate articles using /process/redact-news-rich with save_article=true
     generation_batch_id = str(uuid.uuid4())
     generated_count = 0
-    
-    for unit in selected_units:
-        try:
-            # Generate article content
-            article_data = await llm_client.redact_news(
-                text=unit['raw_text'],
-                organization_id=company_id,
-                client_id=company_id
-            )
-            
-            # Create article directly in database (endpoint is stateless)
-            article_id = str(uuid.uuid4())
-            
-            # Generate slug from title
-            import re
-            slug = re.sub(r'[^\w\s-]', '', article_data['title']).strip()
-            slug = re.sub(r'[\s_-]+', '-', slug).lower()[:50]
-            
-            # Generate image prompt and AI image
-            image_uuid = None
-            image_prompt = None
+
+    async with aiohttp.ClientSession() as session:
+        for unit in selected_units:
             try:
-                # Generate image prompt with LLM
-                prompt_result = await llm_client.generate_image_prompt(
-                    title=article_data['title'],
-                    content=article_data['article']
+                # Call /process/redact-news-rich with save_article=true
+                url = "http://semantika-api:8000/process/redact-news-rich"
+
+                headers = {
+                    'X-API-Key': api_key,
+                    'Content-Type': 'application/json'
+                }
+
+                payload = {
+                    'context_unit_ids': [unit['id']],
+                    'save_article': True
+                }
+
+                async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=120)) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        saved_article = result.get('saved_article', {})
+                        article_id = saved_article.get('id')
+
+                        if article_id:
+                            # Update working_json with auto_generated metadata
+                            working_json = saved_article.get('working_json', {})
+                            working_json.update({
+                                "auto_generated": True,
+                                "generation_date": datetime.utcnow().isoformat(),
+                                "generation_batch_id": generation_batch_id,
+                                "quality_score": unit.get('quality_score'),
+                                "llm_model": settings.llm_writer_model
+                            })
+
+                            # Update article with auto_generated flag
+                            supabase.client.table("press_articles")\
+                                .update({"working_json": working_json})\
+                                .eq("id", article_id)\
+                                .execute()
+
+                            generated_count += 1
+
+                            logger.info("article_auto_generated",
+                                company_id=company_id,
+                                article_id=article_id,
+                                context_unit_id=unit['id'],
+                                title=saved_article.get('titulo', '')[:50]
+                            )
+                        else:
+                            logger.error("article_generation_no_id_returned",
+                                company_id=company_id,
+                                unit_id=unit['id'],
+                                response=result
+                            )
+
+                    elif response.status == 429:
+                        logger.warn("article_generation_rate_limited",
+                            company_id=company_id,
+                            unit_id=unit['id']
+                        )
+                        break  # Stop generating for this company if rate limited
+
+                    else:
+                        response_text = await response.text()
+                        logger.error("article_generation_endpoint_failed",
+                            company_id=company_id,
+                            unit_id=unit['id'],
+                            status_code=response.status,
+                            response=response_text[:200]
+                        )
+
+                # Small delay between articles to avoid overwhelming the system
+                await asyncio.sleep(2)
+
+            except asyncio.TimeoutError:
+                logger.error("article_generation_timeout",
+                    company_id=company_id,
+                    unit_id=unit['id']
                 )
-                image_prompt = prompt_result.get('prompt', 'A professional news image')
-                
-                # Generate AI image
-                from utils.image_generator import generate_image_from_prompt
-                image_result = await generate_image_from_prompt(
-                    context_unit_id=article_id,
-                    image_prompt=image_prompt
-                )
-                
-                if image_result['success']:
-                    image_uuid = image_result['image_uuid']
-                    logger.info("ai_image_generated_for_article",
-                        article_id=article_id,
-                        image_uuid=image_uuid,
-                        prompt=image_prompt[:50]
-                    )
-                
             except Exception as e:
-                logger.error("image_generation_failed", 
-                    article_id=article_id, 
+                logger.error("article_generation_failed",
+                    company_id=company_id,
+                    unit_id=unit['id'],
                     error=str(e)
                 )
-            
-            # Get default style for company
-            default_style = supabase.client.table("press_styles")\
-                .select("id")\
-                .eq("company_id", company_id)\
-                .eq("predeterminado", True)\
-                .maybe_single()\
-                .execute()
-            
-            style_id = default_style.data["id"] if default_style.data else None
-            
-            # Create article record
-            article_insert_data = {
-                "id": article_id,
-                "titulo": article_data['title'],
-                "slug": slug,
-                "autor": article_data.get('author', 'Redacción'),
-                "excerpt": article_data['excerpt'],
-                "contenido": article_data['article'],  # Keep markdown in contenido field
-                "tags": article_data['tags'],
-                "category": unit.get('category', 'general'),
-                "estado": "borrador",
-                "imagen_uuid": image_uuid,
-                "style_id": style_id,
-                "company_id": company_id,
-                "context_unit_ids": [unit['id']],  # IMPORTANT: Set context_unit_ids for footer generation
-                "created_at": datetime.utcnow().isoformat(),
-                "updated_at": datetime.utcnow().isoformat(),
-                "working_json": {
-                    "auto_generated": True,
-                    "generation_date": datetime.utcnow().isoformat(),
-                    "generation_batch_id": generation_batch_id,
-                    "source_context_units": [unit['id']],  # Keep for compatibility
-                    "context_unit_title": unit['title'],
-                    "quality_score": unit.get('quality_score'),
-                    "llm_model": settings.llm_writer_model,
-                    "article": {
-                        "contenido_markdown": article_data['article'],  # Original markdown
-                        "image_prompt": image_prompt,  # Store the generated prompt
-                        "generated_images": [{
-                            "uuid": image_uuid,
-                            "prompt": image_prompt,
-                            "timestamp": datetime.utcnow().timestamp()
-                        }] if image_uuid else []  # Mark AI-generated images
-                    }
-                }
-            }
-            
-            insert_result = supabase.client.table("press_articles").insert(article_insert_data).execute()
-            
-            generated_count += 1
-            
-            logger.info("article_auto_generated",
-                company_id=company_id,
-                article_id=article_id,
-                context_unit_id=unit['id'],
-                title=article_data['title'][:50]
-            )
-            
-        except Exception as e:
-            logger.error("article_generation_failed",
-                company_id=company_id,
-                unit_id=unit['id'],
-                error=str(e)
-            )
-    
+
     logger.info("company_generation_completed",
         company_id=company_id,
         company_name=company_name,
@@ -829,37 +820,105 @@ async def generate_articles_for_company(
         generated=generated_count,
         batch_id=generation_batch_id
     )
-    
+
     return generated_count
 
 
-def get_unused_context_units(company_id: str, limit: int) -> list:
-    """Get context units not used in any article (includes pool units)."""
-    
+def get_unused_context_units(company_id: str, limit: int, max_age_days: int = 7) -> list:
+    """Get high-quality, fresh context units not used in any article.
+
+    Filters:
+    1. Fresh: Only units from last N days (default 7) - news must be current
+    2. Quality: At least 2 atomic_statements (passed quality gate)
+    3. Unused: Not already used in any article for this company
+
+    Args:
+        company_id: Company UUID
+        limit: Max units to return
+        max_age_days: Max age in days (default 7 for fresh news)
+
+    Returns:
+        List of eligible context units, sorted by created_at desc
+    """
+
     supabase = get_supabase_client()
-    
-    # Get IDs already used (from working_json) 
-    articles = supabase.client.table("press_articles").select("working_json").eq("company_id", company_id).execute()
-    
+
+    # 1. Get ALL context_unit_ids already used by this company's articles
+    # Check BOTH: context_unit_ids column (new) AND working_json.source_context_units (legacy)
+    articles = supabase.client.table("press_articles")\
+        .select("context_unit_ids, working_json")\
+        .eq("company_id", company_id)\
+        .execute()
+
     used_unit_ids = set()
     for article in articles.data:
-        working_json = article.get('working_json')
-        if working_json:  # Skip articles with null working_json
-            source_units = working_json.get('source_context_units', [])
-            if source_units:
-                used_unit_ids.update(source_units)
-    
-    # Get unused units from last 30 days
-    # IMPORTANT: Include BOTH company units AND pool units
-    cutoff_date = (datetime.utcnow() - timedelta(days=30)).isoformat()
+        # New format: context_unit_ids column (array)
+        context_unit_ids = article.get('context_unit_ids') or []
+        if context_unit_ids:
+            used_unit_ids.update(context_unit_ids)
+
+        # Legacy format: working_json.source_context_units
+        working_json = article.get('working_json') or {}
+        source_units = working_json.get('source_context_units') or []
+        if source_units:
+            used_unit_ids.update(source_units)
+
+        # Also check working_json.context_unit_ids (another legacy location)
+        wj_context_ids = working_json.get('context_unit_ids') or []
+        if wj_context_ids:
+            used_unit_ids.update(wj_context_ids)
+
+    logger.debug("used_context_units_found",
+        company_id=company_id,
+        used_count=len(used_unit_ids)
+    )
+
+    # 2. Get fresh units from last N days (news must be current)
+    cutoff_date = (datetime.utcnow() - timedelta(days=max_age_days)).isoformat()
     pool_id = "99999999-9999-9999-9999-999999999999"
-    
-    all_units = supabase.client.table("press_context_units").select("*").in_("company_id", [company_id, pool_id]).gte("created_at", cutoff_date).order("created_at", desc=True).limit(limit * 3).execute()
-    
-    # Filter unused
-    unused = [u for u in all_units.data if u['id'] not in used_unit_ids]
-    
-    return unused[:limit]
+
+    # Query: fresh + from company or pool + ordered by newest first
+    all_units = supabase.client.table("press_context_units")\
+        .select("*")\
+        .in_("company_id", [company_id, pool_id])\
+        .gte("created_at", cutoff_date)\
+        .order("created_at", desc=True)\
+        .limit(limit * 5)\
+        .execute()
+
+    # 3. Filter: unused + quality (at least 2 atomic_statements)
+    eligible_units = []
+    for unit in all_units.data:
+        unit_id = unit.get('id')
+
+        # Skip if already used
+        if unit_id in used_unit_ids:
+            continue
+
+        # Skip if low quality (less than 2 atomic_statements)
+        atomic_statements = unit.get('atomic_statements') or []
+        if len(atomic_statements) < 2:
+            continue
+
+        # Skip if no title or summary (incomplete)
+        if not unit.get('title') or not unit.get('summary'):
+            continue
+
+        eligible_units.append(unit)
+
+        # Stop if we have enough
+        if len(eligible_units) >= limit:
+            break
+
+    logger.info("eligible_context_units_selected",
+        company_id=company_id,
+        total_fetched=len(all_units.data),
+        used_filtered=len(used_unit_ids),
+        eligible_count=len(eligible_units),
+        max_age_days=max_age_days
+    )
+
+    return eligible_units
 
 
 async def evaluate_units_quality(units: list, llm_client) -> list:

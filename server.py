@@ -1525,6 +1525,7 @@ class RedactNewsRichRequest(BaseModel):
     instructions: Optional[str] = None
     style_guide: Optional[str] = None
     language: str = "es"
+    save_article: bool = False  # When True, performs all transformations and saves to DB
 
 
 class CreateContextUnitRequest(BaseModel):
@@ -2900,12 +2901,15 @@ async def process_redact_news_rich(
         - instructions: Optional writing instructions (if empty, ignored)
         - style_guide: Optional markdown style guide (string)
         - language: Target language (default: "es")
+        - save_article: If True, transforms and saves article to DB (default: False)
 
     Returns:
-        Generated article with title, summary, tags, and sources
+        Generated article with title, summary, tags, and sources.
+        If save_article=True, also returns saved article with id.
     """
     try:
         from utils.workflow_endpoints import execute_redact_news_rich
+        import uuid as uuid_module
 
         result = await execute_redact_news_rich(
             client=client,
@@ -2916,21 +2920,171 @@ async def process_redact_news_rich(
             language=request.language
         )
 
-        if result.get("success", True):
-            data = result.get("data", result)
-            return {
-                "status": "ok",
-                "action": "redact_news_rich",
-                "result": data
-            }
-        else:
+        if not result.get("success", True):
             if result.get("error") == "usage_limit_exceeded":
                 raise HTTPException(
-                    status_code=429, 
+                    status_code=429,
                     detail=f"Usage limit exceeded: {result.get('details', 'Daily or monthly limit reached')}"
                 )
             else:
                 raise HTTPException(status_code=500, detail=result.get("details", "Workflow execution failed"))
+
+        data = result.get("data", result)
+
+        # If save_article=True, perform transformations and save to DB
+        if request.save_article:
+            logger.info("save_article_enabled",
+                client_id=client["client_id"],
+                context_unit_ids=request.context_unit_ids
+            )
+
+            supabase = get_supabase_client()
+            company_id = client["company_id"]
+
+            # 1. Strip markdown from title and summary
+            raw_title = data.get("title", "")
+            raw_summary = data.get("summary", "")
+            clean_title = _strip_markdown(raw_title)
+            clean_summary = _strip_markdown(raw_summary)
+
+            # 2. Convert article markdown to HTML
+            raw_article = data.get("article", "")
+            article_html = _markdown_to_html(raw_article)
+
+            # 3. Generate slug from clean title
+            slug = _generate_slug_from_title(clean_title)
+
+            # 4. Fetch context units to extract statements
+            context_units = []
+            pool_company_id = "99999999-9999-9999-9999-999999999999"
+
+            for cu_id in request.context_unit_ids:
+                cu_result = supabase.client.table("press_context_units")\
+                    .select("*")\
+                    .eq("id", cu_id)\
+                    .or_(f"company_id.eq.{company_id},company_id.eq.{pool_company_id}")\
+                    .maybe_single()\
+                    .execute()
+
+                if cu_result and cu_result.data:
+                    context_units.append(cu_result.data)
+
+            # 5. Extract statements from context units
+            statements = _extract_statements_from_context_units(context_units)
+
+            # 6. Determine imagen_uuid
+            # Priority: AI-generated (null) → first context_unit with featured_image → null
+            imagen_uuid = None
+            for cu in context_units:
+                source_metadata = cu.get("source_metadata") or {}
+                featured_image = source_metadata.get("featured_image")
+                if featured_image and featured_image.get("url"):
+                    imagen_uuid = cu["id"]
+                    break
+
+            # 7. Build working_json structure
+            working_json = {
+                "context_unit_ids": request.context_unit_ids,
+                "statements": statements,
+                "statements_used": data.get("statements_used", {}),
+                "sources": data.get("sources", []),
+                "raw_title": raw_title,
+                "raw_summary": raw_summary,
+                "raw_article": raw_article,
+                "image_prompt": data.get("image_prompt", ""),
+                "tags": data.get("tags", []),
+                "generated_at": datetime.utcnow().isoformat() + "Z"
+            }
+
+            # 8. Generate new article UUID
+            article_id = str(uuid_module.uuid4())
+
+            # 9. Prepare article data for save
+            article_data = {
+                "id": article_id,
+                "company_id": company_id,
+                "titulo": clean_title,
+                "excerpt": clean_summary,
+                "slug": slug,
+                "contenido": article_html,
+                "category": data.get("category"),
+                "imagen_uuid": imagen_uuid,
+                "context_unit_ids": request.context_unit_ids,
+                "working_json": working_json,
+                "status": "borrador",
+                "created_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.utcnow().isoformat()
+            }
+
+            # 10. Get default style for company
+            default_style = supabase.client.table("press_styles")\
+                .select("id")\
+                .eq("company_id", company_id)\
+                .eq("predeterminado", True)\
+                .maybe_single()\
+                .execute()
+
+            if default_style.data:
+                article_data["style_id"] = default_style.data["id"]
+
+            # 11. Save to database
+            save_result = supabase.client.table("press_articles")\
+                .insert(article_data)\
+                .execute()
+
+            if not save_result.data:
+                raise HTTPException(status_code=500, detail="Failed to save article")
+
+            saved_article = save_result.data[0]
+
+            # 12. Generate embedding for article
+            if clean_title and clean_summary:
+                try:
+                    from utils.embedding_generator import generate_article_embedding
+
+                    embedding = await generate_article_embedding(saved_article)
+                    embedding_generated_at = datetime.utcnow().isoformat()
+
+                    supabase.client.table("press_articles")\
+                        .update({
+                            "embedding": embedding,
+                            "embedding_generated_at": embedding_generated_at
+                        })\
+                        .eq("id", article_id)\
+                        .execute()
+
+                    saved_article["embedding_generated_at"] = embedding_generated_at
+                    logger.info("article_embedding_generated",
+                        article_id=article_id,
+                        embedding_dimensions=len(embedding)
+                    )
+                except Exception as e:
+                    logger.error("article_embedding_generation_failed",
+                        article_id=article_id,
+                        error=str(e)
+                    )
+
+            logger.info("article_saved_via_redact_news_rich",
+                article_id=article_id,
+                company_id=company_id,
+                titulo=clean_title[:50],
+                context_unit_ids_count=len(request.context_unit_ids)
+            )
+
+            # Return saved article with original generation data
+            return {
+                "status": "ok",
+                "action": "redact_news_rich",
+                "result": data,
+                "saved_article": saved_article
+            }
+
+        # Normal flow (save_article=False)
+        return {
+            "status": "ok",
+            "action": "redact_news_rich",
+            "result": data
+        }
 
     except HTTPException:
         raise
@@ -6681,26 +6835,146 @@ async def test_publication_target(
 def _generate_slug_from_title(title: str) -> str:
     """Generate WordPress-compatible slug from title."""
     import re
-    
+
     # Convert to lowercase and replace common Spanish characters
     slug = title.lower()
-    
+
     # Replace Spanish characters
     replacements = {
         'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u', 'ü': 'u',
         'ñ': 'n', 'ç': 'c'
     }
-    
+
     for char, replacement in replacements.items():
         slug = slug.replace(char, replacement)
-    
+
     # Remove special characters and replace spaces with hyphens
     slug = re.sub(r'[^\w\s-]', '', slug)
     slug = re.sub(r'[\s_]+', '-', slug)
     slug = slug.strip('-')
-    
+
     # Limit length to 200 characters (WordPress limit)
     return slug[:200]
+
+
+def _strip_markdown(text: str) -> str:
+    """Strip markdown formatting from text, returning plain text.
+
+    Removes: **bold**, *italic*, `code`, [links](url), # headers, etc.
+    Equivalent to frontend's marked.parse() + HTML stripping.
+    """
+    import re
+
+    if not text:
+        return ""
+
+    # Remove bold (**text** or __text__)
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+    text = re.sub(r'__(.+?)__', r'\1', text)
+
+    # Remove italic (*text* or _text_)
+    text = re.sub(r'\*(.+?)\*', r'\1', text)
+    text = re.sub(r'_(.+?)_', r'\1', text)
+
+    # Remove inline code (`code`)
+    text = re.sub(r'`(.+?)`', r'\1', text)
+
+    # Remove links [text](url) -> text
+    text = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', text)
+
+    # Remove headers (# Header)
+    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+
+    # Remove strikethrough (~~text~~)
+    text = re.sub(r'~~(.+?)~~', r'\1', text)
+
+    # Normalize whitespace
+    text = re.sub(r'\s+', ' ', text).strip()
+
+    return text
+
+
+def _markdown_to_html(markdown_text: str) -> str:
+    """Convert markdown to HTML.
+
+    Uses Python markdown library (equivalent to frontend's marked.parse()).
+    """
+    import markdown
+
+    if not markdown_text:
+        return ""
+
+    # Convert markdown to HTML with common extensions
+    html = markdown.markdown(
+        markdown_text,
+        extensions=['extra', 'sane_lists', 'smarty']
+    )
+
+    return html
+
+
+def _extract_statements_from_context_units(context_units: list) -> list:
+    """Extract all statements from context units for working_json.
+
+    Returns list of statement objects with context_unit_id reference.
+    """
+    statements = []
+
+    for cu in context_units:
+        cu_id = cu.get("id")
+        cu_title = cu.get("title", "")
+
+        # Get atomic statements (may be None from DB)
+        atomic_statements = cu.get("atomic_statements") or []
+
+        for stmt in atomic_statements:
+            if isinstance(stmt, dict):
+                statements.append({
+                    "context_unit_id": cu_id,
+                    "context_unit_title": cu_title,
+                    "text": stmt.get("text", ""),
+                    "type": stmt.get("type", "fact"),
+                    "order": stmt.get("order", 0),
+                    "speaker": stmt.get("speaker")
+                })
+            elif isinstance(stmt, str) and stmt:
+                # Legacy string format
+                statements.append({
+                    "context_unit_id": cu_id,
+                    "context_unit_title": cu_title,
+                    "text": stmt,
+                    "type": "fact",
+                    "order": 0,
+                    "speaker": None
+                })
+
+        # Get enriched statements (may be None from DB)
+        enriched_statements = cu.get("enriched_statements") or []
+
+        for stmt in enriched_statements:
+            if isinstance(stmt, dict):
+                statements.append({
+                    "context_unit_id": cu_id,
+                    "context_unit_title": cu_title,
+                    "text": stmt.get("text", ""),
+                    "type": stmt.get("type", "enriched"),
+                    "order": stmt.get("order", 9999),
+                    "speaker": stmt.get("speaker")
+                })
+            elif isinstance(stmt, str) and stmt:
+                statements.append({
+                    "context_unit_id": cu_id,
+                    "context_unit_title": cu_title,
+                    "text": stmt,
+                    "type": "enriched",
+                    "order": 9999,
+                    "speaker": None
+                })
+
+    # Sort by order
+    statements.sort(key=lambda x: x.get("order", 0))
+
+    return statements
 
 
 if __name__ == "__main__":
