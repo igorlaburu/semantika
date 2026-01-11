@@ -18,8 +18,37 @@ Design:
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta, timezone
 import asyncio
+import re
 
 from utils.logger import get_logger
+
+
+def parse_iso_timestamp(timestamp_str: str) -> datetime:
+    """Parse ISO timestamp robustly, handling variable microsecond precision.
+
+    Supabase/PostgreSQL sometimes returns timestamps with truncated microseconds
+    like '2026-01-09T21:13:24.50359+00:00' (5 digits instead of 6).
+    Python's fromisoformat() is strict about this before Python 3.11.
+    """
+    if not timestamp_str:
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+    # Normalize Z to +00:00
+    timestamp_str = timestamp_str.replace("Z", "+00:00")
+
+    # Fix truncated microseconds: ensure exactly 6 digits after decimal point
+    # Match pattern: .XXXXX+ or .XXXXX- (5 digits before timezone)
+    match = re.search(r'\.(\d{1,5})([+-])', timestamp_str)
+    if match:
+        microseconds = match.group(1)
+        tz_sign = match.group(2)
+        # Pad to 6 digits
+        padded = microseconds.ljust(6, '0')
+        timestamp_str = timestamp_str.replace(f".{microseconds}{tz_sign}", f".{padded}{tz_sign}")
+
+    return datetime.fromisoformat(timestamp_str)
+
+
 from utils.supabase_client import get_supabase_client
 from sources.scraper_workflow import scrape_url
 
@@ -91,7 +120,7 @@ async def get_next_healthy_source() -> Optional[Dict[str, Any]]:
             high_freq_candidates = [
                 s for s in high_freq_result.data
                 if not s.get("last_scraped_at") or 
-                datetime.fromisoformat(s["last_scraped_at"].replace("Z", "+00:00")) < cutoff_time
+                parse_iso_timestamp(s["last_scraped_at"]) < cutoff_time
             ]
             
             if high_freq_candidates:
