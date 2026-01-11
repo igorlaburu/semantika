@@ -3011,7 +3011,7 @@ async def process_redact_news_rich(
                 "imagen_uuid": imagen_uuid,
                 "context_unit_ids": request.context_unit_ids,
                 "working_json": working_json,
-                "status": "borrador",
+                "estado": "borrador",
                 "created_at": datetime.utcnow().isoformat(),
                 "updated_at": datetime.utcnow().isoformat()
             }
