@@ -1524,6 +1524,7 @@ class RedactNewsRichRequest(BaseModel):
     title: Optional[str] = None
     instructions: Optional[str] = None
     style_guide: Optional[str] = None
+    style_id: Optional[str] = None  # Style ID to use (overrides default)
     language: str = "es"
     save_article: bool = False  # When True, performs all transformations and saves to DB
 
@@ -3007,6 +3008,8 @@ async def process_redact_news_rich(
                 "excerpt": clean_summary,
                 "slug": slug,
                 "contenido": article_html,
+                "autor": data.get("author", "Redacción"),
+                "tags": data.get("tags", []),
                 "category": data.get("category"),
                 "imagen_uuid": imagen_uuid,
                 "context_unit_ids": request.context_unit_ids,
@@ -3016,16 +3019,19 @@ async def process_redact_news_rich(
                 "updated_at": datetime.utcnow().isoformat()
             }
 
-            # 10. Get default style for company
-            default_style = supabase.client.table("press_styles")\
-                .select("id")\
-                .eq("company_id", company_id)\
-                .eq("predeterminado", True)\
-                .maybe_single()\
-                .execute()
+            # 10. Get style_id (from request or default)
+            if request.style_id:
+                article_data["style_id"] = request.style_id
+            else:
+                default_style = supabase.client.table("press_styles")\
+                    .select("id")\
+                    .eq("company_id", company_id)\
+                    .eq("predeterminado", True)\
+                    .maybe_single()\
+                    .execute()
 
-            if default_style.data:
-                article_data["style_id"] = default_style.data["id"]
+                if default_style.data:
+                    article_data["style_id"] = default_style.data["id"]
 
             # 11. Save to database
             save_result = supabase.client.table("press_articles")\
