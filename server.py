@@ -5283,7 +5283,8 @@ async def publish_to_platforms(
                         content=social_content,
                         excerpt=excerpt,
                         tags=tags,
-                        status="publish"
+                        status="publish",
+                        temp_image_path=temp_image_path
                     )
 
                     publication_results[target_id] = {
