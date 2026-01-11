@@ -7,6 +7,7 @@ Version: 2025-10-28
 
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Any, List
+import asyncio
 import subprocess
 import io
 import re
@@ -5044,6 +5045,35 @@ async def publish_to_platforms(
 
         # Step 2: Publish to Social Media with WordPress URL
         if social_targets:
+            # Wait for Yoast to generate meta tags before social media fetches them
+            if wordpress_url:
+                logger.info("waiting_for_yoast_meta_tags",
+                    article_id=article['id'],
+                    wordpress_url=wordpress_url,
+                    delay_seconds=5
+                )
+                await asyncio.sleep(5)  # Give Yoast time to generate og:image meta tags
+
+                # Warm up the page to ensure Yoast generates meta tags
+                try:
+                    async with aiohttp.ClientSession() as warm_session:
+                        async with warm_session.get(
+                            wordpress_url,
+                            timeout=aiohttp.ClientTimeout(total=10),
+                            allow_redirects=True
+                        ) as warm_response:
+                            logger.info("wordpress_url_warmed_up",
+                                article_id=article['id'],
+                                wordpress_url=wordpress_url,
+                                status=warm_response.status
+                            )
+                except Exception as e:
+                    logger.warn("wordpress_url_warmup_failed",
+                        article_id=article['id'],
+                        wordpress_url=wordpress_url,
+                        error=str(e)
+                    )
+
             # Format hashtags from tags
             hashtags = ""
             if tags:
