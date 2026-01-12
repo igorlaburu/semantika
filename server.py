@@ -4792,35 +4792,6 @@ async def get_article(
         if 'image_prompt' not in article and working_json.get('image_prompt'):
             article['image_prompt'] = working_json['image_prompt']
 
-        # Get available images from context units
-        context_unit_ids = article.get('context_unit_ids') or []
-        available_images = []
-
-        if context_unit_ids:
-            cu_result = supabase.client.table("press_context_units")\
-                .select("id, image_count")\
-                .in_("id", context_unit_ids)\
-                .execute()
-
-            if cu_result.data:
-                for cu in cu_result.data:
-                    cu_id = cu['id']
-                    image_count = cu.get('image_count') or 0
-                    if image_count > 0:
-                        # First image uses context_unit_id directly
-                        available_images.append({
-                            "uuid": cu_id,
-                            "url": f"/api/v1/context-units/{cu_id}/image"
-                        })
-                        # Additional images use index parameter
-                        for i in range(1, image_count):
-                            available_images.append({
-                                "uuid": f"{cu_id}_{i}",
-                                "url": f"/api/v1/context-units/{cu_id}/image?index={i}"
-                            })
-
-        article['available_images'] = available_images
-
         return article
 
     except HTTPException:
