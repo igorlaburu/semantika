@@ -2973,15 +2973,24 @@ async def process_redact_news_rich(
             # 5. Extract statements from context units
             statements = _extract_statements_from_context_units(context_units)
 
-            # 6. Determine imagen_uuid
+            # 6. Determine imagen_uuid and build source_images list
             # Priority: AI-generated (null) → first context_unit with featured_image → null
             imagen_uuid = None
+            source_images = []
             for cu in context_units:
-                source_metadata = cu.get("source_metadata") or {}
-                featured_image = source_metadata.get("featured_image")
-                if featured_image and featured_image.get("url"):
-                    imagen_uuid = cu["id"]
-                    break
+                cu_id = cu["id"]
+                image_count = cu.get("image_count") or 0
+
+                # Build source_images list (e.g., "uuid_0", "uuid_1")
+                for i in range(image_count):
+                    source_images.append(f"{cu_id}_{i}")
+
+                # Set imagen_uuid to first context unit with featured_image
+                if imagen_uuid is None:
+                    source_metadata = cu.get("source_metadata") or {}
+                    featured_image = source_metadata.get("featured_image")
+                    if featured_image and featured_image.get("url"):
+                        imagen_uuid = cu_id
 
             # 7. Build working_json structure
             working_json = {
@@ -2989,6 +2998,7 @@ async def process_redact_news_rich(
                 "statements": statements,
                 "statements_used": data.get("statements_used", {}),
                 "sources": data.get("sources", []),
+                "source_images": source_images,
                 "raw_title": raw_title,
                 "raw_summary": raw_summary,
                 "raw_article": raw_article,
