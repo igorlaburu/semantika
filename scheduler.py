@@ -886,8 +886,10 @@ def get_unused_context_units(company_id: str, limit: int, max_age_days: int = 7)
         .limit(limit * 5)\
         .execute()
 
-    # 3. Filter: unused + quality (at least 2 atomic_statements)
+    # 3. Filter: unused + quality (at least 2 atomic_statements) + fresh published_at
     eligible_units = []
+    published_at_cutoff = (datetime.utcnow() - timedelta(days=max_age_days)).date()
+
     for unit in all_units.data:
         unit_id = unit.get('id')
 
@@ -903,6 +905,27 @@ def get_unused_context_units(company_id: str, limit: int, max_age_days: int = 7)
         # Skip if no title or summary (incomplete)
         if not unit.get('title') or not unit.get('summary'):
             continue
+
+        # Skip if published_at is too old (even if recently scraped)
+        source_metadata = unit.get('source_metadata') or {}
+        published_at_str = source_metadata.get('published_at', '')
+        if published_at_str:
+            try:
+                # Handle various date formats
+                if 'T' in published_at_str:
+                    published_date = datetime.fromisoformat(published_at_str.replace('Z', '+00:00')).date()
+                else:
+                    published_date = datetime.strptime(published_at_str[:10], '%Y-%m-%d').date()
+
+                if published_date < published_at_cutoff:
+                    logger.debug("skipping_old_published_at",
+                        unit_id=unit_id,
+                        published_at=published_at_str,
+                        cutoff=str(published_at_cutoff)
+                    )
+                    continue
+            except (ValueError, TypeError):
+                pass  # If date parsing fails, don't filter by it
 
         eligible_units.append(unit)
 

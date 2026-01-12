@@ -6845,8 +6845,10 @@ async def test_publication_target(
 
 
 def _generate_slug_from_title(title: str) -> str:
-    """Generate WordPress-compatible slug from title."""
+    """Generate WordPress-compatible slug from title with short unique suffix."""
     import re
+    import time
+    import hashlib
 
     # Convert to lowercase and replace common Spanish characters
     slug = title.lower()
@@ -6865,8 +6867,14 @@ def _generate_slug_from_title(title: str) -> str:
     slug = re.sub(r'[\s_]+', '-', slug)
     slug = slug.strip('-')
 
-    # Limit length to 200 characters (WordPress limit)
-    return slug[:200]
+    # Limit base slug length
+    base_slug = slug[:200]
+
+    # Generate 4-char alphanumeric hash from timestamp for uniqueness
+    timestamp = str(time.time_ns())
+    hash_suffix = hashlib.md5(timestamp.encode()).hexdigest()[:4]
+
+    return f"{base_slug}-{hash_suffix}"
 
 
 def _strip_markdown(text: str) -> str:
