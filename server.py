@@ -4770,7 +4770,7 @@ async def get_article(
 ) -> Dict:
     """
     Get a single article by ID.
-    
+
     **Authentication**: Accepts either JWT (Authorization: Bearer) or API Key (X-API-Key)
     """
     try:
@@ -4786,7 +4786,13 @@ async def get_article(
         if not result.data:
             raise HTTPException(status_code=404, detail="Article not found")
 
-        return result.data
+        # Extract image_prompt from working_json for convenience
+        article = result.data
+        working_json = article.get('working_json') or {}
+        if 'image_prompt' not in article and working_json.get('image_prompt'):
+            article['image_prompt'] = working_json['image_prompt']
+
+        return article
 
     except HTTPException:
         raise
