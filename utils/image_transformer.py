@@ -36,8 +36,20 @@ class ImageTransformer:
             "max_width": 1200,
             "max_height": 630,
         },
+        "twitter": {
+            "format": "jpeg",  # JPEG for maximum Twitter compatibility
+            "quality": 85,     # Good balance - Twitter compresses anyway
+            "max_width": 1200, # Twitter's max display width
+            "max_height": 675, # 16:9 aspect ratio
+        },
+        "linkedin": {
+            "format": "jpeg",
+            "quality": 85,
+            "max_width": 1200,
+            "max_height": 627, # 1.91:1 ratio
+        },
         "default": {
-            "format": "webp", 
+            "format": "webp",
             "quality": 90,
             "max_width": 1200,
             "max_height": 630,

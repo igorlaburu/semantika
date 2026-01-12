@@ -237,11 +237,21 @@ class TwitterPublisher(BasePublisher):
                 has_image=bool(temp_image_path or image_url)
             )
             
-            # TODO: Upload image if provided
+            # Upload image if provided
             media_id = None
             if temp_image_path:
-                # We'll implement image upload in next iteration
-                logger.info("twitter_image_upload_pending", image_path=temp_image_path)
+                upload_result = await self._upload_media(temp_image_path)
+                if upload_result.get('success'):
+                    media_id = upload_result['media_id']
+                    logger.info("twitter_media_uploaded",
+                        media_id=media_id,
+                        size_kb=upload_result.get('size_kb')
+                    )
+                else:
+                    logger.warn("twitter_media_upload_failed",
+                        error=upload_result.get('error'),
+                        image_path=temp_image_path
+                    )
             
             # Publish tweets in thread
             tweet_ids = []
@@ -300,6 +310,79 @@ class TwitterPublisher(BasePublisher):
                 error=f"Twitter publish failed: {str(e)}"
             )
     
+    async def _upload_media(self, image_path: str) -> Dict[str, Any]:
+        """Upload media to Twitter and return media_id.
+
+        Uses Twitter API v1.1 media/upload endpoint.
+        Supports images up to 5MB (JPEG, PNG, GIF, WebP).
+        """
+        try:
+            import os
+
+            # Read and encode image
+            with open(image_path, 'rb') as f:
+                image_data = f.read()
+
+            size_kb = len(image_data) / 1024
+
+            # Check file size (Twitter limit is 5MB for images)
+            if len(image_data) > 5 * 1024 * 1024:
+                return {
+                    "success": False,
+                    "error": f"Image too large: {size_kb:.1f}KB (max 5MB)"
+                }
+
+            # Base64 encode
+            media_base64 = base64.b64encode(image_data).decode('utf-8')
+
+            # Twitter media upload endpoint (v1.1)
+            url = "https://upload.twitter.com/1.1/media/upload.json"
+
+            # Form data for upload
+            form_data = {
+                'media_data': media_base64
+            }
+
+            # Generate OAuth header for this specific request
+            headers = {
+                'Authorization': self._generate_oauth1_header('POST', url),
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, data=form_data) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        media_id = data.get('media_id_string')
+
+                        if media_id:
+                            return {
+                                "success": True,
+                                "media_id": media_id,
+                                "size_kb": round(size_kb, 1)
+                            }
+                        else:
+                            return {
+                                "success": False,
+                                "error": "No media_id in response"
+                            }
+                    else:
+                        error_text = await response.text()
+                        return {
+                            "success": False,
+                            "error": f"HTTP {response.status}: {error_text[:200]}"
+                        }
+
+        except FileNotFoundError:
+            return {
+                "success": False,
+                "error": f"Image file not found: {image_path}"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Upload error: {str(e)}"
+            }
+
     async def _post_tweet(self, text: str, reply_to_id: Optional[str] = None, media_id: Optional[str] = None) -> Dict[str, Any]:
         """Post a single tweet."""
         try:

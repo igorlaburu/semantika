@@ -5205,34 +5205,13 @@ async def publish_to_platforms(
 
         # Step 2: Publish to Social Media with WordPress URL
         if social_targets:
-            # Wait for Yoast to generate meta tags before social media fetches them
+            # Brief delay to ensure WordPress has finished processing
             if wordpress_url:
-                logger.info("waiting_for_yoast_meta_tags",
+                logger.info("brief_delay_before_social",
                     article_id=article['id'],
-                    wordpress_url=wordpress_url,
-                    delay_seconds=5
+                    delay_seconds=2
                 )
-                await asyncio.sleep(5)  # Give Yoast time to generate og:image meta tags
-
-                # Warm up the page to ensure Yoast generates meta tags
-                try:
-                    async with aiohttp.ClientSession() as warm_session:
-                        async with warm_session.get(
-                            wordpress_url,
-                            timeout=aiohttp.ClientTimeout(total=10),
-                            allow_redirects=True
-                        ) as warm_response:
-                            logger.info("wordpress_url_warmed_up",
-                                article_id=article['id'],
-                                wordpress_url=wordpress_url,
-                                status=warm_response.status
-                            )
-                except Exception as e:
-                    logger.warn("wordpress_url_warmup_failed",
-                        article_id=article['id'],
-                        wordpress_url=wordpress_url,
-                        error=str(e)
-                    )
+                await asyncio.sleep(2)
 
             # Format hashtags from tags
             hashtags = ""
@@ -5269,10 +5248,29 @@ async def publish_to_platforms(
 
             for target in social_targets:
                 target_id = target['id']
+                platform_type = target['platform_type']
+                social_image_path = None
 
                 try:
+                    # Transform image specifically for this social platform (JPEG, optimized)
+                    if imagen_uuid and platform_type in ('twitter', 'linkedin'):
+                        original_image_data = ImageTransformer.read_cached_image(imagen_uuid)
+                        if original_image_data:
+                            social_image_path = ImageTransformer.transform_for_publication(
+                                image_data=original_image_data,
+                                platform=platform_type,
+                                image_uuid=imagen_uuid
+                            )
+                            if social_image_path:
+                                social_size_kb = round(os.path.getsize(social_image_path) / 1024, 2)
+                                logger.info("social_image_transformed",
+                                    platform=platform_type,
+                                    article_id=article.get('id'),
+                                    size_kb=social_size_kb
+                                )
+
                     publisher = PublisherFactory.create_publisher(
-                        target['platform_type'],
+                        platform_type,
                         target['base_url'],
                         target['credentials_encrypted']
                     )
@@ -5284,8 +5282,15 @@ async def publish_to_platforms(
                         excerpt=excerpt,
                         tags=tags,
                         status="publish",
-                        temp_image_path=temp_image_path
+                        temp_image_path=social_image_path or temp_image_path
                     )
+
+                    # Clean up social-specific temp image
+                    if social_image_path:
+                        try:
+                            os.unlink(social_image_path)
+                        except:
+                            pass
 
                     publication_results[target_id] = {
                         "success": result.success,
