@@ -319,7 +319,7 @@ class TwitterPublisher(BasePublisher):
         try:
             import os
 
-            # Read and encode image
+            # Read image
             with open(image_path, 'rb') as f:
                 image_data = f.read()
 
@@ -332,25 +332,36 @@ class TwitterPublisher(BasePublisher):
                     "error": f"Image too large: {size_kb:.1f}KB (max 5MB)"
                 }
 
-            # Base64 encode
-            media_base64 = base64.b64encode(image_data).decode('utf-8')
-
             # Twitter media upload endpoint (v1.1)
             url = "https://upload.twitter.com/1.1/media/upload.json"
 
-            # Form data for upload
-            form_data = {
-                'media_data': media_base64
-            }
-
-            # Generate OAuth header for this specific request
+            # Generate OAuth header (no body params in signature for multipart)
             headers = {
                 'Authorization': self._generate_oauth1_header('POST', url),
             }
 
+            # Use multipart/form-data with binary file
+            form = aiohttp.FormData()
+
+            # Detect content type from extension
+            ext = os.path.splitext(image_path)[1].lower()
+            content_types = {
+                '.jpg': 'image/jpeg',
+                '.jpeg': 'image/jpeg',
+                '.png': 'image/png',
+                '.gif': 'image/gif',
+                '.webp': 'image/webp'
+            }
+            content_type = content_types.get(ext, 'image/jpeg')
+
+            form.add_field('media',
+                          image_data,
+                          filename=f'image{ext}',
+                          content_type=content_type)
+
             async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, data=form_data) as response:
-                    if response.status == 200:
+                async with session.post(url, headers=headers, data=form) as response:
+                    if response.status in (200, 201):
                         data = await response.json()
                         media_id = data.get('media_id_string')
 
