@@ -2742,7 +2742,7 @@ async def create_source(
         
         source_data = {
             "client_id": auth["client_id"],
-            "company_id": client.get("company_id"),
+            "company_id": auth.get("company_id"),
             "source_code": request["source_code"],
             "source_name": request["source_name"],
             "source_type": request["source_type"],
@@ -3388,7 +3388,7 @@ async def process_analyze(
         from utils.workflow_endpoints import execute_analyze
 
         result = await execute_analyze(
-            client=client,
+            client=auth,
             text=request.text,
             params=request.params
         )
@@ -3440,7 +3440,7 @@ async def process_analyze_atomic(
         from utils.workflow_endpoints import execute_analyze_atomic
 
         result = await execute_analyze_atomic(
-            client=client,
+            client=auth,
             text=request.text,
             params=request.params
         )
@@ -3494,7 +3494,7 @@ async def process_redact_news(
         from utils.workflow_endpoints import execute_redact_news
 
         result = await execute_redact_news(
-            client=client,
+            client=auth,
             text=request.text,
             params=request.params
         )
@@ -3546,7 +3546,7 @@ async def process_url(
         from core_stateless import StatelessPipeline
 
         pipeline = StatelessPipeline(
-            organization_id=client.get('organization_id'),
+            organization_id=auth.get('organization_id'),
             client_id=auth['client_id']
         )
 
@@ -3604,7 +3604,7 @@ async def generate_style_guide(
             )
 
         pipeline = StatelessPipeline(
-            organization_id=client.get('organization_id'),
+            organization_id=auth.get('organization_id'),
             client_id=auth['client_id']
         )
 
@@ -3651,7 +3651,7 @@ async def process_redact_news_rich(
         import uuid as uuid_module
 
         result = await execute_redact_news_rich(
-            client=client,
+            client=auth,
             context_unit_ids=request.context_unit_ids,
             title=request.title,
             instructions=request.instructions,
@@ -3876,7 +3876,7 @@ async def micro_edit(
         from utils.workflow_endpoints import execute_micro_edit
         
         result = await execute_micro_edit(
-            client=client,
+            client=auth,
             text=request.text,
             command=request.command,
             context=request.context,
@@ -4023,7 +4023,7 @@ async def enrichment_context_unit(
             created_at=created_at,
             tags=context_unit.get("tags", []),
             enrich_type=request.enrich_type,
-            organization_id=client.get("organization_id", "00000000-0000-0000-0000-000000000001"),
+            organization_id=auth.get("organization_id", "00000000-0000-0000-0000-000000000001"),
             context_unit_id=context_unit_id,
             client_id=auth["client_id"]
         )
@@ -5016,7 +5016,7 @@ async def tts_synthesize(
             operation="tts_synthesize",
             input_tokens=0,
             output_tokens=0,
-            company_id=client.get("company_id", "00000000-0000-0000-0000-000000000001"),
+            company_id=auth.get("company_id", "00000000-0000-0000-0000-000000000001"),
             client_id=auth["client_id"],
             metadata={
                 "text_length": len(request.text),
