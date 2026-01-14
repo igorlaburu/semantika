@@ -212,6 +212,92 @@ async def get_company_id_from_auth(
         )
 
 
+async def get_auth_context(
+    user: Optional[Dict] = Depends(get_current_user_from_jwt_optional),
+    client: Optional[Dict] = Depends(get_current_client_optional)
+) -> Dict:
+    """
+    Get unified auth context from either JWT or API Key.
+
+    This is the primary authentication dependency for endpoints that need
+    both client_id and company_id. Accepts either authentication method.
+
+    Args:
+        user: User from JWT (optional)
+        client: Client from API Key (optional)
+
+    Returns:
+        Dict with:
+            - client_id: str (from client or looked up by company_id)
+            - company_id: str
+            - auth_type: "jwt" or "api_key"
+            - user_id: str or None (only for JWT)
+            - email: str or None (only for JWT)
+            - client_name: str or None (only for API Key)
+
+    Raises:
+        HTTPException: If neither auth method provided or no client found
+    """
+    if client:
+        # API Key auth - use client data directly
+        logger.debug("auth_context_api_key",
+            client_id=client["client_id"],
+            company_id=client["company_id"]
+        )
+        return {
+            "client_id": client["client_id"],
+            "company_id": client["company_id"],
+            "auth_type": "api_key",
+            "user_id": None,
+            "email": None,
+            "client_name": client.get("client_name"),
+            "is_active": client.get("is_active"),
+            "created_at": client.get("created_at")
+        }
+    elif user:
+        # JWT auth - look up client by company_id
+        company_id = user["company_id"]
+        supabase = get_supabase_client()
+
+        # Find client associated with this company
+        result = supabase.client.table("clients")\
+            .select("client_id, client_name, is_active, created_at")\
+            .eq("company_id", company_id)\
+            .eq("is_active", True)\
+            .limit(1)\
+            .execute()
+
+        if not result.data:
+            logger.warn("no_client_for_company", company_id=company_id, user_email=user.get("email"))
+            raise HTTPException(
+                status_code=403,
+                detail=f"No active client found for company. Please contact support."
+            )
+
+        client_data = result.data[0]
+        logger.debug("auth_context_jwt",
+            user_id=user.get("id"),
+            company_id=company_id,
+            client_id=client_data["client_id"]
+        )
+
+        return {
+            "client_id": client_data["client_id"],
+            "company_id": company_id,
+            "auth_type": "jwt",
+            "user_id": user.get("id"),
+            "email": user.get("email"),
+            "client_name": client_data.get("client_name"),
+            "is_active": client_data.get("is_active"),
+            "created_at": client_data.get("created_at")
+        }
+    else:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required. Use Bearer token or X-API-Key header."
+        )
+
+
 # ============================================
 # STARTUP/SHUTDOWN
 # ============================================
@@ -282,7 +368,7 @@ async def root() -> Dict[str, str]:
 
 
 @app.get("/me")
-async def get_me(client: Dict = Depends(get_current_client)) -> Dict:
+async def get_me(auth: Dict = Depends(get_auth_context)) -> Dict:
     """
     Get current authenticated client information.
 
@@ -292,11 +378,12 @@ async def get_me(client: Dict = Depends(get_current_client)) -> Dict:
         Client information
     """
     return {
-        "client_id": client["client_id"],
-        "client_name": client["client_name"],
-        "email": client.get("email"),
-        "is_active": client["is_active"],
-        "created_at": client["created_at"]
+        "client_id": auth["client_id"],
+        "client_name": auth.get("client_name"),
+        "email": auth.get("email"),
+        "is_active": auth.get("is_active"),
+        "created_at": auth.get("created_at"),
+        "auth_type": auth.get("auth_type")
     }
 
 
@@ -2209,7 +2296,7 @@ class CreateContextUnitFromURLRequest(BaseModel):
 @app.post("/ingest/text")
 async def ingest_text(
     request: IngestTextRequest,
-    client: Dict = Depends(get_current_client)
+    auth: Dict = Depends(get_auth_context)
 ) -> Dict[str, Any]:
     """
     Ingest text document (LEGACY - use POST /context-units instead).
@@ -2231,7 +2318,7 @@ async def ingest_text(
         # Get company for client
         company_result = supabase.client.table("companies")\
             .select("*")\
-            .eq("id", client["company_id"])\
+            .eq("id", auth["company_id"])\
             .maybe_single()\
             .execute()
 
@@ -2249,12 +2336,12 @@ async def ingest_text(
             # Required metadata
             company_id=company["id"],
             source_type="api",
-            source_id=f"legacy_ingest_{client['client_id'][:8]}",
+            source_id=f"legacy_ingest_{auth['client_id'][:8]}",
 
             # Optional metadata
             source_metadata={
                 "legacy_endpoint": "/ingest/text",
-                "client_id": client["client_id"],
+                "client_id": auth["client_id"],
                 "custom_metadata": request.metadata or {},
                 "skip_guardrails": request.skip_guardrails
             },
@@ -2292,7 +2379,7 @@ async def ingest_text(
 @app.post("/ingest/url")
 async def ingest_url(
     request: IngestURLRequest,
-    client: Dict = Depends(get_current_client)
+    auth: Dict = Depends(get_auth_context)
 ) -> Dict[str, Any]:
     """
     Scrape URL and ingest content (LEGACY - use POST /context-units/from-url instead).
@@ -2315,7 +2402,7 @@ async def ingest_url(
         # Get company for client
         company_result = supabase.client.table("companies")\
             .select("*")\
-            .eq("id", client["company_id"])\
+            .eq("id", auth["company_id"])\
             .maybe_single()\
             .execute()
 
@@ -2359,12 +2446,12 @@ async def ingest_url(
                 # Required metadata
                 company_id=company["id"],
                 source_type="api",
-                source_id=f"legacy_url_{client['client_id'][:8]}_{i}",
+                source_id=f"legacy_url_{auth['client_id'][:8]}_{i}",
 
                 # Optional metadata
                 source_metadata={
                     "legacy_endpoint": "/ingest/url",
-                    "client_id": client["client_id"],
+                    "client_id": auth["client_id"],
                     "url": request.url,
                     "extract_multiple": request.extract_multiple,
                     "skip_guardrails": request.skip_guardrails,
@@ -2424,7 +2511,7 @@ async def search(
     query: str,
     limit: int = 5,
     source: Optional[str] = None,
-    client: Dict = Depends(get_current_client)
+    auth: Dict = Depends(get_auth_context)
 ) -> List[Dict[str, Any]]:
     """
     Semantic search in documents.
@@ -2440,7 +2527,7 @@ async def search(
         List of matching documents with scores
     """
     try:
-        pipeline = IngestPipeline(client_id=client["client_id"])
+        pipeline = IngestPipeline(client_id=auth["client_id"])
 
         filters = {}
         if source:
@@ -2464,7 +2551,7 @@ async def aggregate(
     query: str,
     limit: int = 10,
     threshold: float = 0.7,
-    client: Dict = Depends(get_current_client)
+    auth: Dict = Depends(get_auth_context)
 ) -> Dict[str, Any]:
     """
     Search and aggregate documents with LLM summary.
@@ -2480,7 +2567,7 @@ async def aggregate(
         Summary and source documents
     """
     try:
-        pipeline = IngestPipeline(client_id=client["client_id"])
+        pipeline = IngestPipeline(client_id=auth["client_id"])
 
         result = await pipeline.aggregate(
             query=query,
@@ -2504,7 +2591,7 @@ async def aggregate(
 @app.post("/tasks")
 async def create_task(
     request: CreateTaskRequest,
-    client: Dict = Depends(get_current_client)
+    auth: Dict = Depends(get_auth_context)
 ) -> Dict[str, Any]:
     """
     Create a new scheduled task.
@@ -2522,8 +2609,8 @@ async def create_task(
     """
     try:
         task = await supabase_client.create_task(
-            client_id=client["client_id"],
-            company_id=client["company_id"],
+            client_id=auth["client_id"],
+            company_id=auth["company_id"],
             source_type=request.source_type,
             target=request.target,
             frequency_min=request.frequency_min,
@@ -2547,7 +2634,7 @@ async def create_task(
 
 @app.get("/tasks")
 async def list_tasks(
-    client: Dict = Depends(get_current_client)
+    auth: Dict = Depends(get_auth_context)
 ) -> List[Dict[str, Any]]:
     """
     List all tasks for authenticated client.
@@ -2558,7 +2645,7 @@ async def list_tasks(
         List of tasks
     """
     try:
-        tasks = await supabase_client.get_tasks_by_client(client["client_id"], client["company_id"])
+        tasks = await supabase_client.get_tasks_by_client(auth["client_id"], auth["company_id"])
         return tasks
 
     except Exception as e:
@@ -2568,7 +2655,7 @@ async def list_tasks(
 
 @app.get("/executions")
 async def get_executions(
-    client: Dict = Depends(get_current_client),
+    auth: Dict = Depends(get_auth_context),
     limit: int = 100,
     offset: int = 0
 ) -> List[Dict[str, Any]]:
@@ -2590,7 +2677,7 @@ async def get_executions(
         # Get executions for this client
         result = supabase.client.table("executions")\
             .select("*")\
-            .eq("client_id", client["client_id"])\
+            .eq("client_id", auth["client_id"])\
             .order("timestamp", desc=True)\
             .limit(limit)\
             .offset(offset)\
@@ -2605,7 +2692,7 @@ async def get_executions(
 
 @app.get("/sources")
 async def get_sources(
-    client: Dict = Depends(get_current_client),
+    auth: Dict = Depends(get_auth_context),
     source_type: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
@@ -2621,7 +2708,7 @@ async def get_sources(
     """
     try:
         supabase = get_supabase_client()
-        sources = await supabase.get_sources_by_client(client["client_id"], source_type)
+        sources = await supabase.get_sources_by_client(auth["client_id"], source_type)
         return sources
         
     except Exception as e:
@@ -2632,7 +2719,7 @@ async def get_sources(
 @app.post("/sources")
 async def create_source(
     request: Dict[str, Any],
-    client: Dict = Depends(get_current_client)
+    auth: Dict = Depends(get_auth_context)
 ) -> Dict[str, Any]:
     """
     Create a new information source.
@@ -2654,7 +2741,7 @@ async def create_source(
         supabase = get_supabase_client()
         
         source_data = {
-            "client_id": client["client_id"],
+            "client_id": auth["client_id"],
             "company_id": client.get("company_id"),
             "source_code": request["source_code"],
             "source_name": request["source_name"],
@@ -2682,7 +2769,7 @@ async def create_source(
 async def update_source(
     source_id: str,
     request: Dict[str, Any],
-    client: Dict = Depends(get_current_client)
+    auth: Dict = Depends(get_auth_context)
 ) -> Dict[str, Any]:
     """
     Update an existing information source.
@@ -2710,7 +2797,7 @@ async def update_source(
         existing_source = supabase.client.table("sources")\
             .select("*")\
             .eq("source_id", source_id)\
-            .eq("client_id", client["client_id"])\
+            .eq("client_id", auth["client_id"])\
             .maybe_single()\
             .execute()
         
@@ -2730,13 +2817,13 @@ async def update_source(
         result = supabase.client.table("sources")\
             .update(update_data)\
             .eq("source_id", source_id)\
-            .eq("client_id", client["client_id"])\
+            .eq("client_id", auth["client_id"])\
             .execute()
         
         if result.data and len(result.data) > 0:
             logger.info("source_updated", 
                 source_id=source_id,
-                client_id=client["client_id"],
+                client_id=auth["client_id"],
                 updated_fields=list(update_data.keys())
             )
             return result.data[0]
@@ -2754,7 +2841,7 @@ async def update_source(
 async def get_context_units(
     limit: int = 20,
     offset: int = 0,
-    client: Dict = Depends(get_current_client)
+    auth: Dict = Depends(get_auth_context)
 ) -> List[Dict[str, Any]]:
     """
     Get context units for authenticated client.
@@ -2773,7 +2860,7 @@ async def get_context_units(
         
         result = supabase.client.table("press_context_units")\
             .select("*")\
-            .eq("company_id", client["company_id"])\
+            .eq("company_id", auth["company_id"])\
             .order("created_at", desc=True)\
             .limit(limit)\
             .offset(offset)\
@@ -2789,7 +2876,7 @@ async def get_context_units(
 @app.post("/context-units")
 async def create_context_unit(
     request: CreateContextUnitRequest,
-    client: Dict = Depends(get_current_client)
+    auth: Dict = Depends(get_auth_context)
 ) -> Dict[str, Any]:
     """
     Create a context unit from plain text (manual entry).
@@ -2824,7 +2911,7 @@ async def create_context_unit(
         
         logger.info(
             "manual_context_unit_request",
-            client_id=client["client_id"],
+            client_id=auth["client_id"],
             text_length=len(request.text),
             has_title=bool(request.title)
         )
@@ -2834,7 +2921,7 @@ async def create_context_unit(
         
         company_result = supabase.client.table("companies")\
             .select("*")\
-            .eq("id", client["company_id"])\
+            .eq("id", auth["company_id"])\
             .maybe_single()\
             .execute()
         
@@ -2865,7 +2952,7 @@ async def create_context_unit(
             text_content=request.text,
             metadata={
                 "manual_entry": True,
-                "client_id": client["client_id"],
+                "client_id": auth["client_id"],
                 "company_id": company["id"]
             },
             title=request.title or None
@@ -2889,7 +2976,7 @@ async def create_context_unit(
             # Optional metadata
             source_metadata={
                 "manual_entry": True,
-                "client_id": client["client_id"],
+                "client_id": auth["client_id"],
                 "created_via": "api",
                 "has_custom_title": bool(request.title),
                 "organization_id": organization["id"]
@@ -2905,7 +2992,7 @@ async def create_context_unit(
             if ingest_result.get("duplicate"):
                 logger.warn(
                     "manual_context_unit_duplicate",
-                    client_id=client["client_id"],
+                    client_id=auth["client_id"],
                     duplicate_id=ingest_result.get("duplicate_id"),
                     similarity=ingest_result.get("similarity")
                 )
@@ -2929,7 +3016,7 @@ async def create_context_unit(
         
         logger.info(
             "manual_context_unit_created",
-            client_id=client["client_id"],
+            client_id=auth["client_id"],
             context_unit_id=created_unit["id"],
             title=created_unit.get("title", "")
         )
@@ -2985,7 +3072,7 @@ async def create_context_unit(
         # Log execution
         duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
         await supabase.log_execution(
-            client_id=client["client_id"],
+            client_id=auth["client_id"],
             company_id=company["id"],
             source_name="Manual Text Entry",
             source_type="manual",
@@ -3013,14 +3100,14 @@ async def create_context_unit(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("create_context_unit_error", error=str(e), client_id=client["client_id"])
+        logger.error("create_context_unit_error", error=str(e), client_id=auth["client_id"])
         
         # Log failed execution
         try:
             duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
             await supabase.log_execution(
-                client_id=client["client_id"],
-                company_id=client["company_id"],
+                client_id=auth["client_id"],
+                company_id=auth["company_id"],
                 source_name="Manual Text Entry",
                 source_type="manual",
                 items_count=0,
@@ -3045,7 +3132,7 @@ async def create_context_unit(
 @app.post("/context-units/from-url")
 async def create_context_unit_from_url(
     request: CreateContextUnitFromURLRequest,
-    client: Dict = Depends(get_current_client)
+    auth: Dict = Depends(get_auth_context)
 ) -> Dict[str, Any]:
     """
     Create a context unit from a URL (intelligent web scraping).
@@ -3091,7 +3178,7 @@ async def create_context_unit_from_url(
         
         logger.info(
             "url_context_unit_request",
-            client_id=client["client_id"],
+            client_id=auth["client_id"],
             url=request.url,
             has_title=bool(request.title)
         )
@@ -3101,7 +3188,7 @@ async def create_context_unit_from_url(
         
         company_result = supabase.client.table("companies")\
             .select("*")\
-            .eq("id", client["company_id"])\
+            .eq("id", auth["company_id"])\
             .maybe_single()\
             .execute()
         
@@ -3161,7 +3248,7 @@ async def create_context_unit_from_url(
         
         logger.info(
             "url_context_unit_created",
-            client_id=client["client_id"],
+            client_id=auth["client_id"],
             context_unit_id=created_unit["id"],
             url=request.url,
             title=created_unit.get("title", ""),
@@ -3171,7 +3258,7 @@ async def create_context_unit_from_url(
         # Log execution
         duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
         await supabase.log_execution(
-            client_id=client["client_id"],
+            client_id=auth["client_id"],
             company_id=company["id"],
             source_name="Manual URL Scraping",
             source_type="scraping",
@@ -3207,14 +3294,14 @@ async def create_context_unit_from_url(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("create_context_unit_from_url_error", error=str(e), client_id=client["client_id"], url=request.url)
+        logger.error("create_context_unit_from_url_error", error=str(e), client_id=auth["client_id"], url=request.url)
         
         # Log failed execution
         try:
             duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
             await supabase.log_execution(
-                client_id=client["client_id"],
-                company_id=client["company_id"],
+                client_id=auth["client_id"],
+                company_id=auth["company_id"],
                 source_name="Manual URL Scraping",
                 source_type="scraping",
                 items_count=0,
@@ -3239,7 +3326,7 @@ async def create_context_unit_from_url(
 @app.delete("/tasks/{task_id}")
 async def delete_task(
     task_id: str,
-    client: Dict = Depends(get_current_client)
+    auth: Dict = Depends(get_auth_context)
 ) -> Dict[str, str]:
     """
     Delete a task.
@@ -3254,14 +3341,14 @@ async def delete_task(
     """
     try:
         # Verify task belongs to client and company (automatic filtering)
-        task = await supabase_client.get_task_by_id(task_id, client["company_id"])
+        task = await supabase_client.get_task_by_id(task_id, auth["company_id"])
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
 
-        if task["client_id"] != client["client_id"]:
+        if task["client_id"] != auth["client_id"]:
             raise HTTPException(status_code=403, detail="Not authorized to delete this task")
 
-        await supabase_client.delete_task(task_id, client["company_id"])
+        await supabase_client.delete_task(task_id, auth["company_id"])
 
         return {
             "status": "ok",
@@ -3282,7 +3369,7 @@ async def delete_task(
 @app.post("/process/analyze")
 async def process_analyze(
     request: ProcessTextRequest,
-    client: Dict = Depends(get_current_client)
+    auth: Dict = Depends(get_auth_context)
 ) -> Dict[str, Any]:
     """
     Analyze text and extract: title, summary, tags with usage control.
@@ -3334,7 +3421,7 @@ async def process_analyze(
 @app.post("/process/analyze-atomic")
 async def process_analyze_atomic(
     request: ProcessTextRequest,
-    client: Dict = Depends(get_current_client)
+    auth: Dict = Depends(get_auth_context)
 ) -> Dict[str, Any]:
     """
     Analyze text and extract: title, summary, tags, atomic facts with usage control.
@@ -3386,7 +3473,7 @@ async def process_analyze_atomic(
 @app.post("/process/redact-news")
 async def process_redact_news(
     request: ProcessTextRequest,
-    client: Dict = Depends(get_current_client)
+    auth: Dict = Depends(get_auth_context)
 ) -> Dict[str, Any]:
     """
     Generate news article from text/facts with specific style and usage control.
@@ -3440,7 +3527,7 @@ async def process_redact_news(
 @app.post("/process/url")
 async def process_url(
     request: ProcessURLRequest,
-    client: Dict = Depends(get_current_client)
+    auth: Dict = Depends(get_auth_context)
 ) -> Dict[str, Any]:
     """
     Scrape URL and process content (stateless, no storage).
@@ -3460,7 +3547,7 @@ async def process_url(
 
         pipeline = StatelessPipeline(
             organization_id=client.get('organization_id'),
-            client_id=client['client_id']
+            client_id=auth['client_id']
         )
 
         result = await pipeline.process_url(
@@ -3484,7 +3571,7 @@ async def process_url(
 @app.post("/styles/generate")
 async def generate_style_guide(
     request: GenerateStyleRequest,
-    client: Dict = Depends(get_current_client)
+    auth: Dict = Depends(get_auth_context)
 ) -> Dict[str, Any]:
     """
     Generate writing style guide from example articles.
@@ -3518,7 +3605,7 @@ async def generate_style_guide(
 
         pipeline = StatelessPipeline(
             organization_id=client.get('organization_id'),
-            client_id=client['client_id']
+            client_id=auth['client_id']
         )
 
         result = await pipeline.generate_style_guide(
@@ -3540,7 +3627,7 @@ async def generate_style_guide(
 @app.post("/process/redact-news-rich")
 async def process_redact_news_rich(
     request: RedactNewsRichRequest,
-    client: Dict = Depends(get_current_client)
+    auth: Dict = Depends(get_auth_context)
 ) -> Dict[str, Any]:
     """
     Generate rich news article from multiple context units with custom instructions.
@@ -3586,12 +3673,12 @@ async def process_redact_news_rich(
         # If save_article=True, perform transformations and save to DB
         if request.save_article:
             logger.info("save_article_enabled",
-                client_id=client["client_id"],
+                client_id=auth["client_id"],
                 context_unit_ids=request.context_unit_ids
             )
 
             supabase = get_supabase_client()
-            company_id = client["company_id"]
+            company_id = auth["company_id"]
 
             # 1. Strip markdown from title and summary
             raw_title = data.get("title", "")
@@ -3763,7 +3850,7 @@ async def process_redact_news_rich(
 @app.post("/process/micro-edit")
 async def micro_edit(
     request: MicroEditRequest,
-    client: Dict = Depends(get_current_client)
+    auth: Dict = Depends(get_auth_context)
 ) -> Dict[str, Any]:
     """
     Perform micro-editing on text using LLM with usage control.
@@ -3780,7 +3867,7 @@ async def micro_edit(
     try:
         logger.info(
             "micro_edit_request",
-            client_id=client["client_id"],
+            client_id=auth["client_id"],
             text_length=len(request.text),
             command=request.command[:100]
         )
@@ -3801,7 +3888,7 @@ async def micro_edit(
             data = result.get("data", result)
             logger.info(
                 "micro_edit_completed",
-                client_id=client["client_id"],
+                client_id=auth["client_id"],
                 word_count_change=data.get("word_count_change", 0)
             )
             return {
@@ -3812,7 +3899,7 @@ async def micro_edit(
             # Usage limit exceeded or other workflow error
             logger.warn(
                 "micro_edit_workflow_failed",
-                client_id=client["client_id"],
+                client_id=auth["client_id"],
                 error=result.get("error"),
                 details=result.get("details")
             )
@@ -3845,7 +3932,7 @@ class EnrichContextUnitRequest(BaseModel):
 async def enrichment_context_unit(
     context_unit_id: str,
     request: EnrichContextUnitRequest,
-    client: Dict = Depends(get_current_client)
+    auth: Dict = Depends(get_auth_context)
 ):
     """
     Enrich context unit with real-time web search using EnrichmentService (NEW).
@@ -3871,7 +3958,7 @@ async def enrichment_context_unit(
             "enrichment_context_unit_request",
             context_unit_id=context_unit_id,
             enrich_type=request.enrich_type,
-            client_id=client["client_id"]
+            client_id=auth["client_id"]
         )
 
         # Validate enrich_type
@@ -3888,7 +3975,7 @@ async def enrichment_context_unit(
         result = supabase_client.client.table("press_context_units")\
             .select("*")\
             .eq("id", context_unit_id)\
-            .or_(f"company_id.eq.{client['company_id']},company_id.eq.{pool_company_id}")\
+            .or_(f"company_id.eq.{auth['company_id']},company_id.eq.{pool_company_id}")\
             .maybe_single()\
             .execute()
 
@@ -3896,7 +3983,7 @@ async def enrichment_context_unit(
             logger.warn(
                 "context_unit_not_found",
                 context_unit_id=context_unit_id,
-                client_id=client["client_id"]
+                client_id=auth["client_id"]
             )
             raise HTTPException(status_code=404, detail="Context unit not found")
 
@@ -3938,7 +4025,7 @@ async def enrichment_context_unit(
             enrich_type=request.enrich_type,
             organization_id=client.get("organization_id", "00000000-0000-0000-0000-000000000001"),
             context_unit_id=context_unit_id,
-            client_id=client["client_id"]
+            client_id=auth["client_id"]
         )
 
         # Detect empty results
@@ -3990,7 +4077,7 @@ class SaveEnrichedStatementsRequest(BaseModel):
 async def save_enriched_statements(
     context_unit_id: str,
     request: SaveEnrichedStatementsRequest,
-    client: Dict = Depends(get_current_client)
+    auth: Dict = Depends(get_auth_context)
 ):
     """
     Save user-selected enriched statements to context unit.
@@ -4012,7 +4099,7 @@ async def save_enriched_statements(
             context_unit_id=context_unit_id,
             statements_count=len(request.statements),
             append=request.append,
-            client_id=client["client_id"]
+            client_id=auth["client_id"]
         )
 
         # Get context unit from database
@@ -4022,7 +4109,7 @@ async def save_enriched_statements(
         result = supabase_client.client.table("press_context_units")\
             .select("*")\
             .eq("id", context_unit_id)\
-            .or_(f"company_id.eq.{client['company_id']},company_id.eq.{pool_company_id}")\
+            .or_(f"company_id.eq.{auth['company_id']},company_id.eq.{pool_company_id}")\
             .maybe_single()\
             .execute()
 
@@ -4030,7 +4117,7 @@ async def save_enriched_statements(
             logger.warn(
                 "context_unit_not_found",
                 context_unit_id=context_unit_id,
-                client_id=client["client_id"]
+                client_id=auth["client_id"]
             )
             raise HTTPException(status_code=404, detail="Context unit not found")
 
@@ -4106,7 +4193,7 @@ async def save_enriched_statements(
             enrichment_check = supabase_client.client.table("press_context_units")\
                 .select("id, enriched_statements")\
                 .eq("base_id", base_id)\
-                .eq("company_id", client["company_id"])\
+                .eq("company_id", auth["company_id"])\
                 .maybe_single()\
                 .execute()
             
@@ -4124,7 +4211,7 @@ async def save_enriched_statements(
                 logger.info("enrichment_child_updated",
                     base_id=base_id,
                     enrichment_id=enrichment_id,
-                    company_id=client["company_id"]
+                    company_id=auth["company_id"]
                 )
             else:
                 # Create new enrichment child
@@ -4134,8 +4221,8 @@ async def save_enriched_statements(
                 insert_result = supabase_client.client.table("press_context_units").insert({
                     "id": enrichment_id,
                     "base_id": base_id,
-                    "company_id": client["company_id"],
-                    "client_id": client["client_id"],
+                    "company_id": auth["company_id"],
+                    "client_id": auth["client_id"],
                     "source_id": None,
                     "title": None,  # Inherit from base
                     "summary": None,  # Inherit from base
@@ -4151,7 +4238,7 @@ async def save_enriched_statements(
                 logger.info("enrichment_child_created",
                     base_id=base_id,
                     enrichment_id=enrichment_id,
-                    company_id=client["company_id"]
+                    company_id=auth["company_id"]
                 )
         else:
             # Own unit - update directly
@@ -4821,7 +4908,7 @@ class TTSRequest(BaseModel):
 
 
 @app.get("/tts/health")
-async def tts_health(client: Dict = Depends(get_current_client)):
+async def tts_health(auth: Dict = Depends(get_auth_context)):
     """TTS service health check (requires authentication).
 
     Args:
@@ -4837,14 +4924,14 @@ async def tts_health(client: Dict = Depends(get_current_client)):
         "model": "es_ES-carlfm-x_low",
         "quality": "x_low (3-4x faster, 28MB)",
         "integrated": True,
-        "client_id": client["client_id"]
+        "client_id": auth["client_id"]
     }
 
 
 @app.post("/tts/synthesize")
 async def tts_synthesize(
     request: TTSRequest,
-    client: Dict = Depends(get_current_client)
+    auth: Dict = Depends(get_auth_context)
 ):
     """Synthesize speech from text using Piper TTS.
 
@@ -4860,7 +4947,7 @@ async def tts_synthesize(
     try:
         logger.info(
             "tts_request",
-            client_id=client["client_id"],
+            client_id=auth["client_id"],
             text_length=len(request.text),
             rate=request.rate,
             text_preview=request.text[:50]
@@ -4870,7 +4957,7 @@ async def tts_synthesize(
         if len(request.text) > 2000:
             logger.warn(
                 "tts_long_text",
-                client_id=client["client_id"],
+                client_id=auth["client_id"],
                 text_length=len(request.text),
                 estimated_duration_seconds=len(request.text) // 200  # ~200 chars/sec
             )
@@ -4915,7 +5002,7 @@ async def tts_synthesize(
 
         logger.info(
             "tts_success",
-            client_id=client["client_id"],
+            client_id=auth["client_id"],
             audio_size=audio_size,
             estimated_duration_seconds=estimated_duration,
             text_length=len(request.text),
@@ -4930,7 +5017,7 @@ async def tts_synthesize(
             input_tokens=0,
             output_tokens=0,
             company_id=client.get("company_id", "00000000-0000-0000-0000-000000000001"),
-            client_id=client["client_id"],
+            client_id=auth["client_id"],
             metadata={
                 "text_length": len(request.text),
                 "audio_size": audio_size,
@@ -4953,7 +5040,7 @@ async def tts_synthesize(
     except subprocess.TimeoutExpired:
         logger.error(
             "tts_timeout",
-            client_id=client["client_id"],
+            client_id=auth["client_id"],
             text_length=len(request.text)
         )
         raise HTTPException(
@@ -4965,7 +5052,7 @@ async def tts_synthesize(
     except Exception as e:
         logger.error(
             "tts_error",
-            client_id=client["client_id"],
+            client_id=auth["client_id"],
             error=str(e)
         )
         raise HTTPException(
@@ -5073,7 +5160,7 @@ async def list_context_units(
 
 @app.get("/api/v1/context-units/filter-options")
 async def get_filter_options(
-    user: Dict = Depends(get_current_user_from_jwt)
+    auth: Dict = Depends(get_auth_context)
 ) -> Dict:
     """
     Get available filter options (sources, topics, and categories) for context units.
@@ -5081,7 +5168,7 @@ async def get_filter_options(
     Returns unique source_types, tags, and categories with counts.
     """
     try:
-        company_id = user["company_id"]
+        company_id = auth["company_id"]
         supabase = get_supabase_client()
 
         # Query all units and aggregate manually (simple and reliable)
@@ -5125,7 +5212,7 @@ async def get_filter_options(
 @app.get("/api/v1/context-units/{context_unit_id}")
 async def get_context_unit(
     context_unit_id: str,
-    user: Dict = Depends(get_current_user_from_jwt)
+    auth: Dict = Depends(get_auth_context)
 ) -> Dict:
     """
     Get a single context unit by ID.
@@ -5134,7 +5221,7 @@ async def get_context_unit(
     Supports both base units and enrichment children.
     """
     try:
-        company_id = user["company_id"]
+        company_id = auth["company_id"]
         pool_company_id = "99999999-9999-9999-9999-999999999999"
         supabase = get_supabase_client()
 
@@ -6452,7 +6539,7 @@ async def calculate_optimal_schedule_time(company_id: str) -> datetime:
 
 @app.get("/api/v1/executions")
 async def list_executions(
-    user: Dict = Depends(get_current_user_from_jwt),
+    auth: Dict = Depends(get_auth_context),
     limit: int = 20,
     offset: int = 0
 ) -> Dict:
@@ -6465,7 +6552,7 @@ async def list_executions(
         if limit < 1 or limit > 100:
             raise HTTPException(status_code=400, detail="Limit must be between 1 and 100")
 
-        company_id = user["company_id"]
+        company_id = auth["company_id"]
         supabase = get_supabase_client()
 
         result = supabase.client.table("executions")\
@@ -6493,7 +6580,7 @@ async def list_executions(
 
 @app.get("/api/v1/styles")
 async def list_styles(
-    user: Dict = Depends(get_current_user_from_jwt)
+    auth: Dict = Depends(get_auth_context)
 ) -> Dict:
     """
     Get list of available press styles.
@@ -6501,7 +6588,7 @@ async def list_styles(
     Returns active styles for the user's company.
     """
     try:
-        company_id = user["company_id"]
+        company_id = auth["company_id"]
         supabase = get_supabase_client()
 
         result = supabase.client.table("press_styles")\
