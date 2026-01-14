@@ -5978,26 +5978,44 @@ async def publish_to_platforms(
                         formatted_tags.append(f"#{clean_tag}")
                 hashtags = " ".join(formatted_tags)
 
-            # Build social media content
+            # Build social media content (max 280 chars for Twitter)
+            MAX_TWEET_LENGTH = 280
+
             if wordpress_url:
-                social_content = f"📰 {title}\n\n{wordpress_url}"
+                # With URL: title + URL + hashtags
+                base_content = f"📰 {title}\n\n{wordpress_url}"
                 if hashtags:
-                    social_content += f"\n\n{hashtags}"
+                    test_content = f"{base_content}\n\n{hashtags}"
+                    if len(test_content) <= MAX_TWEET_LENGTH:
+                        social_content = test_content
+                    else:
+                        # Truncate hashtags to fit
+                        available = MAX_TWEET_LENGTH - len(base_content) - 2  # 2 for \n\n
+                        social_content = f"{base_content}\n\n{hashtags[:available]}" if available > 5 else base_content
+                else:
+                    social_content = base_content
 
                 logger.info("social_content_with_wordpress_url",
                     article_id=article['id'],
                     wordpress_url=wordpress_url,
-                    hashtags=hashtags
+                    hashtags=hashtags,
+                    content_length=len(social_content)
                 )
             else:
-                # No WordPress URL available, use excerpt
-                social_content = f"📰 {title}\n\n{excerpt[:200] if excerpt else ''}"
-                if hashtags:
-                    social_content += f"\n\n{hashtags}"
+                # No WordPress URL: title + excerpt + hashtags (fit within 280)
+                base_content = f"📰 {title}\n\n"
+                hashtag_section = f"\n\n{hashtags}" if hashtags else ""
+                available_for_excerpt = MAX_TWEET_LENGTH - len(base_content) - len(hashtag_section) - 3  # 3 for "..."
+
+                if excerpt and available_for_excerpt > 20:
+                    social_content = f"{base_content}{excerpt[:available_for_excerpt]}...{hashtag_section}"
+                else:
+                    social_content = f"{base_content[:MAX_TWEET_LENGTH - len(hashtag_section)]}{hashtag_section}"
 
                 logger.warn("social_content_without_wordpress_url",
                     article_id=article['id'],
-                    reason="No WordPress publication succeeded or no WordPress targets"
+                    reason="No WordPress publication succeeded or no WordPress targets",
+                    content_length=len(social_content)
                 )
 
             for target in social_targets:
