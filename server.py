@@ -616,6 +616,97 @@ async def auth_logout(authorization: Optional[str] = Header(None)) -> Dict:
         raise HTTPException(status_code=500, detail="Logout failed")
 
 
+@app.post("/auth/forgot-password")
+async def auth_forgot_password(data: Dict[str, Any]) -> Dict:
+    """
+    Request password reset email.
+
+    Body:
+        {"email": "user@example.com"}
+
+    Returns:
+        {"success": true, "message": "If the email exists, a reset link has been sent"}
+    """
+    try:
+        email = data.get("email")
+        if not email:
+            raise HTTPException(status_code=400, detail="Email is required")
+
+        supabase = get_supabase_client()
+
+        # Get the frontend URL for the reset link
+        redirect_url = os.getenv("FRONTEND_URL", "https://press.ekimen.ai") + "/reset-password"
+
+        # Request password reset - Supabase will send the email
+        supabase.client.auth.reset_password_email(
+            email,
+            options={"redirect_to": redirect_url}
+        )
+
+        logger.info("password_reset_requested", email=email[:3] + "***")
+
+        # Always return success to prevent email enumeration
+        return {
+            "success": True,
+            "message": "If the email exists, a reset link has been sent"
+        }
+
+    except Exception as e:
+        logger.error("forgot_password_error", error=str(e))
+        # Still return success to prevent email enumeration
+        return {
+            "success": True,
+            "message": "If the email exists, a reset link has been sent"
+        }
+
+
+@app.post("/auth/reset-password")
+async def auth_reset_password(data: Dict[str, Any]) -> Dict:
+    """
+    Reset password using token from email link.
+
+    Body:
+        {"access_token": "token_from_url", "password": "new_password"}
+
+    Returns:
+        {"success": true, "message": "Password updated successfully"}
+    """
+    try:
+        access_token = data.get("access_token") or data.get("token")
+        new_password = data.get("password")
+
+        if not access_token:
+            raise HTTPException(status_code=400, detail="Access token is required")
+        if not new_password:
+            raise HTTPException(status_code=400, detail="New password is required")
+        if len(new_password) < 6:
+            raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+        supabase = get_supabase_client()
+
+        # Set the session with the recovery token
+        session = supabase.client.auth.set_session(access_token, "")
+
+        if not session:
+            raise HTTPException(status_code=400, detail="Invalid or expired token")
+
+        # Update the password
+        supabase.client.auth.update_user({"password": new_password})
+
+        logger.info("password_reset_completed")
+
+        return {
+            "success": True,
+            "message": "Password updated successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("reset_password_error", error=str(e))
+        raise HTTPException(status_code=400, detail="Failed to reset password. Token may be invalid or expired.")
+
+
 @app.get("/auth/user")
 async def auth_get_user() -> Dict:
     """
