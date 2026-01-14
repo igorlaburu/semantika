@@ -48,6 +48,12 @@ class ImageTransformer:
             "max_width": 1200,
             "max_height": 627, # 1.91:1 ratio
         },
+        "facebook": {
+            "format": "jpeg",
+            "quality": 85,
+            "max_width": 1200,
+            "max_height": 630, # Facebook recommends 1.91:1 ratio
+        },
         "default": {
             "format": "webp",
             "quality": 90,
