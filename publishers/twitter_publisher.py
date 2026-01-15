@@ -194,42 +194,39 @@ class TwitterPublisher(BasePublisher):
         imagen_uuid: Optional[str] = None,
         temp_image_path: Optional[str] = None
     ) -> PublicationResult:
-        """Publish article to Twitter as a single tweet."""
+        """Publish article to Twitter as a single tweet. NEVER multiple tweets."""
         try:
-            # Check if content is pre-formatted (contains URL from chained publication)
-            # Pre-formatted content starts with 📰 and contains http
-            is_preformatted = content.startswith("📰") and "http" in content
+            MAX_TWEET_LENGTH = 280
+
+            # Check if content is pre-formatted (from server.py publication flow)
+            is_preformatted = content.startswith("📰")
 
             if is_preformatted:
-                # Use content directly (already formatted with URL and hashtags)
+                # Use content directly - already formatted and length-checked by server.py
                 tweet_content = content
                 logger.info("twitter_using_preformatted_content",
                     content_length=len(content)
                 )
             else:
-                # Build tweet content from scratch (standalone publication)
-                tweet_content = f"📰 {title}\n\n"
+                # Fallback: Build simple tweet (standalone publication)
+                # Format: 📰 {title} - truncate if needed, NO excerpt
+                tweet_content = f"📰 {title}"
+                if len(tweet_content) > MAX_TWEET_LENGTH:
+                    tweet_content = f"📰 {title[:MAX_TWEET_LENGTH - 6]}..."
 
-                # Add excerpt or first part of content
-                if excerpt:
-                    tweet_content += f"{excerpt[:150]}...\n\n"
-                else:
-                    # Use first paragraph of content
-                    clean_content = re.sub(r'<[^>]+>', '', content)
-                    first_para = clean_content.split('\n\n')[0][:150]
-                    tweet_content += f"{first_para}...\n\n"
+                logger.info("twitter_built_simple_content",
+                    content_length=len(tweet_content)
+                )
 
-                # Add hashtags
-                hashtags = self._extract_hashtags_and_mentions(tags or [])
-                if hashtags:
-                    tweet_content += hashtags
+            # SAFETY: Ensure we NEVER exceed 280 chars
+            if len(tweet_content) > MAX_TWEET_LENGTH:
+                tweet_content = tweet_content[:MAX_TWEET_LENGTH]
+                logger.warn("twitter_content_truncated_safety",
+                    original_length=len(content)
+                )
 
-            # For social sharing with URL, we want a single tweet (no thread)
-            # Only split if content is too long and doesn't have a URL
-            if is_preformatted or len(tweet_content) <= 280:
-                tweets = [tweet_content]
-            else:
-                tweets = self._split_into_tweets(tweet_content)
+            # ALWAYS single tweet - NEVER split
+            tweets = [tweet_content]
             
             logger.info("twitter_publish_start", 
                 title=title[:50], 

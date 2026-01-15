@@ -5979,44 +5979,85 @@ async def publish_to_platforms(
                 hashtags = " ".join(formatted_tags)
 
             # Build social media content (max 280 chars for Twitter)
+            # Format: 📰 {title}\n\n{url}\n\n{hashtags}
+            # Rules: NO excerpt, hashtags only if they fit, title truncated if needed
             MAX_TWEET_LENGTH = 280
 
-            if wordpress_url:
-                # With URL: title + URL + hashtags
-                base_content = f"📰 {title}\n\n{wordpress_url}"
-                if hashtags:
-                    test_content = f"{base_content}\n\n{hashtags}"
-                    if len(test_content) <= MAX_TWEET_LENGTH:
-                        social_content = test_content
-                    else:
-                        # Truncate hashtags to fit
-                        available = MAX_TWEET_LENGTH - len(base_content) - 2  # 2 for \n\n
-                        social_content = f"{base_content}\n\n{hashtags[:available]}" if available > 5 else base_content
-                else:
-                    social_content = base_content
-
-                logger.info("social_content_with_wordpress_url",
+            # Get URL: published article URL or fallback to WordPress base URL
+            tweet_url = wordpress_url
+            if not tweet_url and wordpress_targets:
+                # Use first WordPress target's base_url as fallback
+                tweet_url = wordpress_targets[0].get('base_url', '')
+                logger.info("social_using_fallback_base_url",
                     article_id=article['id'],
-                    wordpress_url=wordpress_url,
-                    hashtags=hashtags,
-                    content_length=len(social_content)
+                    fallback_url=tweet_url
                 )
+
+            # If still no URL, try to get default WordPress from company
+            if not tweet_url:
+                try:
+                    default_wp = supabase.client.table("press_publication_targets")\
+                        .select("base_url")\
+                        .eq("company_id", company_id)\
+                        .eq("platform_type", "wordpress")\
+                        .eq("is_active", True)\
+                        .eq("is_default", True)\
+                        .limit(1)\
+                        .execute()
+                    if default_wp.data:
+                        tweet_url = default_wp.data[0].get('base_url', '')
+                        logger.info("social_using_default_wordpress_url",
+                            article_id=article['id'],
+                            default_url=tweet_url
+                        )
+                except Exception as e:
+                    logger.warn("social_failed_to_get_default_wordpress",
+                        article_id=article['id'],
+                        error=str(e)
+                    )
+
+            # Build tweet content - NEVER exceed 280 chars, NEVER double tweets
+            # Structure: 📰 {title}\n\n{url}\n\n{hashtags}
+            emoji_prefix = "📰 "
+            url_section = f"\n\n{tweet_url}" if tweet_url else ""
+            hashtag_section = f"\n\n{hashtags}" if hashtags else ""
+
+            # Calculate available space for title
+            fixed_length = len(emoji_prefix) + len(url_section) + len(hashtag_section)
+            available_for_title = MAX_TWEET_LENGTH - fixed_length
+
+            # If title fits, use as is
+            if len(title) <= available_for_title:
+                final_title = title
             else:
-                # No WordPress URL: title + excerpt + hashtags (fit within 280)
-                base_content = f"📰 {title}\n\n"
-                hashtag_section = f"\n\n{hashtags}" if hashtags else ""
-                available_for_excerpt = MAX_TWEET_LENGTH - len(base_content) - len(hashtag_section) - 3  # 3 for "..."
-
-                if excerpt and available_for_excerpt > 20:
-                    social_content = f"{base_content}{excerpt[:available_for_excerpt]}...{hashtag_section}"
+                # Try without hashtags first
+                available_without_hashtags = MAX_TWEET_LENGTH - len(emoji_prefix) - len(url_section)
+                if len(title) <= available_without_hashtags:
+                    final_title = title
+                    hashtag_section = ""  # Remove hashtags to fit title
                 else:
-                    social_content = f"{base_content[:MAX_TWEET_LENGTH - len(hashtag_section)]}{hashtag_section}"
+                    # Truncate title (without hashtags)
+                    final_title = title[:available_without_hashtags - 3] + "..."
+                    hashtag_section = ""
 
-                logger.warn("social_content_without_wordpress_url",
+            social_content = f"{emoji_prefix}{final_title}{url_section}{hashtag_section}"
+
+            # Safety check - should never happen but just in case
+            if len(social_content) > MAX_TWEET_LENGTH:
+                social_content = social_content[:MAX_TWEET_LENGTH]
+                logger.error("social_content_exceeded_limit_truncated",
                     article_id=article['id'],
-                    reason="No WordPress publication succeeded or no WordPress targets",
-                    content_length=len(social_content)
+                    original_length=len(f"{emoji_prefix}{final_title}{url_section}{hashtag_section}")
                 )
+
+            logger.info("social_content_built",
+                article_id=article['id'],
+                has_article_url=bool(wordpress_url),
+                has_fallback_url=bool(tweet_url and not wordpress_url),
+                has_hashtags=bool(hashtag_section),
+                title_truncated=len(title) > len(final_title),
+                content_length=len(social_content)
+            )
 
             for target in social_targets:
                 target_id = target['id']
