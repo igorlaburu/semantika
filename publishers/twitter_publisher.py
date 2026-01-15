@@ -423,9 +423,24 @@ class TwitterPublisher(BasePublisher):
                             "data": response_data["data"]
                         }
                     else:
+                        # Log full error response for debugging
+                        error_msg = response_data.get('detail') or response_data.get('title') or f'HTTP {response.status}'
+
+                        # Twitter often returns errors in 'errors' array
+                        if 'errors' in response_data:
+                            errors = response_data['errors']
+                            if errors:
+                                error_msg = errors[0].get('message', error_msg)
+
+                        logger.error("twitter_api_error_response",
+                            status=response.status,
+                            error_msg=error_msg,
+                            full_response=response_data
+                        )
+
                         return {
                             "success": False,
-                            "error": response_data.get('detail', f'HTTP {response.status}'),
+                            "error": error_msg,
                             "response": response_data
                         }
                         
