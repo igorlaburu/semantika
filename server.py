@@ -5833,10 +5833,25 @@ async def publish_to_platforms(
         if imagen_uuid:
             try:
                 from utils.image_transformer import ImageTransformer
+                from pathlib import Path
                 import os
-                
-                # Read image from cache
-                original_image_data = ImageTransformer.read_cached_image(imagen_uuid)
+
+                # Read image from cache using same logic as GET /api/v1/images/{image_id}
+                # The imagen_uuid from frontend already includes _0 suffix when needed
+                cache_dir = Path("/app/cache/images")
+                extensions = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"]
+                original_image_data = None
+
+                for ext in extensions:
+                    cache_file = cache_dir / f"{imagen_uuid}{ext}"
+                    if cache_file.exists():
+                        original_image_data = cache_file.read_bytes()
+                        logger.debug("publication_image_cache_hit",
+                            imagen_uuid=imagen_uuid,
+                            extension=ext,
+                            cache_file=str(cache_file)
+                        )
+                        break
                 
                 if original_image_data:
                     # Transform image to temporary file with brand consistency and uniqueness
