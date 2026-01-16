@@ -73,6 +73,9 @@ markdown>=3.5.0
 # Image generation
 fal-client>=0.4.0
 
+# MCP (Model Context Protocol)
+fastmcp>=2.0.0,<3.0
+
 # Testing
 pytest==7.4.3
 pytest-asyncio==0.21.1
