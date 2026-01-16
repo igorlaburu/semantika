@@ -12,7 +12,7 @@ logger = get_logger("api.settings")
 router = APIRouter(prefix="/api/v1/settings", tags=["settings"])
 
 # MCP Server URL - will be configurable via env in production
-MCP_SERVER_URL = "https://api.ekimen.ai/mcp/sse"
+MCP_SERVER_URL = "https://api.ekimen.ai/mcp"
 
 
 @router.get("/integrations")
