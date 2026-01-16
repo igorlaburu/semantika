@@ -157,16 +157,14 @@ async def list_tools(x_api_key: str = Header(None, alias="X-API-Key")):
     client = await authenticate_api_key(x_api_key)
     mcp_server = get_mcp_server(client["company_id"], client["client_name"])
 
-    # Get tools from the MCP server
+    # Get tools from FastMCP's tool manager
     tools = []
-
-    # Access the registered tools from FastMCP
-    if hasattr(mcp_server, '_tool_manager') and hasattr(mcp_server._tool_manager, 'tools'):
-        for name, tool in mcp_server._tool_manager.tools.items():
+    if hasattr(mcp_server, '_tool_manager'):
+        for tool in mcp_server._tool_manager.list_tools():
             tools.append({
-                "name": name,
+                "name": tool.name,
                 "description": tool.description if hasattr(tool, 'description') else None,
-                "inputSchema": tool.parameters if hasattr(tool, 'parameters') else {}
+                "inputSchema": tool.inputSchema if hasattr(tool, 'inputSchema') else {}
             })
 
     return {"tools": tools}
@@ -213,18 +211,29 @@ async def call_tool(
     )
 
     try:
-        # Get the tool function from FastMCP
+        # Use FastMCP's tool manager to call the tool
         if hasattr(mcp_server, '_tool_manager'):
             tool_manager = mcp_server._tool_manager
-            if hasattr(tool_manager, 'tools') and tool_name in tool_manager.tools:
-                tool = tool_manager.tools[tool_name]
-                # Call the tool function
-                if asyncio.iscoroutinefunction(tool.fn):
-                    result = await tool.fn(**arguments)
-                else:
-                    result = tool.fn(**arguments)
 
-                return {"result": result}
+            if not tool_manager.has_tool(tool_name):
+                raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found")
+
+            # Call the tool
+            result = await tool_manager.call_tool(tool_name, arguments)
+
+            # Extract text content from result
+            if result and len(result) > 0:
+                # Result is list of TextContent/ImageContent
+                content = result[0]
+                if hasattr(content, 'text'):
+                    import json
+                    try:
+                        return {"result": json.loads(content.text)}
+                    except json.JSONDecodeError:
+                        return {"result": content.text}
+                return {"result": str(content)}
+
+            return {"result": None}
 
         raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found")
 
