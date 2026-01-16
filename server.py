@@ -44,6 +44,7 @@ from endpoints import images as images_router
 from endpoints import process as process_router
 from endpoints import context_units as context_units_router
 from endpoints import articles as articles_router
+from endpoints import settings as settings_router
 
 # Import shared auth dependencies
 from utils.auth_dependencies import (
@@ -92,6 +93,7 @@ app.include_router(images_router.router)
 app.include_router(process_router.router)
 app.include_router(context_units_router.router)
 app.include_router(articles_router.router)
+app.include_router(settings_router.router)
 
 
 @app.on_event("startup")
