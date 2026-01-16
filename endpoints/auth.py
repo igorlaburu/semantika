@@ -1,5 +1,6 @@
 """Authentication endpoints (Supabase Auth)."""
 
+import os
 import uuid as uuid_module
 from datetime import datetime
 from typing import Dict, Optional, Any
@@ -35,7 +36,7 @@ class SignupRequest(BaseModel):
     cif: str  # Company tax ID (CIF in Spain)
     tier: str = "starter"  # starter, pro, unlimited
 
-@router.post("/auth/signup")
+@router.post("/signup")
 async def auth_signup(request: SignupRequest) -> Dict:
     """
     Sign up new user with a new company.
@@ -169,7 +170,7 @@ async def auth_signup(request: SignupRequest) -> Dict:
         raise HTTPException(status_code=500, detail=f"Signup failed: {str(e)}")
 
 
-@router.post("/auth/login")
+@router.post("/login")
 async def auth_login(request: LoginRequest) -> Dict:
     """
     Login with email and password using Supabase Auth.
@@ -257,7 +258,7 @@ async def auth_login(request: LoginRequest) -> Dict:
         raise HTTPException(status_code=500, detail="Login failed")
 
 
-@router.post("/auth/refresh")
+@router.post("/refresh")
 async def auth_refresh(request: RefreshTokenRequest) -> Dict:
     """
     Refresh access token using refresh token.
@@ -293,7 +294,7 @@ async def auth_refresh(request: RefreshTokenRequest) -> Dict:
         raise HTTPException(status_code=500, detail="Token refresh failed")
 
 
-@router.post("/auth/logout")
+@router.post("/logout")
 async def auth_logout(authorization: Optional[str] = Header(None)) -> Dict:
     """
     Logout current user (invalidate token).
@@ -327,7 +328,7 @@ async def auth_logout(authorization: Optional[str] = Header(None)) -> Dict:
         raise HTTPException(status_code=500, detail="Logout failed")
 
 
-@router.post("/auth/forgot-password")
+@router.post("/forgot-password")
 async def auth_forgot_password(data: Dict[str, Any]) -> Dict:
     """
     Request password reset email.
@@ -371,7 +372,7 @@ async def auth_forgot_password(data: Dict[str, Any]) -> Dict:
         }
 
 
-@router.post("/auth/reset-password")
+@router.post("/reset-password")
 async def auth_reset_password(data: Dict[str, Any]) -> Dict:
     """
     Reset password using token from email link.
@@ -418,7 +419,7 @@ async def auth_reset_password(data: Dict[str, Any]) -> Dict:
         raise HTTPException(status_code=400, detail="Failed to reset password. Token may be invalid or expired.")
 
 
-@router.get("/auth/user")
+@router.get("/user")
 async def auth_get_user() -> Dict:
     """
     Get current authenticated user info (from JWT).
