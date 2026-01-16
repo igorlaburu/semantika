@@ -77,21 +77,18 @@ def create_mcp_server(company_id: str, client_name: str = "unknown") -> FastMCP:
             # Generate embedding for semantic search
             query_embedding = await generate_embedding(query)
 
-            # Calculate date filter
-            since_date = (datetime.utcnow() - timedelta(days=days_back)).isoformat()
-
             # Build the search query
             limit = min(limit, 50)  # Cap at 50
 
-            # Use vector search function
+            # Use hybrid search function
             result = supabase.client.rpc(
-                "search_context_units_hybrid",
+                "hybrid_search_context_units",
                 {
-                    "query_embedding": query_embedding,
-                    "query_text": query,
                     "p_company_id": company_id,
+                    "p_query_text": query,
+                    "p_query_embedding": query_embedding,
                     "p_limit": limit,
-                    "p_since_date": since_date,
+                    "p_max_days": days_back,
                     "p_include_pool": True
                 }
             ).execute()
