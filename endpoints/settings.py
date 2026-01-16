@@ -130,7 +130,7 @@ async def regenerate_api_key(company_id: str = Depends(get_company_id_from_auth)
         client_name = result.data[0].get("client_name", "unknown")
 
         # Generate new API key
-        new_api_key = f"sk-{client_name}-{uuid.uuid4()}"
+        new_api_key = f"ekm-{uuid.uuid4()}"
 
         # Update the client with the new key
         update_result = supabase.client.table("clients")\
