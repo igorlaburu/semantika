@@ -77,7 +77,7 @@ _mcp_servers = {}
 
 def get_mcp_server(company_id: str, client_name: str):
     """Get or create MCP server for a company."""
-    from mcp.tools import create_mcp_server
+    from mcp_tools.tools import create_mcp_server
 
     if company_id not in _mcp_servers:
         logger.info("mcp_server_created", company_id=company_id, client_name=client_name)
