@@ -11,8 +11,10 @@ from utils.auth_dependencies import get_company_id_from_auth
 logger = get_logger("api.settings")
 router = APIRouter(prefix="/api/v1/settings", tags=["settings"])
 
-# MCP Server URL - will be configurable via env in production
-MCP_SERVER_URL = "https://api.ekimen.ai/mcp"
+import os
+
+# MCP Server URL - configurable via environment variable
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "https://mcp.ekimen.ai")
 
 
 @router.get("/integrations")
