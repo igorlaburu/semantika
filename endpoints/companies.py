@@ -16,11 +16,16 @@ router = APIRouter(prefix="/api/v1/companies", tags=["companies"])
 
 class CompanySettingsUpdate(BaseModel):
     """Model for updating company settings."""
+    # Auto-generation settings
     autogenerate_enabled: Optional[bool] = None
     autogenerate_max: Optional[int] = Field(None, ge=1, le=20)
     autogenerate_min_quality: Optional[float] = Field(None, ge=1.0, le=5.0)
+    # General settings
     email_alias: Optional[str] = None
     article_general_settings: Optional[str] = Field(None, max_length=2000)
+    # Notification settings
+    disable_ai_notification: Optional[bool] = None
+    disable_probabilistic_mark: Optional[bool] = None
 
 
 @router.get("/{company_id}/settings")
