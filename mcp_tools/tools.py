@@ -621,16 +621,16 @@ def create_mcp_server(company_id: str, client_name: str = "unknown") -> FastMCP:
                 .eq("company_id", company_id)\
                 .execute()
 
-            # Count articles by status
+            # Count articles by estado
             articles_result = supabase.client.table("press_articles")\
-                .select("status")\
+                .select("estado")\
                 .eq("company_id", company_id)\
                 .execute()
 
             status_counts = {}
             for article in (articles_result.data or []):
-                status = article.get("status", "unknown")
-                status_counts[status] = status_counts.get(status, 0) + 1
+                estado = article.get("estado", "desconocido")
+                status_counts[estado] = status_counts.get(estado, 0) + 1
 
             return {
                 "context_units_total": cu_result.count or 0,
