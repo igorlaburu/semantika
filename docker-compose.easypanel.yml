@@ -16,6 +16,7 @@ services:
       - API_BASE_URL
       - CREDENTIALS_ENCRYPTION_KEY
       - QDRANT_COLLECTION_NAME=semantika_prod
+      - MCP_SERVER_URL
       - LOG_LEVEL=INFO
     volumes:
       - fastembed_cache:/root/.cache/fastembed  # Cache FastEmbed models
