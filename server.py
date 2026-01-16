@@ -31,6 +31,19 @@ from utils.unified_context_ingester import ingest_context_unit
 from core_ingest import IngestPipeline
 from publishers.twitter_publisher import TwitterPublisher
 
+# Import endpoint routers
+from endpoints import tts as tts_router
+
+# Import shared auth dependencies
+from utils.auth_dependencies import (
+    get_api_key,
+    get_current_client,
+    get_current_user_from_jwt_optional,
+    get_current_client_optional,
+    get_company_id_from_auth,
+    get_auth_context
+)
+
 # Initialize logger
 logger = get_logger("api")
 
@@ -54,6 +67,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include endpoint routers
+app.include_router(tts_router.router)
 
 
 @app.on_event("startup")
@@ -110,192 +126,6 @@ async def log_requests(request: Request, call_next):
     )
 
     return response
-
-
-# ============================================
-# AUTHENTICATION
-# ============================================
-
-async def get_api_key(
-    x_api_key: Optional[str] = Header(None),
-    authorization: Optional[str] = Header(None)
-) -> str:
-    """Extract API key from X-API-Key or Authorization Bearer header."""
-    if x_api_key:
-        return x_api_key
-    
-    if authorization:
-        if authorization.startswith("Bearer "):
-            return authorization[7:]
-        return authorization
-    
-    logger.warn("missing_api_key")
-    raise HTTPException(status_code=401, detail="Missing API Key")
-
-
-async def get_current_client(api_key: str = Depends(get_api_key)) -> Dict:
-    """
-    Get current authenticated client from API key.
-
-    Args:
-        api_key: API key from header
-
-    Returns:
-        Client data
-
-    Raises:
-        HTTPException: If API key is invalid
-    """
-    client = await supabase_client.get_client_by_api_key(api_key)
-
-    if not client:
-        logger.warn("invalid_api_key", api_key_prefix=api_key[:10])
-        raise HTTPException(status_code=403, detail="Invalid API Key")
-
-    logger.debug("client_authenticated", client_id=client["client_id"])
-    return client
-
-
-async def get_current_user_from_jwt_optional(authorization: Optional[str] = Header(None)) -> Optional[Dict]:
-    """Optional version of get_current_user_from_jwt - returns None if no token."""
-    if not authorization:
-        return None
-    try:
-        return await get_current_user_from_jwt(authorization)
-    except HTTPException:
-        return None
-
-
-async def get_current_client_optional(x_api_key: Optional[str] = Header(None)) -> Optional[Dict]:
-    """Optional version of get_current_client - returns None if no API key."""
-    if not x_api_key:
-        return None
-    try:
-        client = await supabase_client.get_client_by_api_key(x_api_key)
-        if client:
-            logger.debug("client_authenticated", client_id=client["client_id"])
-        return client
-    except Exception:
-        return None
-
-
-async def get_company_id_from_auth(
-    user: Optional[Dict] = Depends(get_current_user_from_jwt_optional),
-    client: Optional[Dict] = Depends(get_current_client_optional)
-) -> str:
-    """
-    Get company_id from either JWT or API Key (whichever is provided).
-    
-    Allows endpoints to accept both authentication methods.
-    Useful for testing with API Key while frontend uses JWT.
-    
-    Args:
-        user: User from JWT (optional)
-        client: Client from API Key (optional)
-        
-    Returns:
-        company_id string
-        
-    Raises:
-        HTTPException: If neither auth method provided
-    """
-    if user:
-        logger.debug("auth_via_jwt", user_id=user.get("sub"), company_id=user["company_id"])
-        return user["company_id"]
-    elif client:
-        logger.debug("auth_via_api_key", client_id=client["client_id"], company_id=client["company_id"])
-        return client["company_id"]
-    else:
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication required. Provide either JWT token (Authorization: Bearer) or API Key (X-API-Key)"
-        )
-
-
-async def get_auth_context(
-    user: Optional[Dict] = Depends(get_current_user_from_jwt_optional),
-    client: Optional[Dict] = Depends(get_current_client_optional)
-) -> Dict:
-    """
-    Get unified auth context from either JWT or API Key.
-
-    This is the primary authentication dependency for endpoints that need
-    both client_id and company_id. Accepts either authentication method.
-
-    Args:
-        user: User from JWT (optional)
-        client: Client from API Key (optional)
-
-    Returns:
-        Dict with:
-            - client_id: str (from client or looked up by company_id)
-            - company_id: str
-            - auth_type: "jwt" or "api_key"
-            - user_id: str or None (only for JWT)
-            - email: str or None (only for JWT)
-            - client_name: str or None (only for API Key)
-
-    Raises:
-        HTTPException: If neither auth method provided or no client found
-    """
-    if client:
-        # API Key auth - use client data directly
-        logger.debug("auth_context_api_key",
-            client_id=client["client_id"],
-            company_id=client["company_id"]
-        )
-        return {
-            "client_id": client["client_id"],
-            "company_id": client["company_id"],
-            "auth_type": "api_key",
-            "user_id": None,
-            "email": None,
-            "client_name": client.get("client_name"),
-            "is_active": client.get("is_active"),
-            "created_at": client.get("created_at")
-        }
-    elif user:
-        # JWT auth - look up client by company_id
-        company_id = user["company_id"]
-        supabase = get_supabase_client()
-
-        # Find client associated with this company
-        result = supabase.client.table("clients")\
-            .select("client_id, client_name, is_active, created_at")\
-            .eq("company_id", company_id)\
-            .eq("is_active", True)\
-            .limit(1)\
-            .execute()
-
-        if not result.data:
-            logger.warn("no_client_for_company", company_id=company_id, user_email=user.get("email"))
-            raise HTTPException(
-                status_code=403,
-                detail=f"No active client found for company. Please contact support."
-            )
-
-        client_data = result.data[0]
-        logger.debug("auth_context_jwt",
-            user_id=user.get("id"),
-            company_id=company_id,
-            client_id=client_data["client_id"]
-        )
-
-        return {
-            "client_id": client_data["client_id"],
-            "company_id": company_id,
-            "auth_type": "jwt",
-            "user_id": user.get("id"),
-            "email": user.get("email"),
-            "client_name": client_data.get("client_name"),
-            "is_active": client_data.get("is_active"),
-            "created_at": client_data.get("created_at")
-        }
-    else:
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication required. Use Bearer token or X-API-Key header."
-        )
 
 
 # ============================================
@@ -4894,170 +4724,6 @@ async def get_image_unified(image_id: str):
                 "Cache-Control": "public, max-age=3600",
                 "X-Image-Source": "placeholder"
             }
-        )
-
-
-# ============================================
-# TTS ENDPOINTS (Piper TTS)
-# ============================================
-
-class TTSRequest(BaseModel):
-    """Request model for TTS synthesis."""
-    text: str = Field(..., min_length=1, max_length=3000, description="Text to synthesize (max 3000 chars for speed)")
-    rate: float = Field(1.3, ge=0.5, le=2.0, description="Speech rate (0.5=slow, 2.0=fast)")
-
-
-@app.get("/tts/health")
-async def tts_health(auth: Dict = Depends(get_auth_context)):
-    """TTS service health check (requires authentication).
-
-    Args:
-        client: Authenticated client from API key
-
-    Returns:
-        Health status of TTS service
-    """
-    return {
-        "status": "ok",
-        "service": "semantika-tts",
-        "version": "1.0.0",
-        "model": "es_ES-carlfm-x_low",
-        "quality": "x_low (3-4x faster, 28MB)",
-        "integrated": True,
-        "client_id": auth["client_id"]
-    }
-
-
-@app.post("/tts/synthesize")
-async def tts_synthesize(
-    request: TTSRequest,
-    auth: Dict = Depends(get_auth_context)
-):
-    """Synthesize speech from text using Piper TTS.
-
-    Args:
-        request: TTSRequest with text and rate
-
-    Returns:
-        WAV audio stream
-
-    Raises:
-        HTTPException: If synthesis fails
-    """
-    try:
-        logger.info(
-            "tts_request",
-            client_id=auth["client_id"],
-            text_length=len(request.text),
-            rate=request.rate,
-            text_preview=request.text[:50]
-        )
-
-        # Warn if text is long (may take >10s)
-        if len(request.text) > 2000:
-            logger.warn(
-                "tts_long_text",
-                client_id=auth["client_id"],
-                text_length=len(request.text),
-                estimated_duration_seconds=len(request.text) // 200  # ~200 chars/sec
-            )
-
-        # Convert rate to length_scale (inverse)
-        # rate 1.3 = 30% faster = length_scale 0.77
-        length_scale = 1.0 / request.rate
-
-        # Call Piper binary with X_LOW quality model (3-4x faster, carlfm voice)
-        # Output to stdout as WAV format
-        process = subprocess.Popen(
-            [
-                '/app/piper/piper',
-                '--model', '/app/models/es_ES-carlfm-x_low.onnx',
-                '--length_scale', str(length_scale),
-                '--output_file', '-'  # Output WAV to stdout
-            ],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-
-        audio_data, error = process.communicate(
-            input=request.text.encode('utf-8'),
-            timeout=15  # 15s timeout for better UX (fallback to browser TTS)
-        )
-
-        if process.returncode != 0:
-            error_msg = error.decode('utf-8', errors='ignore')
-            logger.error(
-                "piper_tts_error",
-                returncode=process.returncode,
-                error=error_msg[:200]
-            )
-            raise HTTPException(
-                status_code=500,
-                detail=f"TTS synthesis failed: {error_msg[:100]}"
-            )
-
-        audio_size = len(audio_data)
-        estimated_duration = audio_size // 32000  # Rough estimate
-
-        logger.info(
-            "tts_success",
-            client_id=auth["client_id"],
-            audio_size=audio_size,
-            estimated_duration_seconds=estimated_duration,
-            text_length=len(request.text),
-            rate=request.rate
-        )
-
-        # Track usage as simple operation (microedición)
-        tracker = get_usage_tracker()
-        await tracker.track(
-            model="piper/es_ES-carlfm-x_low",
-            operation="tts_synthesize",
-            input_tokens=0,
-            output_tokens=0,
-            company_id=auth.get("company_id", "00000000-0000-0000-0000-000000000001"),
-            client_id=auth["client_id"],
-            metadata={
-                "text_length": len(request.text),
-                "audio_size": audio_size,
-                "rate": request.rate,
-                "duration_seconds": estimated_duration,
-                "usage_type": "simple"
-            }
-        )
-
-        return StreamingResponse(
-            io.BytesIO(audio_data),
-            media_type="audio/wav",
-            headers={
-                "Content-Disposition": "attachment; filename=speech.wav",
-                "Content-Length": str(audio_size),
-                "Cache-Control": "public, max-age=3600"
-            }
-        )
-
-    except subprocess.TimeoutExpired:
-        logger.error(
-            "tts_timeout",
-            client_id=auth["client_id"],
-            text_length=len(request.text)
-        )
-        raise HTTPException(
-            status_code=504,
-            detail=f"TTS timeout (>15s) - texto demasiado largo ({len(request.text)} caracteres). Usa menos de 2000 caracteres para síntesis rápida."
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(
-            "tts_error",
-            client_id=auth["client_id"],
-            error=str(e)
-        )
-        raise HTTPException(
-            status_code=500,
-            detail=f"TTS error: {str(e)}"
         )
 
 
