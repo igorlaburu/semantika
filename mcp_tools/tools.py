@@ -75,7 +75,7 @@ def create_mcp_server(company_id: str, client_name: str = "unknown") -> FastMCP:
             supabase = get_supabase_client()
 
             # Generate embedding for semantic search
-            query_embedding = generate_embedding(query)
+            query_embedding = await generate_embedding(query)
 
             # Calculate date filter
             since_date = (datetime.utcnow() - timedelta(days=days_back)).isoformat()
@@ -325,8 +325,9 @@ def create_mcp_server(company_id: str, client_name: str = "unknown") -> FastMCP:
 
             # Generate embedding for related articles
             try:
+                from utils.embedding_generator import generate_embedding
                 embedding_text = f"{title}. {content[:500]}"
-                embedding = generate_embedding(embedding_text)
+                embedding = await generate_embedding(embedding_text)
                 embedding_str = f"[{','.join(map(str, embedding))}]"
             except Exception:
                 embedding_str = None
