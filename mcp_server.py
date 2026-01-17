@@ -3,6 +3,10 @@
 Standalone server that exposes Semantika functionality via MCP protocol.
 Runs on port 8001 and is proxied via nginx at /mcp.
 
+Supports two authentication methods:
+1. X-API-Key header (legacy, for direct API access)
+2. OAuth 2.1 Bearer tokens (for Claude.ai and MCP clients)
+
 Usage:
     python mcp_server.py
 
@@ -24,12 +28,65 @@ from starlette.responses import StreamingResponse
 from utils.logger import get_logger
 from utils.config import settings
 from utils.supabase_client import get_supabase_client
+from mcp_oauth import oauth_router
+from mcp_oauth.routes import validate_bearer_token
 
 logger = get_logger("mcp_server")
 
 # ============================================
 # AUTHENTICATION
 # ============================================
+
+async def authenticate_request(
+    x_api_key: Optional[str] = None,
+    authorization: Optional[str] = None
+) -> dict:
+    """
+    Validate authentication and return client info.
+
+    Supports two authentication methods:
+    1. X-API-Key header (legacy)
+    2. Authorization: Bearer <token> (OAuth 2.1)
+
+    Args:
+        x_api_key: The X-API-Key header value
+        authorization: The Authorization header value
+
+    Returns:
+        Dict with company_id, client_name (and optionally user_id for OAuth)
+
+    Raises:
+        HTTPException if invalid
+    """
+    # Try Bearer token first (OAuth 2.1)
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization[7:]  # Remove "Bearer " prefix
+        token_info = await validate_bearer_token(token)
+
+        if token_info:
+            logger.debug("oauth_token_authenticated",
+                user_id=token_info["user_id"],
+                company_id=token_info["company_id"]
+            )
+            return {
+                "client_id": None,  # OAuth doesn't use client_id concept
+                "company_id": token_info["company_id"],
+                "client_name": "OAuth User",
+                "user_id": token_info["user_id"],
+                "auth_method": "oauth"
+            }
+        else:
+            raise HTTPException(status_code=401, detail="Invalid or expired Bearer token")
+
+    # Fall back to X-API-Key (legacy)
+    if x_api_key:
+        return await authenticate_api_key(x_api_key)
+
+    raise HTTPException(
+        status_code=401,
+        detail="Authentication required. Use X-API-Key header or Authorization: Bearer <token>"
+    )
+
 
 async def authenticate_api_key(api_key: str) -> dict:
     """
@@ -64,6 +121,7 @@ async def authenticate_api_key(api_key: str) -> dict:
     if not result.data.get("company_id"):
         raise HTTPException(status_code=403, detail="Client has no company assigned")
 
+    result.data["auth_method"] = "api_key"
     return result.data
 
 
@@ -132,7 +190,10 @@ async def root():
         "name": "Semantika MCP Server",
         "version": "1.0.0",
         "protocol": "MCP (Model Context Protocol)",
-        "auth": "X-API-Key header required",
+        "auth": {
+            "methods": ["X-API-Key", "OAuth 2.1 Bearer"],
+            "oauth_discovery": "/.well-known/oauth-authorization-server"
+        },
         "tools": [
             "search_news",
             "get_news_detail",
@@ -147,14 +208,22 @@ async def root():
     }
 
 
+# Mount OAuth router
+app.include_router(oauth_router)
+
+
 @app.get("/tools")
-async def list_tools(x_api_key: str = Header(None, alias="X-API-Key")):
+async def list_tools(
+    x_api_key: str = Header(None, alias="X-API-Key"),
+    authorization: str = Header(None, alias="Authorization")
+):
     """
     List available MCP tools.
 
     Returns tool definitions in MCP format.
+    Supports X-API-Key or Authorization: Bearer <token> authentication.
     """
-    client = await authenticate_api_key(x_api_key)
+    client = await authenticate_request(x_api_key, authorization)
     mcp_server = get_mcp_server(client["company_id"], client["client_name"])
 
     # Get tools from FastMCP's tool manager
@@ -173,7 +242,8 @@ async def list_tools(x_api_key: str = Header(None, alias="X-API-Key")):
 @app.post("/call")
 async def call_tool(
     request: Request,
-    x_api_key: str = Header(None, alias="X-API-Key")
+    x_api_key: str = Header(None, alias="X-API-Key"),
+    authorization: str = Header(None, alias="Authorization")
 ):
     """
     Call an MCP tool directly.
@@ -189,8 +259,10 @@ async def call_tool(
 
     Returns:
         Tool execution result
+
+    Supports X-API-Key or Authorization: Bearer <token> authentication.
     """
-    client = await authenticate_api_key(x_api_key)
+    client = await authenticate_request(x_api_key, authorization)
     mcp_server = get_mcp_server(client["company_id"], client["client_name"])
 
     try:
@@ -258,14 +330,16 @@ async def call_tool(
 @app.get("/sse")
 async def mcp_sse(
     request: Request,
-    x_api_key: str = Header(None, alias="X-API-Key")
+    x_api_key: str = Header(None, alias="X-API-Key"),
+    authorization: str = Header(None, alias="Authorization")
 ):
     """
     SSE endpoint for MCP protocol.
 
     This is the native MCP transport for Claude Desktop and other MCP clients.
+    Supports X-API-Key or Authorization: Bearer <token> authentication.
     """
-    client = await authenticate_api_key(x_api_key)
+    client = await authenticate_request(x_api_key, authorization)
     mcp_server = get_mcp_server(client["company_id"], client["client_name"])
 
     logger.info("mcp_sse_connection",

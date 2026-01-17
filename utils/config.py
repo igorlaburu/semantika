@@ -257,6 +257,28 @@ class Settings(BaseSettings):
         description="Admin email for system alerts"
     )
 
+    # MCP OAuth 2.1 Configuration
+    mcp_oauth_issuer: str = Field(
+        default="https://api.ekimen.ai/mcp",
+        description="OAuth issuer URL for MCP server"
+    )
+    mcp_oauth_access_token_expiry: int = Field(
+        default=3600,
+        description="Access token expiry in seconds (default 1 hour)"
+    )
+    mcp_oauth_refresh_token_expiry: int = Field(
+        default=2592000,
+        description="Refresh token expiry in seconds (default 30 days)"
+    )
+    mcp_oauth_code_expiry: int = Field(
+        default=600,
+        description="Authorization code expiry in seconds (default 10 minutes)"
+    )
+    mcp_oauth_secret_key: str = Field(
+        default="",
+        description="Secret key for OAuth session signing (generate with: openssl rand -hex 32)"
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
