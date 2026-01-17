@@ -259,7 +259,7 @@ class Settings(BaseSettings):
 
     # MCP OAuth 2.1 Configuration
     mcp_oauth_issuer: str = Field(
-        default="https://api.ekimen.ai/mcp",
+        default="https://mcp.ekimen.ai",
         description="OAuth issuer URL for MCP server"
     )
     mcp_oauth_access_token_expiry: int = Field(

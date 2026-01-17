@@ -837,7 +837,7 @@ def _render_login_page(
 
         {error_html}
 
-        <form method="POST" action="/mcp/oauth/login">
+        <form method="POST" action="/oauth/login">
             <div class="form-group">
                 <label for="email">Email</label>
                 <input type="email" id="email" name="email" required autofocus>
@@ -1011,7 +1011,7 @@ def _render_consent_page(
         </div>
 
         <div class="buttons">
-            <form method="POST" action="/mcp/oauth/consent" style="flex: 1;">
+            <form method="POST" action="/oauth/consent" style="flex: 1;">
                 <input type="hidden" name="consent" value="deny">
                 <input type="hidden" name="session_token" value="{session_token}">
                 <input type="hidden" name="client_id" value="{client_id}">
@@ -1023,7 +1023,7 @@ def _render_consent_page(
                 <button type="submit" class="deny">Deny</button>
             </form>
 
-            <form method="POST" action="/mcp/oauth/consent" style="flex: 1;">
+            <form method="POST" action="/oauth/consent" style="flex: 1;">
                 <input type="hidden" name="consent" value="approve">
                 <input type="hidden" name="session_token" value="{session_token}">
                 <input type="hidden" name="client_id" value="{client_id}">
