@@ -358,18 +358,68 @@ class FacebookPublisher(BasePublisher):
     ) -> PublicationResult:
         """Publish social media post to Facebook Page.
 
-        This is a wrapper for publish_article adapted for social media posts.
+        Posts pre-formatted content directly to the page feed.
+        Content should already include title, URL, and hashtags.
         """
-        # Build the post text with URL if provided
-        post_text = content
-        if url and url not in content:
-            post_text += f"\n\n🔗 {url}"
+        try:
+            page_id = self.credentials.get('page_id')
 
-        return await self.publish_article(
-            title="",  # Not needed for social posts
-            content=post_text,
-            tags=tags
-        )
+            if not page_id:
+                return PublicationResult(
+                    success=False,
+                    error="No page_id configured. Facebook requires a page to publish."
+                )
+
+            # Content is already formatted from articles.py
+            # Add emoji prefix if not present
+            post_text = content
+            if not post_text.startswith("📰"):
+                post_text = f"📰 {post_text}"
+
+            logger.info("facebook_publish_social_start",
+                page_id=page_id,
+                content_length=len(post_text),
+                has_image=bool(image_uuid)
+            )
+
+            # Post to page
+            result = await self._post_to_page(post_text)
+
+            if result.get('success'):
+                post_id = result['post_id']
+                page_name = self.credentials.get('page_name', page_id)
+                post_url = f"https://www.facebook.com/{post_id.replace('_', '/posts/')}"
+
+                logger.info("facebook_social_published",
+                    post_id=post_id,
+                    url=post_url
+                )
+
+                return PublicationResult(
+                    success=True,
+                    url=post_url,
+                    external_id=post_id,
+                    metadata={
+                        "platform": "facebook",
+                        "page_id": page_id,
+                        "page_name": page_name
+                    }
+                )
+            else:
+                logger.error("facebook_social_publish_failed",
+                    error=result.get('error')
+                )
+                return PublicationResult(
+                    success=False,
+                    error=f"Facebook API error: {result.get('error')}"
+                )
+
+        except Exception as e:
+            logger.error("facebook_social_publish_error", error=str(e))
+            return PublicationResult(
+                success=False,
+                error=f"Facebook publish failed: {str(e)}"
+            )
 
     # OAuth 2.0 Flow Methods
     @staticmethod
