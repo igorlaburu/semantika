@@ -635,7 +635,17 @@ async def publish_to_platforms(
             MAX_TWEET_LENGTH = 280
 
             # Get URL: published article URL or fallback to WordPress base URL
+            # Priority: 1) Just published WP URL, 2) Previously published URL, 3) WP base URL
             tweet_url = wordpress_url
+
+            # Check for previously published URL if not publishing to WP now
+            if not tweet_url and article.get('published_url'):
+                tweet_url = article['published_url']
+                logger.info("social_using_previous_published_url",
+                    article_id=article['id'],
+                    published_url=tweet_url
+                )
+
             if not tweet_url and wordpress_targets:
                 # Use first WordPress target's base_url as fallback
                 tweet_url = wordpress_targets[0].get('base_url', '')
