@@ -349,6 +349,28 @@ class FacebookPublisher(BasePublisher):
         clean = re.sub(r'\s+', ' ', clean)
         return clean.strip()
 
+    async def publish_social(
+        self,
+        content: str,
+        url: Optional[str] = None,
+        image_uuid: Optional[str] = None,
+        tags: Optional[list] = None
+    ) -> PublicationResult:
+        """Publish social media post to Facebook Page.
+
+        This is a wrapper for publish_article adapted for social media posts.
+        """
+        # Build the post text with URL if provided
+        post_text = content
+        if url and url not in content:
+            post_text += f"\n\n🔗 {url}"
+
+        return await self.publish_article(
+            title="",  # Not needed for social posts
+            content=post_text,
+            tags=tags
+        )
+
     # OAuth 2.0 Flow Methods
     @staticmethod
     def get_authorization_url(app_id: str, redirect_uri: str, state: str) -> str:
