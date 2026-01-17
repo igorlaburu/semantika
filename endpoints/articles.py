@@ -714,7 +714,8 @@ async def publish_to_platforms(
                         content=social_content,
                         url=tweet_url,
                         image_uuid=imagen_uuid,
-                        tags=tags[:5] if tags else []
+                        tags=tags[:5] if tags else [],
+                        temp_image_path=temp_image_path
                     )
 
                     publication_results[target_id] = {

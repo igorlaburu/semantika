@@ -354,7 +354,8 @@ class FacebookPublisher(BasePublisher):
         content: str,
         url: Optional[str] = None,
         image_uuid: Optional[str] = None,
-        tags: Optional[list] = None
+        tags: Optional[list] = None,
+        temp_image_path: Optional[str] = None
     ) -> PublicationResult:
         """Publish social media post to Facebook Page.
 
@@ -379,11 +380,27 @@ class FacebookPublisher(BasePublisher):
             logger.info("facebook_publish_social_start",
                 page_id=page_id,
                 content_length=len(post_text),
-                has_image=bool(image_uuid)
+                has_image=bool(temp_image_path)
             )
 
-            # Post to page
-            result = await self._post_to_page(post_text)
+            # Upload image if provided
+            photo_id = None
+            if temp_image_path:
+                upload_result = await self._upload_photo(temp_image_path)
+                if upload_result.get('success'):
+                    photo_id = upload_result['photo_id']
+                    logger.info("facebook_social_photo_uploaded",
+                        photo_id=photo_id,
+                        size_kb=upload_result.get('size_kb')
+                    )
+                else:
+                    logger.warn("facebook_social_photo_upload_failed",
+                        error=upload_result.get('error'),
+                        image_path=temp_image_path
+                    )
+
+            # Post to page with photo if available
+            result = await self._post_to_page(post_text, photo_id)
 
             if result.get('success'):
                 post_id = result['post_id']
@@ -402,7 +419,8 @@ class FacebookPublisher(BasePublisher):
                     metadata={
                         "platform": "facebook",
                         "page_id": page_id,
-                        "page_name": page_name
+                        "page_name": page_name,
+                        "has_photo": bool(photo_id)
                     }
                 )
             else:
