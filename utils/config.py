@@ -257,6 +257,16 @@ class Settings(BaseSettings):
         description="Admin email for system alerts"
     )
 
+    # Facebook OAuth Configuration
+    facebook_app_id: str = Field(
+        default="",
+        description="Facebook App ID for OAuth"
+    )
+    facebook_app_secret: str = Field(
+        default="",
+        description="Facebook App Secret for OAuth"
+    )
+
     # MCP OAuth 2.1 Configuration
     mcp_oauth_issuer: str = Field(
         default="https://mcp.ekimen.ai",

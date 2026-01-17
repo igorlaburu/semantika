@@ -21,7 +21,7 @@ from publishers.facebook_publisher import FacebookPublisher
 logger = get_logger("api.oauth.facebook")
 router = APIRouter(prefix="/oauth/facebook", tags=["oauth-facebook"])
 
-@router.get("/oauth/facebook/start")
+@router.get("/start")
 async def facebook_oauth_start(
     token: Optional[str] = Query(None, description="JWT token (for popup flow)"),
     authorization: Optional[str] = Header(None)
@@ -123,7 +123,7 @@ async def facebook_oauth_start(
         )
 
 
-@router.get("/oauth/facebook/callback")
+@router.get("/callback")
 async def facebook_oauth_callback(
     code: str = Query(None, description="Authorization code from Facebook"),
     state: str = Query(None, description="State parameter"),
@@ -331,7 +331,7 @@ async def facebook_oauth_callback(
         )
 
 
-@router.get("/oauth/facebook/status")
+@router.get("/status")
 async def facebook_oauth_status(
     company_id: str = Depends(get_company_id_from_auth)
 ) -> Dict:
@@ -379,7 +379,7 @@ async def facebook_oauth_status(
         return {"connected": False, "error": str(e)}
 
 
-@router.delete("/oauth/facebook")
+@router.delete("")
 async def facebook_oauth_disconnect(
     company_id: str = Depends(get_company_id_from_auth)
 ) -> Dict:
@@ -413,7 +413,7 @@ async def facebook_oauth_disconnect(
         raise HTTPException(status_code=500, detail="Failed to disconnect Facebook account")
 
 
-@router.post("/oauth/facebook/data-deletion")
+@router.post("/data-deletion")
 async def facebook_data_deletion_callback(
     request: Request
 ) -> Dict:
@@ -543,7 +543,7 @@ async def facebook_data_deletion_callback(
         raise HTTPException(status_code=500, detail="Data deletion failed")
 
 
-@router.get("/oauth/facebook/deletion-status")
+@router.get("/deletion-status")
 async def facebook_deletion_status(
     code: str = Query(..., description="Confirmation code")
 ) -> HTMLResponse:
