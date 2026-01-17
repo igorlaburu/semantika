@@ -17,6 +17,8 @@ services:
       - CREDENTIALS_ENCRYPTION_KEY
       - QDRANT_COLLECTION_NAME=semantika_prod
       - MCP_SERVER_URL
+      - FACEBOOK_APP_ID
+      - FACEBOOK_APP_SECRET
       - LOG_LEVEL=INFO
     volumes:
       - fastembed_cache:/root/.cache/fastembed  # Cache FastEmbed models
@@ -47,6 +49,8 @@ services:
       - API_BASE_URL
       - CREDENTIALS_ENCRYPTION_KEY
       - QDRANT_COLLECTION_NAME=semantika_prod
+      - FACEBOOK_APP_ID
+      - FACEBOOK_APP_SECRET
       - LOG_LEVEL=INFO
     volumes:
       - fastembed_cache:/root/.cache/fastembed  # Cache FastEmbed models
