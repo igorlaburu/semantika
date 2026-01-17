@@ -208,6 +208,137 @@ async def root():
     }
 
 
+@app.post("/")
+async def mcp_jsonrpc(
+    request: Request,
+    x_api_key: str = Header(None, alias="X-API-Key"),
+    authorization: str = Header(None, alias="Authorization")
+):
+    """
+    MCP JSON-RPC endpoint (standard MCP protocol).
+
+    Handles JSON-RPC requests from MCP clients like Claude.ai.
+    """
+    import json
+
+    client = await authenticate_request(x_api_key, authorization)
+    mcp_server = get_mcp_server(client["company_id"], client["client_name"])
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            {"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": None},
+            status_code=400
+        )
+
+    # Handle JSON-RPC request
+    method = body.get("method", "")
+    params = body.get("params", {})
+    request_id = body.get("id")
+
+    logger.info("mcp_jsonrpc_request",
+        method=method,
+        company_id=client["company_id"]
+    )
+
+    try:
+        # Standard MCP methods
+        if method == "initialize":
+            return JSONResponse({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {
+                    "protocolVersion": "2024-11-05",
+                    "serverInfo": {
+                        "name": "Semantika MCP Server",
+                        "version": "1.0.0"
+                    },
+                    "capabilities": {
+                        "tools": {"listChanged": False}
+                    }
+                }
+            })
+
+        elif method == "notifications/initialized":
+            # Client notification, no response needed
+            return JSONResponse({"jsonrpc": "2.0", "id": request_id, "result": {}})
+
+        elif method == "tools/list":
+            tools = []
+            if hasattr(mcp_server, '_tool_manager'):
+                for tool in mcp_server._tool_manager.list_tools():
+                    tools.append({
+                        "name": tool.name,
+                        "description": tool.description if hasattr(tool, 'description') else "",
+                        "inputSchema": tool.inputSchema if hasattr(tool, 'inputSchema') else {"type": "object", "properties": {}}
+                    })
+            return JSONResponse({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {"tools": tools}
+            })
+
+        elif method == "tools/call":
+            tool_name = params.get("name")
+            arguments = params.get("arguments", {})
+
+            if not tool_name:
+                return JSONResponse({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {"code": -32602, "message": "Missing tool name"}
+                })
+
+            if hasattr(mcp_server, '_tool_manager'):
+                tool_manager = mcp_server._tool_manager
+
+                if not tool_manager.has_tool(tool_name):
+                    return JSONResponse({
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {"code": -32601, "message": f"Tool '{tool_name}' not found"}
+                    })
+
+                result = await tool_manager.call_tool(tool_name, arguments)
+
+                # Format result
+                content = []
+                if result and len(result) > 0:
+                    for item in result:
+                        if hasattr(item, 'text'):
+                            content.append({"type": "text", "text": item.text})
+                        else:
+                            content.append({"type": "text", "text": str(item)})
+
+                return JSONResponse({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {"content": content, "isError": False}
+                })
+
+            return JSONResponse({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {"code": -32601, "message": "Tool manager not available"}
+            })
+
+        else:
+            return JSONResponse({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {"code": -32601, "message": f"Method '{method}' not found"}
+            })
+
+    except Exception as e:
+        logger.error("mcp_jsonrpc_error", method=method, error=str(e))
+        return JSONResponse({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "error": {"code": -32603, "message": str(e)}
+        })
+
+
 # Mount OAuth router
 app.include_router(oauth_router)
 
