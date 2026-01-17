@@ -77,15 +77,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 20s
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.semantika-mcp.rule=Host(`api.ekimen.ai`) && PathPrefix(`/mcp`)"
-      - "traefik.http.routers.semantika-mcp.entrypoints=https"
-      - "traefik.http.routers.semantika-mcp.tls=true"
-      - "traefik.http.routers.semantika-mcp.tls.certresolver=letsencrypt"
-      - "traefik.http.middlewares.mcp-stripprefix.stripprefix.prefixes=/mcp"
-      - "traefik.http.routers.semantika-mcp.middlewares=mcp-stripprefix"
-      - "traefik.http.services.semantika-mcp.loadbalancer.server.port=8001"
 
 volumes:
   fastembed_cache:
