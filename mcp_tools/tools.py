@@ -392,7 +392,7 @@ def create_mcp_server(company_id: str, client_name: str = "unknown") -> FastMCP:
             titulo: Nuevo título (opcional)
             contenido: Nuevo contenido en Markdown (opcional)
             excerpt: Nuevo resumen/extracto (opcional)
-            estado: Nuevo estado: borrador, revision, aprobado (opcional)
+            estado: Nuevo estado: borrador, publicado, programado (opcional)
             category: Nueva categoría (opcional)
             tags: Nuevas etiquetas (opcional)
 
