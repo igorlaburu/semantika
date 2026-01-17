@@ -281,6 +281,7 @@ def create_mcp_server(company_id: str, client_name: str = "unknown") -> FastMCP:
         title: str,
         content: str,
         context_unit_ids: List[str],
+        autor: str = "Redacción",
         category: Optional[str] = None,
         summary: Optional[str] = None,
         tags: Optional[List[str]] = None
@@ -294,6 +295,7 @@ def create_mcp_server(company_id: str, client_name: str = "unknown") -> FastMCP:
             title: Título del artículo
             content: Contenido en Markdown
             context_unit_ids: IDs de las noticias usadas como fuente
+            autor: Nombre del autor (por defecto "Redacción")
             category: Categoría (política, economía, sociedad, cultura, deportes)
             summary: Resumen breve (se genera automáticamente si no se proporciona)
             tags: Lista de etiquetas
@@ -334,6 +336,7 @@ def create_mcp_server(company_id: str, client_name: str = "unknown") -> FastMCP:
                 "titulo": title,
                 "slug": slug,
                 "contenido": content,
+                "autor": autor,
                 "category": category,
                 "estado": "borrador",
                 "context_unit_ids": context_unit_ids,
