@@ -4,19 +4,15 @@ Handles:
 - Access token generation (opaque, prefixed with mcp_at_)
 - Refresh token generation (opaque, prefixed with mcp_rt_)
 - Token hashing for storage (SHA256)
-- Client secret hashing (bcrypt)
+- Client secret hashing (SHA256 - sufficient for high-entropy secrets)
 - Session token generation for login flow
 """
 
 import hashlib
+import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple, Dict, Any
-
-from passlib.context import CryptContext
-
-# bcrypt context for client secrets
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 # Token prefixes for easy identification
@@ -45,15 +41,18 @@ def generate_client_credentials() -> Tuple[str, str, str]:
 
 
 def hash_client_secret(client_secret: str) -> str:
-    """Hash a client secret using bcrypt.
+    """Hash a client secret using SHA256.
+
+    Note: SHA256 is sufficient for high-entropy secrets like OAuth client secrets.
+    These are randomly generated, not user passwords.
 
     Args:
         client_secret: Plain text client secret
 
     Returns:
-        Bcrypt hash string
+        SHA256 hash string (hex)
     """
-    return pwd_context.hash(client_secret)
+    return hashlib.sha256(client_secret.encode("utf-8")).hexdigest()
 
 
 def verify_client_secret(plain_secret: str, hashed_secret: str) -> bool:
@@ -61,12 +60,13 @@ def verify_client_secret(plain_secret: str, hashed_secret: str) -> bool:
 
     Args:
         plain_secret: Plain text secret to verify
-        hashed_secret: Stored bcrypt hash
+        hashed_secret: Stored SHA256 hash
 
     Returns:
         True if secret matches, False otherwise
     """
-    return pwd_context.verify(plain_secret, hashed_secret)
+    expected_hash = hashlib.sha256(plain_secret.encode("utf-8")).hexdigest()
+    return hmac.compare_digest(expected_hash, hashed_secret)
 
 
 def generate_access_token() -> Tuple[str, str]:
