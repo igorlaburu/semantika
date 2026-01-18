@@ -631,6 +631,11 @@ async def execute_redact_news_rich(
                 from_context_unit=context_units[0]["id"]
             )
 
+        # Final fallback: if still no category, use "general"
+        if not category:
+            category = "general"
+            logger.info("article_category_default", category=category)
+
         result["category"] = category
 
         # IMAGE INHERITANCE LOGIC
