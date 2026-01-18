@@ -954,27 +954,28 @@ async def scrape_articles_from_index(
     from dateutil import parser as date_parser
     
     # Filter articles older than 30 days (generous buffer)
+    # NOTE: With local extraction, dates are often not available. Articles on index
+    # pages are typically recent, so we ALLOW articles without dates. Only reject
+    # if we have a date AND it's too old.
     cutoff_date = datetime.utcnow() - timedelta(days=30)
     articles_filtered = []
-    
+    articles_no_date = 0
+
     for article in articles:
         article_date_str = article.get("date")
         if not article_date_str:
-            # No date - REJECT by default (conservative approach)
-            # Too risky: could be category pages with mixed old/new content
-            logger.debug("article_filtered_no_date",
-                url=article.get("url"),
-                title=article.get("title", "")[:50],
-                reason="LLM could not extract date, rejecting to avoid old content"
-            )
+            # No date - ALLOW (articles on index page are likely recent)
+            # Local extraction rarely finds dates, so this is expected
+            articles_filtered.append(article)
+            articles_no_date += 1
             continue
-        
+
         try:
             article_date = date_parser.parse(article_date_str)
             if article_date.tzinfo is None:
                 # Assume UTC if no timezone
                 article_date = article_date.replace(tzinfo=datetime.now().astimezone().tzinfo)
-            
+
             if article_date.replace(tzinfo=None) >= cutoff_date:
                 articles_filtered.append(article)
             else:
@@ -985,21 +986,23 @@ async def scrape_articles_from_index(
                     age_hours=int((datetime.utcnow() - article_date.replace(tzinfo=None)).total_seconds() / 3600)
                 )
         except Exception as e:
-            # Date parsing failed - REJECT (conservative approach)
-            logger.warn("article_date_parse_failed_rejected",
+            # Date parsing failed - ALLOW (benefit of the doubt for index page articles)
+            logger.debug("article_date_parse_failed_allowed",
                 url=article.get("url"),
                 date_str=article_date_str,
                 error=str(e),
-                reason="Could not parse date, rejecting to avoid old content"
+                reason="Could not parse date, allowing since it's on index page"
             )
-    
-    if len(articles_filtered) < len(articles):
+            articles_filtered.append(article)
+
+    if len(articles_filtered) < len(articles) or articles_no_date > 0:
         logger.info("articles_filtered_by_date",
             total=len(articles),
             kept=len(articles_filtered),
-            filtered_out=len(articles) - len(articles_filtered)
+            filtered_out=len(articles) - len(articles_filtered),
+            articles_without_date=articles_no_date
         )
-    
+
     articles = articles_filtered
     
     semaphore = asyncio.Semaphore(max_concurrent)
