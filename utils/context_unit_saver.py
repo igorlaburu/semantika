@@ -82,6 +82,49 @@ async def check_for_duplicates(
         return None
 
 
+async def check_url_exists(
+    url: str,
+    company_id: str
+) -> Optional[Dict[str, Any]]:
+    """Check if a URL already exists in context units for this company.
+
+    Args:
+        url: URL to check
+        company_id: Company UUID
+
+    Returns:
+        Dict with existing context unit info if found, None otherwise
+    """
+    if not url:
+        return None
+
+    try:
+        supabase = get_supabase_client()
+
+        # Check for existing URL in source_metadata
+        result = supabase.client.table("press_context_units").select(
+            "id, title"
+        ).eq("company_id", company_id).filter(
+            "source_metadata->>url", "eq", url
+        ).limit(1).execute()
+
+        if result.data and len(result.data) > 0:
+            existing = result.data[0]
+            logger.info("url_already_exists",
+                url=url,
+                existing_id=existing['id'],
+                existing_title=existing.get('title', '')[:50]
+            )
+            return existing
+
+        return None
+
+    except Exception as e:
+        logger.error("url_check_error", url=url, error=str(e))
+        # On error, assume no duplicate (safer to have duplicates than miss content)
+        return None
+
+
 async def save_context_unit(
     company_id: str,
     source_id: str,
@@ -100,7 +143,7 @@ async def save_context_unit(
     generate_embedding_flag: bool = True
 ) -> Dict[str, Any]:
     """Universal function to save context unit with embedding and duplicate detection.
-    
+
     Args:
         company_id: Company UUID
         source_id: Source UUID
@@ -116,7 +159,7 @@ async def save_context_unit(
         force_save: Save even if duplicate found
         check_duplicates: Check for duplicates before saving
         generate_embedding_flag: Generate embedding for duplicate detection
-        
+
     Returns:
         Dict with:
         - success: bool
@@ -131,9 +174,28 @@ async def save_context_unit(
         title=title[:50],
         source_type=source_type
     )
-    
+
     try:
         supabase = get_supabase_client()
+
+        # Check for URL duplicate first (faster than embedding check)
+        url = source_metadata.get("url") if source_metadata else None
+        if check_duplicates and url and not force_save:
+            existing = await check_url_exists(url, company_id)
+            if existing:
+                logger.warn("url_duplicate_found_skipping_save",
+                    title=title[:50],
+                    url=url,
+                    duplicate_id=existing['id']
+                )
+                return {
+                    "success": False,
+                    "context_unit_id": None,
+                    "duplicate": True,
+                    "duplicate_id": existing['id'],
+                    "duplicate_title": existing.get('title'),
+                    "duplicate_reason": "url_match"
+                }
         
         # Generate embedding for duplicate detection and semantic search
         embedding = None

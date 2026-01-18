@@ -1542,10 +1542,20 @@ async def ingest_to_context(state: ScraperState) -> ScraperState:
     try:
         context_unit_ids = []
         content_items = state.get("content_items", [])
-        
+
         for i, url_content_unit_id in enumerate(url_content_unit_ids):
             item = content_items[i] if i < len(content_items) else {}
-            
+
+            # Skip items without source_url (would use index page URL as fallback)
+            article_url = item.get("source_url")
+            if not article_url:
+                logger.warn("skipping_item_no_source_url",
+                    url=url,
+                    title=item.get("title", "")[:50],
+                    reason="No source_url, would use index page URL"
+                )
+                continue
+
             result = await save_from_scraping(
                 company_id=state["company_id"],
                 source_id=state["source_id"],
@@ -1557,7 +1567,7 @@ async def ingest_to_context(state: ScraperState) -> ScraperState:
                     "tags": item.get("tags", []),
                     "atomic_statements": item.get("atomic_statements", []),
                     "category": item.get("category"),
-                    "url": item.get("source_url", url),
+                    "url": article_url,
                     "scraped_at": datetime.utcnow().isoformat(),
                     "published_at": item.get("published_at") or item.get("index_date") or state.get("published_at"),
                     "featured_image": item.get("featured_image"),
