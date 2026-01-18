@@ -298,7 +298,7 @@ class TwitterPublisher(BasePublisher):
                 )
                 
         except Exception as e:
-            logger.error("twitter_publish_error", 
+            logger.error("twitter_publish_error",
                 title=title[:50],
                 error=str(e)
             )
@@ -306,7 +306,91 @@ class TwitterPublisher(BasePublisher):
                 success=False,
                 error=f"Twitter publish failed: {str(e)}"
             )
-    
+
+    async def publish_social(
+        self,
+        content: str,
+        url: Optional[str] = None,
+        image_uuid: Optional[str] = None,
+        tags: Optional[list] = None,
+        temp_image_path: Optional[str] = None
+    ) -> PublicationResult:
+        """Publish pre-formatted social media post to Twitter.
+
+        This method receives already-formatted content from the publication flow
+        and posts it directly as a tweet.
+        """
+        try:
+            MAX_TWEET_LENGTH = 280
+
+            # Content is pre-formatted, use directly
+            tweet_content = content
+
+            # Safety: truncate if needed
+            if len(tweet_content) > MAX_TWEET_LENGTH:
+                tweet_content = tweet_content[:MAX_TWEET_LENGTH - 3] + "..."
+                logger.warn("twitter_social_content_truncated",
+                    original_length=len(content),
+                    truncated_to=MAX_TWEET_LENGTH
+                )
+
+            logger.info("twitter_publish_social_start",
+                content_length=len(tweet_content),
+                has_image=bool(temp_image_path),
+                has_url=bool(url)
+            )
+
+            # Upload image if provided
+            media_id = None
+            if temp_image_path:
+                upload_result = await self._upload_media(temp_image_path)
+                if upload_result.get('success'):
+                    media_id = upload_result['media_id']
+                    logger.info("twitter_social_media_uploaded",
+                        media_id=media_id
+                    )
+                else:
+                    logger.warn("twitter_social_media_upload_failed",
+                        error=upload_result.get('error')
+                    )
+
+            # Post the tweet
+            result = await self._post_tweet(tweet_content, reply_to_id=None, media_id=media_id)
+
+            if result.get('success'):
+                tweet_id = result['data']['id']
+                username = self.base_url.replace('@', '') if self.base_url.startswith('@') else self.base_url
+                tweet_url = f"https://twitter.com/{username}/status/{tweet_id}"
+
+                logger.info("twitter_social_published",
+                    tweet_id=tweet_id,
+                    url=tweet_url
+                )
+
+                return PublicationResult(
+                    success=True,
+                    url=tweet_url,
+                    external_id=tweet_id,
+                    metadata={
+                        "platform": "twitter",
+                        "username": username
+                    }
+                )
+            else:
+                error_msg = result.get('error', 'Unknown error')
+                logger.error("twitter_social_post_failed", error=error_msg)
+                return PublicationResult(
+                    success=False,
+                    error=f"Twitter post failed: {error_msg}"
+                )
+
+        except Exception as e:
+            logger.error("twitter_publish_social_error", error=str(e))
+            return PublicationResult(
+                success=False,
+                error=f"Twitter social publish failed: {str(e)}"
+            )
+
     async def _upload_media(self, image_path: str) -> Dict[str, Any]:
         """Upload media to Twitter and return media_id.
 
