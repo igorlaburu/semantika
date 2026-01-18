@@ -278,7 +278,7 @@ async def get_related_articles(
                 'target_embedding': article_result.data["embedding"],
                 'target_company_id': company_id,
                 'target_article_id': article_id,
-                'similarity_threshold': 0.35,
+                'similarity_threshold': 0.5,
                 'max_results': limit
             }
         ).execute()
@@ -890,7 +890,7 @@ async def _add_article_footer(content: str, article_id: str, company_id: str) ->
                         'target_embedding': current_article.data["embedding"],
                         'target_company_id': company_id,
                         'target_article_id': article_id,
-                        'similarity_threshold': 0.35,
+                        'similarity_threshold': 0.5,
                         'max_results': 3
                     }
                 ).execute()
@@ -912,7 +912,7 @@ async def _add_article_footer(content: str, article_id: str, company_id: str) ->
                 else:
                     logger.info("no_related_articles_found_for_footer",
                         article_id=article_id,
-                        threshold=0.35
+                        threshold=0.5
                     )
             else:
                 logger.info("no_embedding_available_for_related_articles",
