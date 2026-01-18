@@ -1055,18 +1055,35 @@ async def publish_article(
                         old_date=existing_date,
                         new_date=publication_date)
 
-            # Extract primary publication URL (first successful publication)
-            published_url = None
+            # Merge publication results with existing publication_status (additive)
+            existing_status = article.get('publication_status') or {}
+            for target_id, result in publication_results.items():
+                existing_status[target_id] = {
+                    **result,
+                    "published_at": datetime.utcnow().isoformat()
+                }
+
+            # Determine published_url: prioritize WordPress, keep existing if set
+            current_published_url = article.get('published_url')
+            new_published_url = current_published_url  # Keep existing by default
+
+            # Only update published_url if:
+            # 1. It's not set yet, OR
+            # 2. New publication is WordPress (prioritize WP URLs for SEO)
             for target_id, result in publication_results.items():
                 if result.get("success") and result.get("url"):
-                    published_url = result["url"]
-                    break  # Use first successful URL as primary
+                    is_wordpress = result.get("platform") == "wordpress"
+                    if not new_published_url or is_wordpress:
+                        new_published_url = result["url"]
+                        if is_wordpress:
+                            break  # WordPress URL found, use it as primary
 
             # Publish immediately
             update_data = {
                 "estado": "publicado",
                 "fecha_publicacion": publication_date,
-                "published_url": published_url,
+                "published_url": new_published_url,
+                "publication_status": existing_status,
                 "published_date": datetime.utcnow().isoformat(),
                 "updated_at": datetime.utcnow().isoformat()
             }
