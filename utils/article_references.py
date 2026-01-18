@@ -55,13 +55,27 @@ def generate_references_section(
             for unit in context_units:
                 source_metadata = unit.get("source_metadata") or {}
                 url = source_metadata.get("url")
-                
-                if not url or url in seen_urls:
+                source_name = source_metadata.get("source_name")
+
+                # Skip if no source info at all
+                if not url and not source_name:
                     continue
-                
-                seen_urls.add(url)
-                domain = extract_domain(url)
-                lines.append(f"[{domain}]({url})")
+
+                # Skip duplicate URLs
+                if url and url in seen_urls:
+                    continue
+
+                if url:
+                    seen_urls.add(url)
+
+                # Use source_name if available, otherwise extract domain from URL
+                display_name = source_name or (extract_domain(url) if url else None)
+
+                if url and display_name:
+                    lines.append(f"[{display_name}]({url})")
+                elif display_name:
+                    # No URL, just show source name (for manual entries without link)
+                    lines.append(display_name)
         
         # Add enrichment references
         if enrichments:

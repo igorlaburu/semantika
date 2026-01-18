@@ -55,13 +55,23 @@ class CreateContextUnitRequest(BaseModel):
     """Request model for creating context unit from text."""
     text: str
     title: Optional[str] = None
-    images: Optional[List[Dict[str, str]]] = Field(
+    source_name: Optional[str] = Field(
         default=None,
-        description="Array of images with base64 data and filename",
+        description="Name of the source (e.g., 'El País', 'Reuters', 'Comunicado de prensa')"
+    )
+    url: Optional[str] = Field(
+        default=None,
+        description="URL of the original source (if available)"
+    )
+    images: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Array of images with base64 data, filename, and optional attribution",
         example=[
             {
                 "base64": "data:image/jpeg;base64,/9j/4AAQ...",
-                "filename": "imagen1.jpg"
+                "filename": "imagen1.jpg",
+                "source_name": "EFE",
+                "attribution": "Foto: EFE/Juan García"
             }
         ]
     )
@@ -804,6 +814,9 @@ async def create_context_unit(
 
             # Optional metadata
             source_metadata={
+                "source_name": request.source_name,  # Source name for references
+                "url": request.url,  # Source URL for references
+                "connector_type": "manual",
                 "manual_entry": True,
                 "client_id": auth["client_id"],
                 "created_via": "api",
@@ -868,11 +881,22 @@ async def create_context_unit(
 
                 # Update context unit metadata with image info
                 if images_saved:
+                    # Build detailed image metadata including attribution
+                    images_metadata = []
+                    for i, img_path in enumerate(images_saved):
+                        img_data = request.images[i] if i < len(request.images) else {}
+                        images_metadata.append({
+                            "index": i,
+                            "filename": Path(img_path).name,
+                            "source_name": img_data.get("source_name"),
+                            "attribution": img_data.get("attribution"),
+                            "source_url": img_data.get("source_url")
+                        })
+
                     image_metadata = {
                         "has_manual_images": True,
                         "image_count": len(images_saved),
-                        "image_sources": ["user_upload"] * len(images_saved),
-                        "cached_images": [Path(p).stem for p in images_saved]  # Remove extension, keep only filename
+                        "images": images_metadata  # Full metadata per image
                     }
 
                     # Update source_metadata
