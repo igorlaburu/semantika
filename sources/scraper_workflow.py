@@ -1107,6 +1107,58 @@ async def scrape_articles_from_index(
                             error=str(e)
                         )
                 
+                # Extract publication date from article content
+                from utils.date_extractor import extract_from_meta_tags, extract_from_css_selectors, extract_date_from_text
+                from datetime import timedelta
+
+                published_at = None
+                date_source = None
+
+                # Try meta tags first (highest confidence)
+                meta_dates = extract_from_meta_tags(article_soup)
+                if meta_dates:
+                    published_at, date_source, _ = meta_dates[0]
+
+                # Try CSS selectors (time tags, .date classes)
+                if not published_at:
+                    css_dates = extract_from_css_selectors(article_soup)
+                    if css_dates:
+                        published_at, date_source, _ = css_dates[0]
+
+                # Try text patterns as fallback
+                if not published_at:
+                    published_at = extract_date_from_text(semantic_content[:2000])
+                    if published_at:
+                        date_source = "text_pattern"
+
+                # Filter out articles older than 7 days or without date
+                max_age_days = 7
+                if published_at:
+                    article_age = (datetime.utcnow() - published_at).days
+                    if article_age > max_age_days:
+                        logger.info("article_skipped_too_old",
+                            url=article_url,
+                            title=title[:50],
+                            published_at=published_at.isoformat(),
+                            age_days=article_age,
+                            max_age_days=max_age_days
+                        )
+                        return None
+                    logger.debug("article_date_extracted",
+                        url=article_url,
+                        published_at=published_at.isoformat(),
+                        date_source=date_source,
+                        age_days=article_age
+                    )
+                else:
+                    # No date found - skip article (can't verify it's recent)
+                    logger.info("article_skipped_no_date",
+                        url=article_url,
+                        title=title[:50],
+                        reason="No publication date found, cannot verify recency"
+                    )
+                    return None
+
                 return {
                     "position": position,
                     "title": result.get("title", article.get("title", "Untitled")),
@@ -1117,6 +1169,8 @@ async def scrape_articles_from_index(
                     "atomic_statements": atomic_statements,
                     "source_url": article_url,
                     "index_date": article.get("date"),
+                    "published_at": published_at.isoformat() if published_at else None,
+                    "date_source": date_source,
                     "featured_image": featured_image,
                     "geo_location": geo_location
                 }
