@@ -230,6 +230,24 @@ async def generate_articles_for_company(
                                 response=result
                             )
 
+                    elif response.status == 400:
+                        # Empty content - LLM failed to generate, skip this unit
+                        logger.warn("article_generation_empty_content",
+                            company_id=company_id,
+                            unit_id=unit['id'],
+                            unit_title=unit.get('title', '')[:50]
+                        )
+                        # Continue to next unit
+
+                    elif response.status == 409:
+                        # Duplicate - article already exists with this context unit
+                        logger.info("article_generation_skipped_duplicate",
+                            company_id=company_id,
+                            unit_id=unit['id'],
+                            unit_title=unit.get('title', '')[:50]
+                        )
+                        # Continue to next unit
+
                     elif response.status == 429:
                         logger.warn("article_generation_rate_limited",
                             company_id=company_id,

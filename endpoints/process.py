@@ -445,10 +445,47 @@ async def process_redact_news_rich(
                 "generated_at": datetime.utcnow().isoformat() + "Z"
             }
 
-            # 8. Generate new article UUID
+            # 8. Validate content is not empty (reject empty articles)
+            if not clean_title or not clean_title.strip():
+                logger.error("save_article_rejected_empty_title",
+                    client_id=auth["client_id"],
+                    context_unit_ids=request.context_unit_ids
+                )
+                raise HTTPException(status_code=400, detail="Cannot save article with empty title")
+
+            if not article_html or len(article_html.strip()) < 50:
+                logger.error("save_article_rejected_empty_content",
+                    client_id=auth["client_id"],
+                    context_unit_ids=request.context_unit_ids,
+                    content_length=len(article_html) if article_html else 0
+                )
+                raise HTTPException(status_code=400, detail="Cannot save article with empty or too short content")
+
+            # 9. Check if articles already exist with these context_unit_ids (prevent duplicates)
+            for cu_id in request.context_unit_ids:
+                existing_article = supabase.client.table("press_articles")\
+                    .select("id, titulo")\
+                    .eq("company_id", company_id)\
+                    .contains("context_unit_ids", [cu_id])\
+                    .limit(1)\
+                    .execute()
+
+                if existing_article.data:
+                    logger.warn("save_article_rejected_duplicate_context_unit",
+                        client_id=auth["client_id"],
+                        context_unit_id=cu_id,
+                        existing_article_id=existing_article.data[0]["id"],
+                        existing_title=existing_article.data[0].get("titulo", "")[:50]
+                    )
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"An article already exists using context unit {cu_id}"
+                    )
+
+            # 10. Generate new article UUID
             article_id = str(uuid_module.uuid4())
 
-            # 9. Prepare article data for save
+            # 11. Prepare article data for save
             article_data = {
                 "id": article_id,
                 "company_id": company_id,
@@ -467,7 +504,7 @@ async def process_redact_news_rich(
                 "updated_at": datetime.utcnow().isoformat()
             }
 
-            # 10. Get style_id (from request or default)
+            # 12. Get style_id (from request or default)
             if request.style_id:
                 article_data["style_id"] = request.style_id
             else:
@@ -481,7 +518,7 @@ async def process_redact_news_rich(
                 if default_style.data:
                     article_data["style_id"] = default_style.data["id"]
 
-            # 11. Save to database
+            # 13. Save to database
             save_result = supabase.client.table("press_articles")\
                 .insert(article_data)\
                 .execute()
@@ -491,7 +528,7 @@ async def process_redact_news_rich(
 
             saved_article = save_result.data[0]
 
-            # 12. Generate embedding for article
+            # 14. Generate embedding for article
             if clean_title and clean_summary:
                 try:
                     from utils.embedding_generator import generate_article_embedding
