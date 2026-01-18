@@ -592,8 +592,225 @@ async def parse_multi_noticia(state: ScraperState, news_blocks, soup: BeautifulS
         await parse_single_article(state, page_title, semantic_content)
 
 
+def extract_news_links_local(html: str, base_url: str) -> Dict[str, Any]:
+    """Extract news article links from index page using local heuristics (NO LLM).
+
+    This function replaces the expensive LLM-based extraction with BeautifulSoup
+    heuristics, saving ~9,000 tokens per call.
+
+    Heuristics used:
+    1. Find links inside article containers (<article>, .news, .post, .entry, etc.)
+    2. Filter by URL patterns (dates, /noticias/, /news/, /actualidad/, etc.)
+    3. Extract title from link text or nearby headings
+    4. Exclude navigation, footer, sidebar links
+
+    Args:
+        html: HTML content of index page
+        base_url: Base URL for making relative URLs absolute
+
+    Returns:
+        Dict with articles: [{"title": "...", "url": "...", "date": "..."}, ...]
+    """
+    from urllib.parse import urljoin, urlparse
+    import re
+
+    soup = BeautifulSoup(html, 'html.parser')
+
+    # Remove noise: nav, footer, sidebar, header, scripts, styles
+    for tag in soup(['script', 'style', 'nav', 'footer', 'aside', 'header']):
+        tag.decompose()
+
+    # Also remove common navigation/menu classes
+    for selector in ['.menu', '.nav', '.navigation', '.sidebar', '.footer', '.header',
+                     '#menu', '#nav', '#navigation', '#sidebar', '#footer', '#header',
+                     '.breadcrumb', '.pagination', '.widget', '.social', '.share']:
+        for el in soup.select(selector):
+            el.decompose()
+
+    articles = []
+    seen_urls = set()
+
+    # Get base domain for filtering
+    base_domain = urlparse(base_url).netloc
+
+    # Patterns that indicate news article URLs
+    news_url_patterns = [
+        r'/\d{4}/\d{2}/',           # /2026/01/
+        r'/\d{4}-\d{2}-\d{2}/',     # /2026-01-18/
+        r'/noticias?/',              # /noticia/ or /noticias/
+        r'/news/',
+        r'/actualidad/',
+        r'/albisteak/',              # Basque for news
+        r'/berriak/',                # Basque for news
+        r'/articulo/',
+        r'/article/',
+        r'/post/',
+        r'/entrada/',
+        r'/comunicado/',
+        r'/nota-de-prensa/',
+        r'/press-release/',
+        r'/-[a-z0-9]+-\d+',         # slug-with-id pattern
+        r'/[a-z0-9-]+-\d{5,}',      # slug-with-long-id
+    ]
+    news_pattern = re.compile('|'.join(news_url_patterns), re.IGNORECASE)
+
+    # Patterns to EXCLUDE (navigation, categories, tags, etc.)
+    exclude_patterns = [
+        r'/categoria/',
+        r'/category/',
+        r'/tag/',
+        r'/etiqueta/',
+        r'/autor/',
+        r'/author/',
+        r'/page/\d+',
+        r'/feed/',
+        r'/rss/',
+        r'#',
+        r'\?',                       # Query strings often indicate filters
+        r'/wp-content/',
+        r'/wp-admin/',
+        r'javascript:',
+        r'mailto:',
+        r'/login',
+        r'/register',
+        r'/contacto',
+        r'/contact',
+        r'/about',
+        r'/acerca',
+        r'/legal',
+        r'/privacy',
+        r'/cookies',
+    ]
+    exclude_pattern = re.compile('|'.join(exclude_patterns), re.IGNORECASE)
+
+    # Strategy 1: Find links inside article containers
+    article_containers = soup.select('article, .news-item, .post, .entry, .noticia, .article-item, '
+                                     '.news-card, .card, .item, .list-item, [class*="news"], '
+                                     '[class*="article"], [class*="post"], [class*="noticia"]')
+
+    for container in article_containers:
+        # Find the main link in this container
+        link = container.find('a', href=True)
+        if not link:
+            continue
+
+        href = link.get('href', '')
+        if not href or href == '#':
+            continue
+
+        # Make absolute URL
+        full_url = urljoin(base_url, href)
+
+        # Skip if already seen
+        if full_url in seen_urls:
+            continue
+
+        # Skip external links
+        if urlparse(full_url).netloc != base_domain:
+            continue
+
+        # Skip excluded patterns
+        if exclude_pattern.search(full_url):
+            continue
+
+        # Get title from link text, heading, or container
+        title = ''
+
+        # Try to find heading in container
+        heading = container.find(['h1', 'h2', 'h3', 'h4', 'h5'])
+        if heading:
+            title = heading.get_text(strip=True)
+
+        # Fallback to link text
+        if not title:
+            title = link.get_text(strip=True)
+
+        # Skip if title too short or looks like navigation
+        if len(title) < 15 or title.lower() in ['leer más', 'read more', 'ver más', 'more', 'seguir leyendo']:
+            # Try getting title from link's title attribute
+            title = link.get('title', '') or link.get('aria-label', '')
+
+        if len(title) < 10:
+            continue
+
+        # Try to extract date from container
+        date_str = None
+        time_tag = container.find('time')
+        if time_tag:
+            date_str = time_tag.get('datetime', '') or time_tag.get_text(strip=True)
+
+        articles.append({
+            'title': title[:200],  # Limit title length
+            'url': full_url,
+            'date': date_str
+        })
+        seen_urls.add(full_url)
+
+    # Strategy 2: If few articles found, scan all links with news URL patterns
+    if len(articles) < 3:
+        all_links = soup.find_all('a', href=True)
+
+        for link in all_links:
+            href = link.get('href', '')
+            if not href or href == '#':
+                continue
+
+            full_url = urljoin(base_url, href)
+
+            if full_url in seen_urls:
+                continue
+
+            # Must match news pattern
+            if not news_pattern.search(full_url):
+                continue
+
+            # Skip excluded patterns
+            if exclude_pattern.search(full_url):
+                continue
+
+            # Skip external links
+            if urlparse(full_url).netloc != base_domain:
+                continue
+
+            title = link.get_text(strip=True) or link.get('title', '') or link.get('aria-label', '')
+
+            if len(title) < 10:
+                continue
+
+            articles.append({
+                'title': title[:200],
+                'url': full_url,
+                'date': None
+            })
+            seen_urls.add(full_url)
+
+    # Deduplicate by URL and sort by likely recency (URLs with dates first)
+    unique_articles = []
+    for article in articles:
+        if article['url'] not in [a['url'] for a in unique_articles]:
+            unique_articles.append(article)
+
+    # Sort: articles with dates in URL first, then by title length (longer = more descriptive)
+    def sort_key(a):
+        has_date = bool(re.search(r'/\d{4}/', a['url']))
+        return (not has_date, -len(a['title']))
+
+    unique_articles.sort(key=sort_key)
+
+    logger.info("extract_news_links_local_completed",
+        base_url=base_url,
+        articles_found=len(unique_articles),
+        from_containers=len([a for a in articles if a in unique_articles[:len(article_containers)]]),
+        from_url_patterns=len(unique_articles) - len([a for a in articles if a in unique_articles[:len(article_containers)]])
+    )
+
+    return {"articles": unique_articles[:15]}  # Return max 15 articles
+
+
 async def parse_index(state: ScraperState, soup: BeautifulSoup):
-    """Parse index page using Groq to extract article links, then scrape them.
+    """Parse index page to extract article links, then scrape them.
+
+    Uses local heuristics first (FREE), falls back to LLM only if needed.
 
     Args:
         state: Workflow state
@@ -609,30 +826,62 @@ async def parse_index(state: ScraperState, soup: BeautifulSoup):
         company_id=company_id
     )
 
-    # Use Groq to intelligently extract news links
-    llm_client = get_llm_client()
-
     try:
-        logger.info("parse_index_calling_extract_news_links", url=url)
+        # STEP 1: Try LOCAL extraction first (FREE, no LLM tokens)
+        logger.info("parse_index_trying_local_extraction", url=url)
 
-        result = await llm_client.extract_news_links(
-            html=html,
-            base_url=url,
-            organization_id=company_id
-        )
+        result = extract_news_links_local(html, url)
+        articles = result.get("articles", [])
+        extraction_method = "local"
 
-        logger.info("parse_index_extract_result",
+        logger.info("parse_index_local_result",
             url=url,
-            result_type=type(result).__name__,
-            result_keys=list(result.keys()) if isinstance(result, dict) else "not_dict",
-            articles_raw_count=len(result.get("articles", [])) if isinstance(result, dict) else 0
+            articles_found=len(articles),
+            articles_preview=[{
+                "title": a.get("title", "")[:50],
+                "url": a.get("url", "")[:80]
+            } for a in articles[:3]]
         )
 
-        articles = result.get("articles", [])[:10]  # Limit to 10 most recent
+        # STEP 2: If local extraction found < 3 articles, fall back to LLM
+        if len(articles) < 3:
+            logger.info("parse_index_local_insufficient_fallback_to_llm",
+                url=url,
+                local_articles=len(articles),
+                reason="Less than 3 articles found locally, trying LLM"
+            )
+
+            llm_client = get_llm_client()
+            llm_result = await llm_client.extract_news_links(
+                html=html,
+                base_url=url,
+                organization_id=company_id
+            )
+
+            llm_articles = llm_result.get("articles", [])
+
+            # Use LLM result only if it found more articles
+            if len(llm_articles) > len(articles):
+                articles = llm_articles
+                extraction_method = "llm_fallback"
+                logger.info("parse_index_using_llm_result",
+                    url=url,
+                    llm_articles=len(llm_articles),
+                    local_articles=len(result.get("articles", []))
+                )
+            else:
+                logger.info("parse_index_keeping_local_result",
+                    url=url,
+                    reason="LLM did not find more articles"
+                )
+
+        # Limit to 10 most recent
+        articles = articles[:10]
 
         logger.info("index_links_extracted",
             url=url,
             articles_found=len(articles),
+            extraction_method=extraction_method,
             articles_preview=[{
                 "title": a.get("title", "")[:50],
                 "url": a.get("url", "")[:80]
