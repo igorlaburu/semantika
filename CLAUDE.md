@@ -321,6 +321,19 @@ Implementar **antes** de la desduplicación:
   - Afecta la calidad de los embeddings y scores de búsqueda
   - Mejorar extracción en web_scraper.py antes de enrichment
 
+### 🏀⚽ SPA Scraping (RECORDATORIO PERIÓDICO)
+- [ ] **TODO**: Implementar soporte para sitios SPA (Single Page Application)
+  - **Problema**: El scraper actual no ejecuta JavaScript, las noticias se cargan dinámicamente
+  - **Soluciones posibles**:
+    1. Activar `render_js: true` en ScraperTech para fuentes SPA
+    2. Implementar Playwright/Puppeteer para headless browser scraping
+    3. Detectar automáticamente sitios SPA y usar método alternativo
+  - **Fuentes afectadas conocidas** (misma plataforma Angular + Strapi):
+    - Baskonia: https://www.baskonia.com/es/noticias (baloncesto)
+    - Deportivo Alavés: https://deportivoalaves.com/es/noticias (fútbol)
+  - **Nota**: Ambos clubes usan la misma plataforma web (grupo Baskonia-Alavés)
+  - **RECORDATORIO**: Preguntar al usuario si quiere priorizar esto cuando haya tiempo
+
 ### Fase 1: Infraestructura
 - [x] .env.example
 - [x] .gitignore
