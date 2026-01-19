@@ -242,6 +242,10 @@ async def execute_source_task(source: Dict[str, Any]):
                 asyncio.create_task(pool_checker_job())
             elif system_job == "ttl_cleanup":
                 asyncio.create_task(cleanup_old_data())
+            elif system_job == "event_ingest":
+                # Event ingestion - pass geographic_area from config
+                geographic_area = config.get("geographic_area", "alava")
+                asyncio.create_task(event_ingest_job(company_id, geographic_area))
             else:
                 logger.error("unknown_system_job",
                     source_id=source_id,
@@ -346,16 +350,53 @@ async def pool_ingestion_job():
 async def pool_checker_job():
     """Pool checker job - checks one source in rotation (v2 with circuit breaker)."""
     logger.info("starting_pool_checker_job")
-    
+
     try:
         from sources.pool_checker_v2 import check_next_sources
-        
+
         await check_next_sources()
-        
+
         logger.info("pool_checker_job_completed")
-    
+
     except Exception as e:
         logger.error("pool_checker_job_error", error=str(e))
+
+
+async def event_ingest_job(company_id: str, geographic_area: str):
+    """Event ingestion job - scrapes event sources and updates context_events.
+
+    Args:
+        company_id: Company UUID (pool UUID for shared events)
+        geographic_area: Geographic area code (e.g., 'alava', 'bizkaia')
+    """
+    logger.info("starting_event_ingest_job",
+        company_id=company_id,
+        geographic_area=geographic_area
+    )
+
+    try:
+        from sources.event_ingest import ingest_events_for_area
+
+        result = await ingest_events_for_area(company_id, geographic_area)
+
+        if result.get("success"):
+            logger.info("event_ingest_job_completed",
+                geographic_area=geographic_area,
+                sources_processed=result.get("sources_processed"),
+                events_extracted=result.get("events_extracted"),
+                dates_with_events=result.get("dates_with_events")
+            )
+        else:
+            logger.error("event_ingest_job_failed",
+                geographic_area=geographic_area,
+                error=result.get("message")
+            )
+
+    except Exception as e:
+        logger.error("event_ingest_job_error",
+            geographic_area=geographic_area,
+            error=str(e)
+        )
 
 
 async def schedule_sources(scheduler: AsyncIOScheduler):

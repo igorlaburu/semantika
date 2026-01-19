@@ -262,6 +262,121 @@ Extract and respond in JSON:
             article_structure_prompt | self.llm_sonnet | JsonOutputParser()
         )
 
+        # 8. Event Extraction Chain (for calendar/agenda pages)
+        extract_events_prompt = ChatPromptTemplate.from_messages([
+            ("system", """Extractor de eventos de agenda.
+Fecha/hora actual: {current_datetime_utc} UTC / {current_datetime_local} (España).
+Hoy es {today_weekday}, {today_date}."""),
+            ("user", """Extrae TODOS los eventos de esta página de agenda/calendario.
+
+INTERPRETACIÓN DE FECHAS:
+- "Hoy" = {today_date}
+- "Mañana" = {tomorrow_date}
+- "Pasado mañana" = {day_after_tomorrow}
+- "Este sábado/domingo" = próximo sábado/domingo desde hoy
+- "Próximo viernes" = el viernes de esta semana o la siguiente
+- Fechas relativas: calcular desde {today_date}
+- Si no hay año, asumir {current_year}
+
+IMPORTANTE:
+- Extrae SOLO eventos FUTUROS (desde {today_date} en adelante)
+- Ignora eventos pasados
+- Si un evento no tiene fecha clara, intenta inferirla del contexto
+- Si no puedes determinar la fecha, usa null para event_date
+
+Para CADA evento extrae:
+1. event_date: Fecha del evento en formato YYYY-MM-DD
+2. start_time: Hora inicio "HH:MM" (24h) o null
+3. end_time: Hora fin "HH:MM" o null
+4. title: Título del evento (obligatorio)
+5. location: Lugar/dirección o null
+6. description: Descripción breve (1-2 frases)
+7. detail: Información adicional (precio, edad, etc.) o null
+8. img_url: URL completa de imagen del evento o null
+9. category: cultura|deporte|institucional|ocio|musica|teatro|cine|exposicion|taller|conferencia|infantil|gastronomia|feria|otro
+10. external_url: URL a la página del evento o null
+11. price_info: Información de precio ("Gratis", "5€", "3.50€ general") o null
+
+HTML de la página:
+{html}
+
+URL base (para URLs relativas): {base_url}
+
+Responde en JSON:
+{{"events": [
+  {{
+    "event_date": "2025-01-25",
+    "start_time": "19:00",
+    "end_time": "21:00",
+    "title": "Concierto de jazz",
+    "location": "Artium, Vitoria-Gasteiz",
+    "description": "Concierto del trío de jazz local",
+    "detail": "Entrada general 5€, socios gratis",
+    "img_url": "https://example.com/image.jpg",
+    "category": "musica",
+    "external_url": "https://example.com/evento/123",
+    "price_info": "5€ general, gratis socios"
+  }},
+  ...
+]}}
+
+Si NO hay eventos válidos: {{"events": []}}""")
+        ])
+
+        self.extract_events_chain = RunnableSequence(
+            extract_events_prompt | self.llm_sonnet | JsonOutputParser()
+        )
+
+        # 9. Event Merge Chain (LLM as intelligent editor)
+        merge_events_prompt = ChatPromptTemplate.from_messages([
+            ("system", """Eres un editor de agenda de eventos. Tu tarea es fusionar dos listas de eventos del mismo día de forma inteligente.
+
+REGLAS DE FUSIÓN:
+1. IDENTIFICAR DUPLICADOS: Dos eventos son el mismo si tienen título muy similar O misma hora+lugar
+2. ACTUALIZAR: Si un evento nuevo tiene más información que el existente, actualiza los campos
+3. CONSERVAR: Mantén eventos existentes que NO aparezcan en los nuevos (pueden ser de otras fuentes)
+4. PRESERVAR IDs: Usa el ID del evento existente cuando fusiones; genera nuevo UUID solo para eventos nuevos
+5. LIMPIAR: Elimina eventos claramente duplicados
+
+Fecha del día: {event_date}"""),
+            ("user", """EVENTOS EXISTENTES (ya guardados en BD):
+{existing_events_json}
+
+EVENTOS NUEVOS (recién scrapeados):
+{new_events_json}
+
+Devuelve la lista FUSIONADA de eventos para este día.
+- Conserva eventos existentes que no aparezcan en los nuevos
+- Actualiza eventos existentes si los nuevos tienen más info
+- Añade eventos nuevos que no estén duplicados
+- Preserva los IDs de eventos existentes
+
+JSON de salida:
+{{"events": [
+  {{
+    "id": "uuid-existente-o-nuevo",
+    "event_date": "{event_date}",
+    "start_time": "HH:MM",
+    "end_time": "HH:MM",
+    "title": "...",
+    "location": "...",
+    "description": "...",
+    "detail": "...",
+    "img_url": "...",
+    "category": "...",
+    "external_url": "...",
+    "price_info": "...",
+    "source": "scraping|manual",
+    "status": "active"
+  }},
+  ...
+]}}""")
+        ])
+
+        self.merge_events_chain = RunnableSequence(
+            merge_events_prompt | self.llm_sonnet | JsonOutputParser()
+        )
+
     async def detect_pii(self, text: str) -> Dict[str, Any]:
         """Detect PII in text using LangChain chain."""
         try:
@@ -1433,6 +1548,108 @@ Formato exacto:
                 "explanation": f"Error: {str(e)}",
                 "word_count_change": 0
             }
+
+    async def extract_events(self, html: str, base_url: str) -> Dict[str, Any]:
+        """Extract events from calendar/agenda HTML page.
+
+        Args:
+            html: HTML content of the events page
+            base_url: Base URL for resolving relative links
+
+        Returns:
+            Dict with 'events' list containing extracted event data
+        """
+        from datetime import datetime, timedelta
+        import pytz
+
+        try:
+            # Calculate all date context for the LLM
+            spain_tz = pytz.timezone('Europe/Madrid')
+            now_utc = datetime.utcnow()
+            now_local = datetime.now(spain_tz)
+
+            today = now_local.date()
+            tomorrow = today + timedelta(days=1)
+            day_after = today + timedelta(days=2)
+
+            # Spanish weekday names
+            weekdays_es = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo']
+            today_weekday = weekdays_es[today.weekday()]
+
+            # Prepare context variables
+            context = {
+                "current_datetime_utc": now_utc.strftime("%Y-%m-%d %H:%M"),
+                "current_datetime_local": now_local.strftime("%Y-%m-%d %H:%M"),
+                "today_date": today.strftime("%Y-%m-%d"),
+                "today_weekday": today_weekday,
+                "tomorrow_date": tomorrow.strftime("%Y-%m-%d"),
+                "day_after_tomorrow": day_after.strftime("%Y-%m-%d"),
+                "current_year": today.year,
+                "html": html[:15000],  # Limit HTML size
+                "base_url": base_url
+            }
+
+            result = await self.extract_events_chain.ainvoke(context)
+
+            events = result.get("events", [])
+            logger.info("events_extracted",
+                count=len(events),
+                base_url=base_url
+            )
+
+            return result
+
+        except Exception as e:
+            _log_llm_error("extract_events", e)
+            return {"events": []}
+
+    async def merge_events(
+        self,
+        existing_events: List[Dict[str, Any]],
+        new_events: List[Dict[str, Any]],
+        event_date: str
+    ) -> Dict[str, Any]:
+        """Intelligently merge existing and new events using LLM.
+
+        The LLM acts as an editor that:
+        - Identifies duplicates (same event with different wording)
+        - Updates event details if new info is available
+        - Keeps existing events not in new scrape
+        - Returns clean merged list
+
+        Args:
+            existing_events: Current events for the day
+            new_events: Newly scraped events
+            event_date: Date string (YYYY-MM-DD)
+
+        Returns:
+            Dict with 'events' list containing merged event data
+        """
+        import json
+
+        try:
+            context = {
+                "event_date": event_date,
+                "existing_events_json": json.dumps(existing_events, ensure_ascii=False, indent=2),
+                "new_events_json": json.dumps(new_events, ensure_ascii=False, indent=2)
+            }
+
+            result = await self.merge_events_chain.ainvoke(context)
+
+            merged = result.get("events", [])
+            logger.info("events_merged",
+                event_date=event_date,
+                existing_count=len(existing_events),
+                new_count=len(new_events),
+                merged_count=len(merged)
+            )
+
+            return result
+
+        except Exception as e:
+            _log_llm_error("merge_events", e)
+            # Fallback: return existing + new without deduplication
+            return {"events": existing_events + new_events}
 
 
 # Global LLM client instance
