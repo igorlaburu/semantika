@@ -447,7 +447,7 @@ class FacebookPublisher(BasePublisher):
             'client_id': app_id,
             'redirect_uri': redirect_uri,
             'state': state,
-            'scope': 'pages_manage_posts,pages_read_engagement,pages_show_list,public_profile',
+            'scope': 'pages_manage_posts,pages_read_engagement,pages_show_list,public_profile,business_management',
             'response_type': 'code'
         }
         return f"https://www.facebook.com/{GRAPH_API_VERSION}/dialog/oauth?{urlencode(params)}"
