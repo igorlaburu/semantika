@@ -1600,13 +1600,16 @@ async def ingest_to_context(state: ScraperState) -> ScraperState:
         for i, url_content_unit_id in enumerate(url_content_unit_ids):
             item = content_items[i] if i < len(content_items) else {}
 
-            # Skip items without source_url (would use index page URL as fallback)
-            article_url = item.get("source_url")
-            if not article_url:
+            # Get article URL: use source_url if from index, otherwise use main URL
+            article_url = item.get("source_url") or url
+
+            # Only skip if this is from an index page AND has no source_url
+            # (single article scrapes won't have source_url but that's OK - use main url)
+            if state.get("url_type") == "index" and not item.get("source_url"):
                 logger.warn("skipping_item_no_source_url",
                     url=url,
                     title=item.get("title", "")[:50],
-                    reason="No source_url, would use index page URL"
+                    reason="No source_url for index page item"
                 )
                 continue
 
