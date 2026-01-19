@@ -363,6 +363,60 @@ async def update_article(
         raise HTTPException(status_code=500, detail="Failed to update article")
 
 
+@router.delete("/api/v1/articles/{article_id}")
+async def delete_article(
+    article_id: str,
+    company_id: str = Depends(get_company_id_from_auth)
+) -> Dict:
+    """
+    Delete an article.
+
+    **Authentication**: Accepts either JWT (Authorization: Bearer) or API Key (X-API-Key)
+
+    **Note**: This is a hard delete. The article cannot be recovered.
+    """
+    try:
+        supabase = get_supabase_client()
+
+        # First verify the article exists and belongs to this company
+        check_result = supabase.client.table("press_articles")\
+            .select("id, titulo")\
+            .eq("id", article_id)\
+            .eq("company_id", company_id)\
+            .execute()
+
+        if not check_result.data or len(check_result.data) == 0:
+            raise HTTPException(status_code=404, detail="Article not found")
+
+        article_title = check_result.data[0].get("titulo", "Unknown")
+
+        # Delete the article
+        result = supabase.client.table("press_articles")\
+            .delete()\
+            .eq("id", article_id)\
+            .eq("company_id", company_id)\
+            .execute()
+
+        logger.info(
+            "article_deleted",
+            article_id=article_id,
+            company_id=company_id,
+            title=article_title[:50]
+        )
+
+        return {
+            "success": True,
+            "message": f"Article '{article_title}' deleted successfully",
+            "article_id": article_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("delete_article_error", error=str(e), article_id=article_id)
+        raise HTTPException(status_code=500, detail="Failed to delete article")
+
+
 # ============================================
 # PUBLICATION HELPERS
 # ============================================
