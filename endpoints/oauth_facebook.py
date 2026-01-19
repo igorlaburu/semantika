@@ -576,3 +576,124 @@ async def facebook_deletion_status(
     """
     return HTMLResponse(content=html_content)
 
+
+# =============================================================================
+# BUSINESS MANAGEMENT ENDPOINT (For Facebook App Review)
+# =============================================================================
+# This endpoint demonstrates the business_management permission.
+# It's required to pass Facebook App Review, even if not used in production.
+# DO NOT DELETE - may be needed for future App Reviews.
+# =============================================================================
+
+@router.get("/businesses")
+async def facebook_get_businesses(
+    company_id: str = Depends(get_company_id_from_auth)
+) -> Dict:
+    """
+    Get Facebook Business accounts for the connected user.
+
+    This endpoint demonstrates the business_management permission usage.
+    It calls GET /me/businesses on the Facebook Graph API.
+
+    Required for Facebook App Review of business_management permission.
+
+    Returns:
+        {
+            "success": true,
+            "businesses": [
+                {
+                    "id": "123456789",
+                    "name": "My Business",
+                    "primary_page": {...}
+                }
+            ]
+        }
+    """
+    import httpx
+
+    try:
+        supabase = get_supabase_client()
+
+        # Get Facebook credentials for this company
+        result = supabase.client.table('press_publication_targets')\
+            .select('credentials_encrypted')\
+            .eq('company_id', company_id)\
+            .eq('platform_type', 'facebook')\
+            .eq('is_active', True)\
+            .execute()
+
+        if not result.data:
+            return {
+                "success": False,
+                "error": "no_facebook_connection",
+                "message": "No Facebook account connected. Please connect your Facebook account first."
+            }
+
+        # Decrypt credentials to get user access token
+        from utils.credential_manager import CredentialManager
+        credentials = CredentialManager.decrypt_credentials(
+            bytes.fromhex(result.data[0]['credentials_encrypted'])
+        )
+
+        user_access_token = credentials.get('user_access_token')
+        if not user_access_token:
+            return {
+                "success": False,
+                "error": "no_access_token",
+                "message": "User access token not found in credentials."
+            }
+
+        # Call Facebook Graph API to get businesses
+        # This demonstrates the business_management permission
+        graph_api_version = "v21.0"
+        url = f"https://graph.facebook.com/{graph_api_version}/me/businesses"
+        params = {
+            "access_token": user_access_token,
+            "fields": "id,name,primary_page,created_time,verification_status"
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, params=params)
+            data = response.json()
+
+        if "error" in data:
+            error_msg = data["error"].get("message", "Unknown error")
+            error_code = data["error"].get("code", 0)
+
+            logger.error("facebook_businesses_api_error",
+                company_id=company_id,
+                error_code=error_code,
+                error_message=error_msg
+            )
+
+            return {
+                "success": False,
+                "error": "facebook_api_error",
+                "error_code": error_code,
+                "message": error_msg
+            }
+
+        businesses = data.get("data", [])
+
+        logger.info("facebook_businesses_fetched",
+            company_id=company_id,
+            businesses_count=len(businesses)
+        )
+
+        return {
+            "success": True,
+            "businesses": businesses,
+            "paging": data.get("paging")
+        }
+
+    except Exception as e:
+        logger.error("facebook_businesses_error",
+            company_id=company_id,
+            error=str(e)
+        )
+        return {
+            "success": False,
+            "error": "internal_error",
+            "message": str(e)
+        }
+
