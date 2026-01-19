@@ -249,7 +249,53 @@ class IngestionFlow:
                     "reason": "insufficient_statements",
                     "statement_count": statement_count
                 }
-            
+
+            # Date filter: reject articles older than 7 days or without dates
+            max_age_days = 7
+            published_at_str = item.get("published_at")
+            if published_at_str:
+                try:
+                    from dateutil import parser as date_parser
+                    published_at = date_parser.parse(published_at_str)
+                    if published_at.tzinfo:
+                        published_at = published_at.replace(tzinfo=None)
+                    article_age = (datetime.utcnow() - published_at).days
+                    if article_age > max_age_days:
+                        logger.info("item_rejected_too_old",
+                            title=title[:50],
+                            published_at=published_at_str,
+                            age_days=article_age,
+                            max_age_days=max_age_days
+                        )
+                        return {
+                            "success": False,
+                            "reason": "too_old",
+                            "age_days": article_age
+                        }
+                except Exception as e:
+                    logger.warn("item_date_parse_failed",
+                        title=title[:50],
+                        published_at=published_at_str,
+                        error=str(e)
+                    )
+                    # Can't parse date - reject to be safe
+                    return {
+                        "success": False,
+                        "reason": "unparseable_date",
+                        "published_at": published_at_str
+                    }
+            else:
+                # No date - reject (can't verify recency)
+                logger.info("item_rejected_no_date",
+                    title=title[:50],
+                    url=url,
+                    reason="No publication date found"
+                )
+                return {
+                    "success": False,
+                    "reason": "no_date"
+                }
+
             # Normalize metadata to standard schema for pool sources
             metadata = normalize_source_metadata(
                 url=url,
