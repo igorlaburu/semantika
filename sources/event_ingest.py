@@ -208,7 +208,7 @@ async def get_existing_events(
         Tuple of (record_id, events_list) or (None, []) if not found
     """
     try:
-        result = supabase.table('context_events').select('id, events').eq(
+        result = supabase.client.table('context_events').select('id, events').eq(
             'company_id', company_id
         ).eq(
             'geographic_area', geographic_area
@@ -304,7 +304,7 @@ async def save_events_for_date(
 
         if record_id:
             # Update existing record
-            supabase.table('context_events').update({
+            supabase.client.table('context_events').update({
                 'events': events,
                 'last_source': source_name,
                 'updated_at': now
@@ -316,7 +316,7 @@ async def save_events_for_date(
             )
         else:
             # Insert new record
-            supabase.table('context_events').insert({
+            supabase.client.table('context_events').insert({
                 'company_id': company_id,
                 'geographic_area': geographic_area,
                 'event_date': event_date,
@@ -375,7 +375,7 @@ async def update_source_hashes(
             })
         else:
             # Increment failure counters
-            current = supabase.table('event_sources').select(
+            current = supabase.client.table('event_sources').select(
                 'consecutive_failures, total_failures'
             ).eq('source_id', source_id).execute()
 
@@ -392,7 +392,7 @@ async def update_source_hashes(
                     'circuit_breaker_open': circuit_open
                 })
 
-        supabase.table('event_sources').update(update_data).eq('source_id', source_id).execute()
+        supabase.client.table('event_sources').update(update_data).eq('source_id', source_id).execute()
 
     except Exception as e:
         logger.error("source_hashes_update_error", source_id=source_id, error=str(e))
@@ -537,7 +537,7 @@ async def ingest_events_for_area(
     llm_client = get_llm_client()
 
     # Load active event sources
-    sources_response = supabase.table('event_sources').select('*').eq(
+    sources_response = supabase.client.table('event_sources').select('*').eq(
         'company_id', company_id
     ).eq(
         'geographic_area', geographic_area
