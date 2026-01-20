@@ -64,6 +64,12 @@ async def list_articles(
         total = result.count if hasattr(result, 'count') else 0
         items = result.data or []
 
+        # Extract image_prompt from working_json for each article
+        for article in items:
+            if article.get("working_json") and isinstance(article["working_json"], dict):
+                if "image_prompt" in article["working_json"]:
+                    article["image_prompt"] = article["working_json"]["image_prompt"]
+
         return {
             "items": items,
             "total": total,
@@ -100,7 +106,13 @@ async def get_article_by_slug(
         if not result.data:
             raise HTTPException(status_code=404, detail="Article not found")
 
-        return result.data
+        # Extract image_prompt from working_json if available
+        article = result.data
+        if article.get("working_json") and isinstance(article["working_json"], dict):
+            if "image_prompt" in article["working_json"]:
+                article["image_prompt"] = article["working_json"]["image_prompt"]
+
+        return article
 
     except HTTPException:
         raise
@@ -227,7 +239,13 @@ async def get_article(
         if not result.data:
             raise HTTPException(status_code=404, detail="Article not found")
 
-        return result.data
+        # Extract image_prompt from working_json if available
+        article = result.data
+        if article.get("working_json") and isinstance(article["working_json"], dict):
+            if "image_prompt" in article["working_json"]:
+                article["image_prompt"] = article["working_json"]["image_prompt"]
+
+        return article
 
     except HTTPException:
         raise
