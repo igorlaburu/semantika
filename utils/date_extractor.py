@@ -153,9 +153,9 @@ def extract_from_meta_tags(soup: BeautifulSoup) -> List[Tuple[datetime, str, flo
         if tag and tag.get('content'):
             dt = parse_date_string(tag['content'])
             if dt and dt <= now:
-                dates.append((dt, f'meta_tag:{name}', 0.95))
-                logger.debug("date_from_meta_tag", 
-                    meta_name=name, 
+                dates.append((dt, 'meta_tag', 0.95))
+                logger.debug("date_from_meta_tag",
+                    meta_name=name,
                     date=dt.isoformat()
                 )
             elif dt and dt > now:
@@ -198,7 +198,7 @@ def extract_from_jsonld(soup: BeautifulSoup) -> List[Tuple[datetime, str, float]
                     if key in item:
                         dt = parse_date_string(item[key])
                         if dt and dt <= now:
-                            dates.append((dt, f'jsonld:{key}', 0.95))
+                            dates.append((dt, 'jsonld', 0.95))
                             logger.debug("date_from_jsonld",
                                 key=key,
                                 date=dt.isoformat()
@@ -249,7 +249,7 @@ def extract_from_url(url: str) -> List[Tuple[datetime, str, float]]:
                 
                 # Sanity check: date shouldn't be in the future
                 if dt <= datetime.now():
-                    dates.append((dt, f'url_pattern:{pattern}', 0.80))
+                    dates.append((dt, 'url_pattern', 0.80))
                     logger.debug("date_from_url",
                         pattern=pattern,
                         date=dt.isoformat()
@@ -300,7 +300,7 @@ def extract_from_css_selectors(soup: BeautifulSoup) -> List[Tuple[datetime, str,
                 if date_str:
                     dt = parse_date_string(date_str)
                     if dt and dt <= now:
-                        dates.append((dt, f'css_selector:{selector}', 0.75))
+                        dates.append((dt, 'css_selector', 0.75))
                         logger.debug("date_from_css_selector",
                             selector=selector,
                             date=dt.isoformat()
