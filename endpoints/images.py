@@ -693,19 +693,18 @@ async def upload_image(
             # Read file content
             image_data = await image_file.read()
 
-            # Validate size
+            # Validate size (before resize)
             if len(image_data) > ContextUnitImageProcessor.MAX_FILE_SIZE:
                 raise HTTPException(
                     status_code=413,
-                    detail=f"Image too large. Max size: {ContextUnitImageProcessor.MAX_FILE_SIZE} bytes"
+                    detail=f"Image too large. Max size: {ContextUnitImageProcessor.MAX_FILE_SIZE // (1024*1024)}MB"
                 )
 
-            # Validate image format and dimensions
-            if not ContextUnitImageProcessor.validate_image(image_data):
-                raise HTTPException(status_code=400, detail="Invalid image format or dimensions")
+            # Validate and resize if needed
+            success, image_data, extension = ContextUnitImageProcessor.process_image(image_data)
+            if not success:
+                raise HTTPException(status_code=400, detail="Invalid image format or too small (min 50x50)")
 
-            # Detect format
-            extension = ContextUnitImageProcessor.detect_image_format(image_data)
             if not extension:
                 # Fallback to filename extension
                 extension = ContextUnitImageProcessor.get_extension_from_filename(image_file.filename or "")
@@ -791,12 +790,11 @@ async def upload_image_base64(
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
-        # Validate image format and dimensions
-        if not ContextUnitImageProcessor.validate_image(image_data):
-            raise HTTPException(status_code=400, detail="Invalid image format or dimensions")
+        # Validate and resize if needed
+        success, image_data, extension = ContextUnitImageProcessor.process_image(image_data)
+        if not success:
+            raise HTTPException(status_code=400, detail="Invalid image format or too small (min 50x50)")
 
-        # Detect format
-        extension = ContextUnitImageProcessor.detect_image_format(image_data)
         if not extension:
             # Fallback to filename extension
             extension = ContextUnitImageProcessor.get_extension_from_filename(request.filename or "")

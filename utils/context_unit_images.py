@@ -18,19 +18,22 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 class ContextUnitImageProcessor:
     """Process and cache images for context units."""
-    
+
     # Supported image types
     IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
-    
+
     # Min/Max size constraints (pixels)
     MIN_WIDTH = 50
     MIN_HEIGHT = 50
     MAX_WIDTH = 4000
     MAX_HEIGHT = 4000
-    
-    # Max file size (bytes) - 5MB
-    MAX_FILE_SIZE = 5 * 1024 * 1024
-    
+
+    # Max dimension for auto-resize (longest side)
+    MAX_DIMENSION = 1200
+
+    # Max file size (bytes) - 10MB (before resize)
+    MAX_FILE_SIZE = 10 * 1024 * 1024
+
     # Max images per context unit
     MAX_IMAGES = 5
     
@@ -102,26 +105,125 @@ class ContextUnitImageProcessor:
             with tempfile.NamedTemporaryFile() as tmp_file:
                 tmp_file.write(image_data)
                 tmp_file.flush()
-                
+
                 with Image.open(tmp_file.name) as img:
                     width, height = img.size
-                    
-                    # Check dimensions
-                    if (width < ContextUnitImageProcessor.MIN_WIDTH or 
+
+                    # Check minimum dimensions
+                    if (width < ContextUnitImageProcessor.MIN_WIDTH or
                         height < ContextUnitImageProcessor.MIN_HEIGHT):
                         logger.warn("image_too_small", width=width, height=height)
                         return False
-                        
-                    if (width > ContextUnitImageProcessor.MAX_WIDTH or 
-                        height > ContextUnitImageProcessor.MAX_HEIGHT):
-                        logger.warn("image_too_large", width=width, height=height)
-                        return False
-                    
+
+                    # Note: We no longer reject large images - they get resized
                     return True
-                    
+
         except Exception as e:
             logger.warn("image_validation_failed", error=str(e))
             return False
+
+    @staticmethod
+    def resize_image(image_data: bytes, max_dimension: int = None) -> bytes:
+        """Resize image if larger than max_dimension, maintaining aspect ratio.
+
+        Args:
+            image_data: Raw image bytes
+            max_dimension: Max pixels for longest side (default: MAX_DIMENSION)
+
+        Returns:
+            Resized image bytes (JPEG format for efficiency) or original if smaller
+        """
+        if max_dimension is None:
+            max_dimension = ContextUnitImageProcessor.MAX_DIMENSION
+
+        try:
+            import io
+
+            with io.BytesIO(image_data) as input_buffer:
+                with Image.open(input_buffer) as img:
+                    original_width, original_height = img.size
+
+                    # Check if resize is needed
+                    if original_width <= max_dimension and original_height <= max_dimension:
+                        logger.debug("image_no_resize_needed",
+                            width=original_width,
+                            height=original_height,
+                            max_dimension=max_dimension
+                        )
+                        return image_data
+
+                    # Calculate new dimensions maintaining aspect ratio
+                    if original_width > original_height:
+                        # Landscape: width is the limiting factor
+                        new_width = max_dimension
+                        new_height = int(original_height * (max_dimension / original_width))
+                    else:
+                        # Portrait or square: height is the limiting factor
+                        new_height = max_dimension
+                        new_width = int(original_width * (max_dimension / original_height))
+
+                    # Convert to RGB if necessary (for JPEG output)
+                    if img.mode in ('RGBA', 'LA', 'P'):
+                        # Create white background for transparent images
+                        background = Image.new('RGB', img.size, (255, 255, 255))
+                        if img.mode == 'P':
+                            img = img.convert('RGBA')
+                        background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+                        img = background
+                    elif img.mode != 'RGB':
+                        img = img.convert('RGB')
+
+                    # Resize with high quality
+                    resized = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+                    # Save to bytes as JPEG
+                    output_buffer = io.BytesIO()
+                    resized.save(output_buffer, format='JPEG', quality=85, optimize=True)
+                    resized_bytes = output_buffer.getvalue()
+
+                    logger.info("image_resized",
+                        original_width=original_width,
+                        original_height=original_height,
+                        new_width=new_width,
+                        new_height=new_height,
+                        original_size=len(image_data),
+                        new_size=len(resized_bytes)
+                    )
+
+                    return resized_bytes
+
+        except Exception as e:
+            logger.error("image_resize_failed", error=str(e))
+            # Return original on error
+            return image_data
+
+    @staticmethod
+    def process_image(image_data: bytes) -> tuple[bool, bytes, str]:
+        """Validate and resize image if needed.
+
+        Args:
+            image_data: Raw image bytes
+
+        Returns:
+            Tuple of (success, processed_bytes, extension)
+        """
+        # Validate basic format
+        if not ContextUnitImageProcessor.validate_image(image_data):
+            return False, image_data, ""
+
+        # Detect format
+        extension = ContextUnitImageProcessor.detect_image_format(image_data)
+        if not extension:
+            extension = ".jpg"
+
+        # Resize if needed (always outputs JPEG if resized)
+        resized_data = ContextUnitImageProcessor.resize_image(image_data)
+
+        # If image was resized, extension is now .jpg
+        if resized_data != image_data:
+            extension = ".jpg"
+
+        return True, resized_data, extension
     
     @staticmethod
     async def save_context_unit_images(
