@@ -461,28 +461,7 @@ async def process_redact_news_rich(
                 )
                 raise HTTPException(status_code=400, detail="Cannot save article with empty or too short content")
 
-            # 9. Check if articles already exist with these context_unit_ids (prevent duplicates)
-            for cu_id in request.context_unit_ids:
-                existing_article = supabase.client.table("press_articles")\
-                    .select("id, titulo")\
-                    .eq("company_id", company_id)\
-                    .contains("context_unit_ids", [cu_id])\
-                    .limit(1)\
-                    .execute()
-
-                if existing_article.data:
-                    logger.warn("save_article_rejected_duplicate_context_unit",
-                        client_id=auth["client_id"],
-                        context_unit_id=cu_id,
-                        existing_article_id=existing_article.data[0]["id"],
-                        existing_title=existing_article.data[0].get("titulo", "")[:50]
-                    )
-                    raise HTTPException(
-                        status_code=409,
-                        detail=f"An article already exists using context unit {cu_id}"
-                    )
-
-            # 10. Generate new article UUID
+            # 9. Generate new article UUID (allow multiple articles from same context units)
             article_id = str(uuid_module.uuid4())
 
             # 11. Prepare article data for save
