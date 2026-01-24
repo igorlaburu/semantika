@@ -442,9 +442,16 @@ async def delete_article(
 async def publish_to_platforms(
     article: Dict[str, Any],
     company_id: str,
-    target_ids: list
+    target_ids: list,
+    publish_as_draft: bool = False
 ) -> Dict[str, Any]:
-    """Publish article to specified platforms or default platforms."""
+    """Publish article to specified platforms or default platforms.
+
+    If publish_as_draft=True:
+    - WordPress targets publish with status="draft" instead of "publish"
+    - Social media targets (Twitter, LinkedIn, etc.) are SKIPPED entirely
+      (cannot post to RRSS without a published URL)
+    """
     from publishers.publisher_factory import PublisherFactory
 
     publication_results = {}
@@ -609,8 +616,18 @@ async def publish_to_platforms(
             wordpress_count=len(wordpress_targets),
             social_count=len(social_targets),
             wordpress_names=[t['name'] for t in wordpress_targets],
-            social_names=[t['name'] for t in social_targets]
+            social_names=[t['name'] for t in social_targets],
+            publish_as_draft=publish_as_draft
         )
+
+        # If publishing as draft, skip social media entirely (no URL to share)
+        if publish_as_draft:
+            if social_targets:
+                logger.info("skipping_social_targets_draft_mode",
+                    article_id=article['id'],
+                    skipped_targets=[t['name'] for t in social_targets]
+                )
+            social_targets = []
 
         # Step 1: Publish to WordPress first (to get URL for social media)
         wordpress_url = None
@@ -631,7 +648,7 @@ async def publish_to_platforms(
                     "excerpt": excerpt,
                     "tags": tags,
                     "category": category,
-                    "status": "publish",
+                    "status": "draft" if publish_as_draft else "publish",
                     "slug": slug,
                     "fecha_publicacion": article.get('fecha_publicacion')
                 }
@@ -1050,7 +1067,8 @@ async def publish_article(
             "publish_now": false,               // optional, default false
             "preserve_original_date": false,    // optional, mantener fecha de publicación original
             "schedule_time": null,              // optional ISO datetime, null = auto-schedule
-            "targets": ["uuid1", "uuid2"]       // optional, publication target IDs. If empty, uses default targets, then first available target
+            "targets": ["uuid1", "uuid2"],      // optional, publication target IDs. If empty, uses default targets, then first available target
+            "publish_as_draft": false           // optional, if true: publish to WordPress as draft, skip RRSS
         }
 
     **Returns**:
@@ -1101,11 +1119,14 @@ async def publish_article(
         publication_results = {}
 
         # Handle multi-platform publication if immediate
+        publish_as_draft = request.get('publish_as_draft', False)
+
         if publish_now:
             publication_results = await publish_to_platforms(
                 article,
                 company_id,
-                request.get('targets', [])
+                request.get('targets', []),
+                publish_as_draft=publish_as_draft
             )
 
         if publish_now:
@@ -1205,7 +1226,8 @@ async def publish_article(
             article_id=article_id,
             company_id=company_id,
             new_status=new_status,
-            scheduled_for=scheduled_for
+            scheduled_for=scheduled_for,
+            publish_as_draft=publish_as_draft if publish_now else None
         )
 
         response = {
@@ -1213,7 +1235,8 @@ async def publish_article(
             "article_id": article_id,
             "status": new_status,
             "scheduled_for": scheduled_for,
-            "message": f"Article {'published' if publish_now else 'scheduled for publication'}"
+            "message": f"Article {'published as draft' if (publish_now and publish_as_draft) else 'published' if publish_now else 'scheduled for publication'}",
+            "published_as_draft": publish_as_draft if publish_now else None
         }
 
         # Add publication results if we published immediately

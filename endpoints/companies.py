@@ -26,6 +26,8 @@ class CompanySettingsUpdate(BaseModel):
     # Notification settings
     disable_ai_notification: Optional[bool] = None
     disable_probabilistic_mark: Optional[bool] = None
+    # Publication settings
+    draft_publish_default: Optional[bool] = None  # Default to publish as draft (for frontend)
 
 
 # NOTE: /current/* routes MUST be defined BEFORE /{company_id}/* routes
