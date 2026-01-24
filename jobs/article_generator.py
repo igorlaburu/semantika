@@ -576,6 +576,65 @@ def _is_valid_public_url(url: str) -> bool:
     return True
 
 
+async def _download_image_to_temp(image_uuid: str) -> str:
+    """Download image from API and save to temp file.
+
+    Returns path to temp file, or None if failed.
+    """
+    import tempfile
+    import os
+
+    if not image_uuid:
+        return None
+
+    try:
+        # Fetch from internal API (docker service name)
+        url = f"http://semantika-api:8000/api/v1/images/{image_uuid}"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status != 200:
+                    logger.warn("image_download_failed",
+                        image_uuid=image_uuid,
+                        status=response.status
+                    )
+                    return None
+
+                image_data = await response.read()
+                content_type = response.headers.get('content-type', 'image/jpeg')
+
+                # Determine extension from content type
+                ext_map = {
+                    'image/jpeg': '.jpg',
+                    'image/png': '.png',
+                    'image/gif': '.gif',
+                    'image/webp': '.webp'
+                }
+                ext = ext_map.get(content_type, '.jpg')
+
+                # Save to temp file
+                fd, temp_path = tempfile.mkstemp(suffix=ext, prefix=f'social_{image_uuid[:8]}_')
+                os.close(fd)
+
+                with open(temp_path, 'wb') as f:
+                    f.write(image_data)
+
+                logger.info("image_downloaded_to_temp",
+                    image_uuid=image_uuid,
+                    temp_path=temp_path,
+                    size_kb=round(len(image_data) / 1024, 1)
+                )
+
+                return temp_path
+
+    except Exception as e:
+        logger.error("image_download_error",
+            image_uuid=image_uuid,
+            error=str(e)
+        )
+        return None
+
+
 async def process_scheduled_publications():
     """Process individual scheduled publications from scheduled_publications table.
 
@@ -715,7 +774,13 @@ async def process_scheduled_publications():
                 if wp_pubs and social_pubs and wordpress_url:
                     await asyncio.sleep(2)
 
-                # Step 2: Publish to social media with hook
+                # Step 2: Download image once for all social media
+                social_temp_image = None
+                imagen_uuid = article.get('imagen_uuid')
+                if imagen_uuid:
+                    social_temp_image = await _download_image_to_temp(imagen_uuid)
+
+                # Step 3: Publish to social media with hook
                 for pub in social_pubs:
                     try:
                         target = pub['press_publication_targets']
@@ -772,8 +837,9 @@ async def process_scheduled_publications():
                         result = await publisher.publish_social(
                             content=social_content,
                             url=social_url,
-                            image_uuid=article.get('imagen_uuid'),
-                            tags=[]
+                            image_uuid=imagen_uuid,
+                            tags=[],
+                            temp_image_path=social_temp_image
                         )
 
                         # Update scheduled_publication record
@@ -823,6 +889,21 @@ async def process_scheduled_publications():
                             .eq("id", pub['id'])\
                             .execute()
                         failed_count += 1
+
+                # Cleanup temp image file
+                if social_temp_image:
+                    try:
+                        import os
+                        if os.path.exists(social_temp_image):
+                            os.remove(social_temp_image)
+                            logger.debug("social_temp_image_cleaned",
+                                temp_path=social_temp_image
+                            )
+                    except Exception as e:
+                        logger.warn("social_temp_image_cleanup_failed",
+                            temp_path=social_temp_image,
+                            error=str(e)
+                        )
 
                 # Check if all publications for this article are done
                 remaining_result = supabase.client.table("scheduled_publications")\
