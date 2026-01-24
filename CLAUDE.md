@@ -334,6 +334,14 @@ Implementar **antes** de la desduplicación:
   - **Nota**: Ambos clubes usan la misma plataforma web (grupo Baskonia-Alavés)
   - **RECORDATORIO**: Preguntar al usuario si quiere priorizar esto cuando haya tiempo
 
+### 📅 Scheduled Publications (Frontend)
+- [ ] **TODO**: Endpoint para revisar/confirmar publicaciones programadas
+  - **Necesidad**: El frontend necesita un endpoint para ver las horas de publicación programadas
+  - **Endpoint propuesto**: `GET /api/v1/articles/{article_id}/scheduled-publications`
+  - **Respuesta**: Lista de publicaciones pendientes con target, platform_type, scheduled_for, status, social_hook
+  - **Uso**: Confirmar visualmente las horas antes de que se ejecuten
+  - **Tabla**: `scheduled_publications` (ya existe)
+
 ### Fase 1: Infraestructura
 - [x] .env.example
 - [x] .gitignore
