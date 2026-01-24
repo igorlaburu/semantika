@@ -1275,7 +1275,7 @@ Respond with ONLY the prompt text (no JSON, no markdown, no explanation).""")
 
         try:
             hooks_prompt = ChatPromptTemplate.from_messages([
-                ("system", "You are an expert social media copywriter. Generate engaging hooks for news articles."),
+                ("system", "You are an expert social media copywriter. Generate engaging hooks for news articles. ALWAYS write in the SAME LANGUAGE as the original article."),
                 ("user", """Generate 3 social media hooks for this article. Each hook must be MAXIMUM 150 characters.
 
 Title: {title}
@@ -1290,6 +1290,7 @@ Generate 3 hooks in JSON format:
 }}
 
 IMPORTANT:
+- WRITE IN THE SAME LANGUAGE AS THE TITLE AND CONTENT (Spanish, Basque, etc.)
 - Each hook must be UNDER 150 characters
 - Do NOT include hashtags or URLs (added automatically)
 - Do NOT repeat the exact title, rephrase it

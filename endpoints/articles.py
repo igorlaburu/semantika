@@ -1183,6 +1183,16 @@ async def _publish_with_target_schedules(
 ) -> Dict:
     """Handle publication with new target_schedules format."""
 
+    # Log incoming target_schedules for debugging
+    logger.info("publish_target_schedules_received",
+        article_id=article_id,
+        target_schedules_count=len(target_schedules),
+        target_schedules_raw=[
+            {"target_id": ts.get('target_id'), "schedule_time": ts.get('schedule_time')}
+            for ts in target_schedules
+        ]
+    )
+
     # Check article state
     if article['estado'] not in ['borrador', 'programado']:
         raise HTTPException(
