@@ -349,6 +349,39 @@ class FacebookPublisher(BasePublisher):
         clean = re.sub(r'\s+', ' ', clean)
         return clean.strip()
 
+    async def _add_comment(self, post_id: str, comment_text: str) -> Dict[str, Any]:
+        """Add a comment to a Facebook post."""
+        try:
+            page_token = self._get_page_access_token()
+
+            url = f"{GRAPH_API_BASE}/{post_id}/comments"
+            data = {
+                'message': comment_text,
+                'access_token': page_token
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, data=data) as response:
+                    response_data = await response.json()
+
+                    if response.status == 200:
+                        return {
+                            "success": True,
+                            "comment_id": response_data.get('id')
+                        }
+                    else:
+                        error_msg = response_data.get('error', {}).get('message', f'HTTP {response.status}')
+                        return {
+                            "success": False,
+                            "error": error_msg
+                        }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
     async def publish_social(
         self,
         content: str,
@@ -359,8 +392,8 @@ class FacebookPublisher(BasePublisher):
     ) -> PublicationResult:
         """Publish social media post to Facebook Page.
 
-        Posts pre-formatted content directly to the page feed.
-        Content should already include title, URL, and hashtags.
+        Posts content WITHOUT the URL in main post.
+        URL is added as first comment to improve reach (Facebook algorithm).
         """
         try:
             page_id = self.credentials.get('page_id')
@@ -371,16 +404,24 @@ class FacebookPublisher(BasePublisher):
                     error="No page_id configured. Facebook requires a page to publish."
                 )
 
-            # Content is already formatted from articles.py
-            # Add emoji prefix if not present
+            # Remove URL from content if present (will be added as comment)
             post_text = content
+            if url and url in post_text:
+                post_text = post_text.replace(url, '').strip()
+                # Clean up double newlines left after URL removal
+                while '\n\n\n' in post_text:
+                    post_text = post_text.replace('\n\n\n', '\n\n')
+                post_text = post_text.rstrip('\n')
+
+            # Add emoji prefix if not present
             if not post_text.startswith("📰"):
                 post_text = f"📰 {post_text}"
 
             logger.info("facebook_publish_social_start",
                 page_id=page_id,
                 content_length=len(post_text),
-                has_image=bool(temp_image_path)
+                has_image=bool(temp_image_path),
+                has_url_for_comment=bool(url)
             )
 
             # Upload image if provided
@@ -407,9 +448,27 @@ class FacebookPublisher(BasePublisher):
                 page_name = self.credentials.get('page_name', page_id)
                 post_url = f"https://www.facebook.com/{post_id.replace('_', '/posts/')}"
 
+                # Add URL as first comment if provided
+                comment_added = False
+                if url:
+                    comment_text = f"🔗 Más información: {url}"
+                    comment_result = await self._add_comment(post_id, comment_text)
+                    if comment_result.get('success'):
+                        comment_added = True
+                        logger.info("facebook_url_comment_added",
+                            post_id=post_id,
+                            comment_id=comment_result.get('comment_id')
+                        )
+                    else:
+                        logger.warn("facebook_url_comment_failed",
+                            post_id=post_id,
+                            error=comment_result.get('error')
+                        )
+
                 logger.info("facebook_social_published",
                     post_id=post_id,
-                    url=post_url
+                    url=post_url,
+                    url_in_comment=comment_added
                 )
 
                 return PublicationResult(
@@ -420,7 +479,8 @@ class FacebookPublisher(BasePublisher):
                         "platform": "facebook",
                         "page_id": page_id,
                         "page_name": page_name,
-                        "has_photo": bool(photo_id)
+                        "has_photo": bool(photo_id),
+                        "url_in_comment": comment_added
                     }
                 )
             else:
