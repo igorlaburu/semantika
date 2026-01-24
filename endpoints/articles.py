@@ -1746,6 +1746,71 @@ async def _get_last_scheduled_wp(company_id: str) -> Optional[datetime]:
         return None
 
 
+@router.get("/api/v1/articles/{article_id}/scheduled-publications")
+async def get_scheduled_publications(
+    article_id: str,
+    company_id: str = Depends(get_company_id_from_auth)
+) -> Dict:
+    """Get scheduled publications for an article.
+
+    Returns all scheduled/published/failed publications for this article,
+    allowing the frontend to track publication progress.
+    """
+    supabase = get_supabase_client()
+
+    # Verify article belongs to company
+    article_result = supabase.client.table("press_articles")\
+        .select("id, titulo, estado")\
+        .eq("id", article_id)\
+        .eq("company_id", company_id)\
+        .execute()
+
+    if not article_result.data:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    article = article_result.data[0]
+
+    # Get all scheduled publications for this article
+    pubs_result = supabase.client.table("scheduled_publications")\
+        .select("id, target_id, platform_type, scheduled_for, status, published_at, social_hook, error_message, publication_result")\
+        .eq("article_id", article_id)\
+        .order("scheduled_for", desc=False)\
+        .execute()
+
+    publications = []
+    for pub in (pubs_result.data or []):
+        publications.append({
+            "id": pub['id'],
+            "target_id": pub['target_id'],
+            "platform_type": pub['platform_type'],
+            "scheduled_for": pub['scheduled_for'],
+            "status": pub['status'],
+            "published_at": pub.get('published_at'),
+            "social_hook": pub.get('social_hook'),
+            "error_message": pub.get('error_message'),
+            "published_url": pub.get('publication_result', {}).get('url') if pub.get('publication_result') else None
+        })
+
+    # Summary counts
+    total = len(publications)
+    scheduled = len([p for p in publications if p['status'] == 'scheduled'])
+    published = len([p for p in publications if p['status'] == 'published'])
+    failed = len([p for p in publications if p['status'] == 'failed'])
+
+    return {
+        "article_id": article_id,
+        "titulo": article['titulo'],
+        "estado": article['estado'],
+        "summary": {
+            "total": total,
+            "scheduled": scheduled,
+            "published": published,
+            "failed": failed
+        },
+        "publications": publications
+    }
+
+
 @router.post("/api/v1/articles/{article_id}/propose-schedule")
 async def propose_schedule(
     article_id: str,
