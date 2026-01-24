@@ -556,6 +556,26 @@ async def publish_scheduled_articles():
         logger.error("scheduled_publication_check_failed", error=str(e))
 
 
+def _is_valid_public_url(url: str) -> bool:
+    """Check if URL is valid for public sharing (not a draft URL).
+
+    Draft URLs from WordPress look like: https://example.com/?p=1194
+    We want to detect these and use fallback instead.
+    """
+    if not url:
+        return False
+
+    # Draft URLs contain ?p= parameter
+    if '?p=' in url:
+        return False
+
+    # Must be a proper HTTP URL
+    if not url.startswith(('http://', 'https://')):
+        return False
+
+    return True
+
+
 async def process_scheduled_publications():
     """Process individual scheduled publications from scheduled_publications table.
 
@@ -705,8 +725,43 @@ async def process_scheduled_publications():
                         if len(hook_text) > 150:
                             hook_text = hook_text[:147] + "..."
 
+                        # Determine social URL with fallback for draft URLs
+                        social_url = None
+
+                        # Try wordpress_url from current publication
+                        if _is_valid_public_url(wordpress_url):
+                            social_url = wordpress_url
+                        elif wordpress_url:
+                            logger.info("scheduled_social_skipping_draft_url",
+                                article_id=article_id,
+                                draft_url=wordpress_url
+                            )
+
+                        # Try previous published_url
+                        if not social_url and article.get('published_url'):
+                            if _is_valid_public_url(article['published_url']):
+                                social_url = article['published_url']
+                                logger.info("scheduled_social_using_previous_url",
+                                    article_id=article_id,
+                                    published_url=social_url
+                                )
+
+                        # Fallback to WordPress target's base_url
+                        if not social_url:
+                            # Get WordPress target base_url from this article's WP publications
+                            for wp_pub in wp_pubs:
+                                wp_target = wp_pub.get('press_publication_targets', {})
+                                base_url = wp_target.get('base_url')
+                                if base_url:
+                                    social_url = base_url
+                                    logger.info("scheduled_social_using_fallback_base_url",
+                                        article_id=article_id,
+                                        fallback_url=social_url
+                                    )
+                                    break
+
                         # Build social content
-                        social_content = f"{hook_text}\n\n{wordpress_url}" if wordpress_url else hook_text
+                        social_content = f"{hook_text}\n\n{social_url}" if social_url else hook_text
 
                         publisher = PublisherFactory.create_publisher(
                             target['platform_type'],
@@ -716,7 +771,7 @@ async def process_scheduled_publications():
 
                         result = await publisher.publish_social(
                             content=social_content,
-                            url=wordpress_url,
+                            url=social_url,
                             image_uuid=article.get('imagen_uuid'),
                             tags=[]
                         )

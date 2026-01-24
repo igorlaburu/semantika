@@ -730,15 +730,28 @@ async def publish_to_platforms(
             fallback_hook = title[:147] + "..." if len(title) > 150 else title
 
             # Get URL: published article URL or fallback
-            social_url = wordpress_url
+            # Priority: wordpress_url (if valid) > published_url (if valid) > base_url
+            social_url = None
 
-            if not social_url and article.get('published_url'):
-                social_url = article['published_url']
-                logger.info("social_using_previous_published_url",
+            # Try wordpress_url from current publication
+            if _is_valid_public_url(wordpress_url):
+                social_url = wordpress_url
+            elif wordpress_url:
+                logger.info("social_skipping_draft_url",
                     article_id=article['id'],
-                    published_url=social_url
+                    draft_url=wordpress_url
                 )
 
+            # Try previous published_url if no valid URL yet
+            if not social_url and article.get('published_url'):
+                if _is_valid_public_url(article['published_url']):
+                    social_url = article['published_url']
+                    logger.info("social_using_previous_published_url",
+                        article_id=article['id'],
+                        published_url=social_url
+                    )
+
+            # Fallback to WordPress target's base_url
             if not social_url and wordpress_targets:
                 social_url = wordpress_targets[0].get('base_url', '')
                 logger.info("social_using_fallback_base_url",
@@ -867,6 +880,26 @@ async def publish_to_platforms(
         # Return empty dict on error rather than failing the whole publication
 
     return publication_results
+
+
+def _is_valid_public_url(url: str) -> bool:
+    """Check if URL is valid for public sharing (not a draft URL).
+
+    Draft URLs from WordPress look like: https://example.com/?p=1194
+    We want to detect these and use fallback instead.
+    """
+    if not url:
+        return False
+
+    # Draft URLs contain ?p= parameter
+    if '?p=' in url:
+        return False
+
+    # Must be a proper HTTP URL
+    if not url.startswith(('http://', 'https://')):
+        return False
+
+    return True
 
 
 async def _add_article_footer(content: str, article_id: str, company_id: str) -> str:
