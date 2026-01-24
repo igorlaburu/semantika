@@ -554,3 +554,256 @@ async def publish_scheduled_articles():
 
     except Exception as e:
         logger.error("scheduled_publication_check_failed", error=str(e))
+
+
+async def process_scheduled_publications():
+    """Process individual scheduled publications from scheduled_publications table.
+
+    This handles the new per-target scheduling system where each target
+    can have a different schedule time.
+    """
+    from publishers.publisher_factory import PublisherFactory
+    from itertools import groupby
+
+    try:
+        logger.info("process_scheduled_publications_start")
+
+        supabase = get_supabase_client()
+        now = datetime.utcnow()
+
+        # Get all pending scheduled publications that are due
+        pending_result = supabase.client.table("scheduled_publications")\
+            .select("*, press_articles!inner(id, titulo, contenido, excerpt, slug, tags, category, imagen_uuid, working_json, published_url, company_id), press_publication_targets!inner(id, platform_type, name, base_url, credentials_encrypted)")\
+            .eq("status", "scheduled")\
+            .lte("scheduled_for", now.isoformat())\
+            .order("article_id")\
+            .order("scheduled_for")\
+            .execute()
+
+        if not pending_result.data:
+            logger.debug("no_scheduled_publications_pending")
+            return
+
+        pending = pending_result.data
+        logger.info("scheduled_publications_found", count=len(pending))
+
+        # Group by article_id for batch processing
+        pending_sorted = sorted(pending, key=lambda x: x['article_id'])
+        grouped = {}
+        for pub in pending_sorted:
+            article_id = pub['article_id']
+            if article_id not in grouped:
+                grouped[article_id] = []
+            grouped[article_id].append(pub)
+
+        published_count = 0
+        failed_count = 0
+
+        for article_id, publications in grouped.items():
+            try:
+                # Get article data from first publication
+                article = publications[0]['press_articles']
+
+                # Separate WordPress vs Social targets
+                wp_pubs = [p for p in publications if p['platform_type'] == 'wordpress']
+                social_pubs = [p for p in publications if p['platform_type'] != 'wordpress']
+
+                wordpress_url = article.get('published_url')
+
+                # Step 1: Publish WordPress first (to get URL for social)
+                for pub in wp_pubs:
+                    try:
+                        target = pub['press_publication_targets']
+
+                        publisher = PublisherFactory.create_publisher(
+                            target['platform_type'],
+                            target['base_url'],
+                            target['credentials_encrypted']
+                        )
+
+                        # Prepare content
+                        content = article.get('contenido', '')
+
+                        # Add footer with related articles
+                        try:
+                            from endpoints.articles import _add_article_footer
+                            content = await _add_article_footer(content, article_id, article['company_id'])
+                        except Exception as e:
+                            logger.warn("add_footer_failed", error=str(e))
+
+                        result = await publisher.publish_article(
+                            title=article.get('titulo', 'Untitled'),
+                            content=content,
+                            excerpt=article.get('excerpt', ''),
+                            tags=article.get('tags', []),
+                            category=article.get('category'),
+                            status="publish",
+                            slug=article.get('slug'),
+                            imagen_uuid=article.get('imagen_uuid')
+                        )
+
+                        # Update scheduled_publication record
+                        update_data = {
+                            "status": "published" if result.success else "failed",
+                            "published_at": datetime.utcnow().isoformat() if result.success else None,
+                            "error_message": result.error if not result.success else None,
+                            "publication_result": {
+                                "success": result.success,
+                                "url": result.url,
+                                "external_id": result.external_id,
+                                "error": result.error
+                            }
+                        }
+
+                        supabase.client.table("scheduled_publications")\
+                            .update(update_data)\
+                            .eq("id", pub['id'])\
+                            .execute()
+
+                        if result.success:
+                            wordpress_url = result.url
+                            published_count += 1
+                            logger.info("scheduled_wp_published",
+                                article_id=article_id,
+                                target_id=target['id'],
+                                url=result.url
+                            )
+                        else:
+                            failed_count += 1
+                            logger.error("scheduled_wp_failed",
+                                article_id=article_id,
+                                target_id=target['id'],
+                                error=result.error
+                            )
+
+                    except Exception as e:
+                        logger.error("scheduled_wp_publication_error",
+                            article_id=article_id,
+                            pub_id=pub['id'],
+                            error=str(e)
+                        )
+                        supabase.client.table("scheduled_publications")\
+                            .update({
+                                "status": "failed",
+                                "error_message": str(e)
+                            })\
+                            .eq("id", pub['id'])\
+                            .execute()
+                        failed_count += 1
+
+                # Brief delay before social media
+                if wp_pubs and social_pubs and wordpress_url:
+                    await asyncio.sleep(2)
+
+                # Step 2: Publish to social media with hook
+                for pub in social_pubs:
+                    try:
+                        target = pub['press_publication_targets']
+
+                        # Get hook from scheduled_publication record
+                        hook_text = pub.get('social_hook') or article.get('titulo', '')[:147]
+                        if len(hook_text) > 150:
+                            hook_text = hook_text[:147] + "..."
+
+                        # Build social content
+                        social_content = f"{hook_text}\n\n{wordpress_url}" if wordpress_url else hook_text
+
+                        publisher = PublisherFactory.create_publisher(
+                            target['platform_type'],
+                            target.get('base_url', ''),
+                            target['credentials_encrypted']
+                        )
+
+                        result = await publisher.publish_social(
+                            content=social_content,
+                            url=wordpress_url,
+                            image_uuid=article.get('imagen_uuid'),
+                            tags=[]
+                        )
+
+                        # Update scheduled_publication record
+                        update_data = {
+                            "status": "published" if result.success else "failed",
+                            "published_at": datetime.utcnow().isoformat() if result.success else None,
+                            "error_message": result.error if not result.success else None,
+                            "publication_result": {
+                                "success": result.success,
+                                "url": result.url,
+                                "external_id": result.external_id,
+                                "error": result.error
+                            }
+                        }
+
+                        supabase.client.table("scheduled_publications")\
+                            .update(update_data)\
+                            .eq("id", pub['id'])\
+                            .execute()
+
+                        if result.success:
+                            published_count += 1
+                            logger.info("scheduled_social_published",
+                                article_id=article_id,
+                                platform=target['platform_type'],
+                                url=result.url
+                            )
+                        else:
+                            failed_count += 1
+                            logger.error("scheduled_social_failed",
+                                article_id=article_id,
+                                platform=target['platform_type'],
+                                error=result.error
+                            )
+
+                    except Exception as e:
+                        logger.error("scheduled_social_publication_error",
+                            article_id=article_id,
+                            pub_id=pub['id'],
+                            error=str(e)
+                        )
+                        supabase.client.table("scheduled_publications")\
+                            .update({
+                                "status": "failed",
+                                "error_message": str(e)
+                            })\
+                            .eq("id", pub['id'])\
+                            .execute()
+                        failed_count += 1
+
+                # Check if all publications for this article are done
+                remaining_result = supabase.client.table("scheduled_publications")\
+                    .select("id")\
+                    .eq("article_id", article_id)\
+                    .eq("status", "scheduled")\
+                    .execute()
+
+                if not remaining_result.data:
+                    # All done - update article to published
+                    supabase.client.table("press_articles")\
+                        .update({
+                            "estado": "publicado",
+                            "published_url": wordpress_url,
+                            "fecha_publicacion": datetime.utcnow().isoformat(),
+                            "updated_at": datetime.utcnow().isoformat()
+                        })\
+                        .eq("id", article_id)\
+                        .execute()
+
+                    logger.info("article_all_publications_complete",
+                        article_id=article_id
+                    )
+
+            except Exception as e:
+                logger.error("process_article_publications_failed",
+                    article_id=article_id,
+                    error=str(e)
+                )
+
+        if published_count > 0 or failed_count > 0:
+            logger.info("process_scheduled_publications_completed",
+                total_processed=len(pending),
+                published=published_count,
+                failed=failed_count
+            )
+
+    except Exception as e:
+        logger.error("process_scheduled_publications_failed", error=str(e))

@@ -1047,31 +1047,42 @@ async def publish_article(
     """
     Publish an article to multiple platforms.
 
-    If publish_now=true, publishes immediately to all specified targets.
-    If schedule_time is provided, schedules for that time.
-    If neither, backend calculates optimal schedule time.
+    Supports two modes:
+
+    **NEW FORMAT (target_schedules):**
+        {
+            "target_schedules": [
+                {"target_id": "uuid", "schedule_time": null},        // null = immediate
+                {"target_id": "uuid", "schedule_time": "ISO-8601"}   // scheduled
+            ],
+            "social_hooks": {                                        // optional, override hooks
+                "direct": "Hook for Twitter",
+                "professional": "Hook for LinkedIn",
+                "emotional": "Hook for Facebook"
+            },
+            "publish_as_draft": false
+        }
+
+    **LEGACY FORMAT (backwards compatible):**
+        {
+            "publish_now": false,
+            "preserve_original_date": false,
+            "schedule_time": null,
+            "targets": ["uuid1", "uuid2"],
+            "publish_as_draft": false
+        }
 
     **Authentication**: Accepts either JWT or API Key
-
-    **Body**:
-        {
-            "publish_now": false,               // optional, default false
-            "preserve_original_date": false,    // optional, mantener fecha de publicación original
-            "schedule_time": null,              // optional ISO datetime, null = auto-schedule
-            "targets": ["uuid1", "uuid2"],      // optional, publication target IDs. If empty, uses default targets, then first available target
-            "publish_as_draft": false           // optional, if true: publish to WordPress as draft, skip RRSS
-        }
 
     **Returns**:
         {
             "success": true,
             "article_id": "xxx",
-            "status": "programado",
-            "scheduled_for": "2024-12-27T10:00:00Z",
-            "publication_results": {
-                "uuid1": {"success": true, "url": "https://...", "platform": "wordpress"},
-                "uuid2": {"success": false, "error": "Connection failed"}
-            }
+            "status": "scheduled" | "published" | "mixed",
+            "publications": [
+                {"target_id": "uuid", "platform_type": "wordpress", "status": "published", "url": "..."},
+                {"target_id": "uuid", "platform_type": "twitter", "status": "scheduled", "scheduled_for": "..."}
+            ]
         }
     """
     try:
@@ -1090,151 +1101,33 @@ async def publish_article(
 
         article = article_result.data
 
-        # Determine publication strategy first
-        publish_now = request.get('publish_now', False)
-        preserve_original_date = request.get('preserve_original_date', False)
+        # Check if using NEW FORMAT (target_schedules) or LEGACY FORMAT
+        target_schedules = request.get('target_schedules')
 
-        # Check article state - allow programado articles to be published immediately
-        if article['estado'] == 'borrador':
-            # Draft articles can be published/scheduled
-            pass
-        elif article['estado'] == 'programado' and publish_now:
-            # Scheduled articles can be published immediately (used by scheduler)
-            pass
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Article cannot be processed. Current state: {article['estado']}, publish_now: {publish_now}"
+        if target_schedules is not None:
+            # ==========================================
+            # NEW FORMAT: target_schedules
+            # ==========================================
+            return await _publish_with_target_schedules(
+                article_id=article_id,
+                article=article,
+                company_id=company_id,
+                target_schedules=target_schedules,
+                social_hooks=request.get('social_hooks'),
+                publish_as_draft=request.get('publish_as_draft', False),
+                supabase=supabase
             )
-        schedule_time = request.get('schedule_time')
-        publication_results = {}
-
-        # Handle multi-platform publication if immediate
-        publish_as_draft = request.get('publish_as_draft', False)
-
-        if publish_now:
-            publication_results = await publish_to_platforms(
-                article,
-                company_id,
-                request.get('targets', []),
-                publish_as_draft=publish_as_draft
-            )
-
-        if publish_now:
-            # Determine publication date
-            existing_date = article.get('fecha_publicacion')
-
-            if preserve_original_date and existing_date:
-                # Mantener fecha original
-                publication_date = existing_date
-                logger.info("preserving_original_publication_date",
-                    article_id=article_id,
-                    original_date=existing_date)
-            else:
-                # Nueva fecha de publicación
-                publication_date = datetime.utcnow().isoformat()
-                if existing_date:
-                    logger.info("updating_publication_date",
-                        article_id=article_id,
-                        old_date=existing_date,
-                        new_date=publication_date)
-
-            # Merge publication results with existing publication_status (additive)
-            existing_status = article.get('publication_status') or {}
-            for target_id, result in publication_results.items():
-                existing_status[target_id] = {
-                    **result,
-                    "published_at": datetime.utcnow().isoformat()
-                }
-
-            # Determine published_url: prioritize WordPress, keep existing if set
-            current_published_url = article.get('published_url')
-            new_published_url = current_published_url  # Keep existing by default
-
-            # Only update published_url if:
-            # 1. It's not set yet, OR
-            # 2. New publication is WordPress (prioritize WP URLs for SEO)
-            for target_id, result in publication_results.items():
-                if result.get("success") and result.get("url"):
-                    is_wordpress = result.get("platform") == "wordpress"
-                    if not new_published_url or is_wordpress:
-                        new_published_url = result["url"]
-                        if is_wordpress:
-                            break  # WordPress URL found, use it as primary
-
-            # Publish immediately
-            update_data = {
-                "estado": "publicado",
-                "fecha_publicacion": publication_date,
-                "published_url": new_published_url,
-                "publication_status": existing_status,
-                "published_date": datetime.utcnow().isoformat(),
-                "updated_at": datetime.utcnow().isoformat()
-            }
-            scheduled_for = None
-            new_status = "publicado"
         else:
-            # Schedule for later
-            if schedule_time:
-                # Use provided schedule time
-                try:
-                    scheduled_datetime = datetime.fromisoformat(
-                        schedule_time.replace('Z', '+00:00')
-                    )
-                    if scheduled_datetime <= datetime.utcnow():
-                        raise HTTPException(
-                            status_code=400,
-                            detail="Schedule time must be in the future"
-                        )
-                except ValueError:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Invalid datetime format"
-                    )
-            else:
-                # Calculate optimal schedule time
-                scheduled_datetime = await calculate_optimal_schedule_time(company_id)
-
-            update_data = {
-                "estado": "borrador",
-                "to_publish_at": scheduled_datetime.isoformat(),
-                "updated_at": datetime.utcnow().isoformat()
-            }
-            scheduled_for = scheduled_datetime.isoformat()
-            new_status = "programado"
-
-        # Update article
-        update_result = supabase.client.table("press_articles")\
-            .update(update_data)\
-            .eq("id", article_id)\
-            .eq("company_id", company_id)\
-            .execute()
-
-        if not update_result.data:
-            raise HTTPException(status_code=500, detail="Failed to update article")
-
-        logger.info("article_published",
-            article_id=article_id,
-            company_id=company_id,
-            new_status=new_status,
-            scheduled_for=scheduled_for,
-            publish_as_draft=publish_as_draft if publish_now else None
-        )
-
-        response = {
-            "success": True,
-            "article_id": article_id,
-            "status": new_status,
-            "scheduled_for": scheduled_for,
-            "message": f"Article {'published as draft' if (publish_now and publish_as_draft) else 'published' if publish_now else 'scheduled for publication'}",
-            "published_as_draft": publish_as_draft if publish_now else None
-        }
-
-        # Add publication results if we published immediately
-        if publish_now and publication_results:
-            response["publication_results"] = publication_results
-
-        return response
+            # ==========================================
+            # LEGACY FORMAT: publish_now, targets, etc.
+            # ==========================================
+            return await _publish_legacy_format(
+                article_id=article_id,
+                article=article,
+                company_id=company_id,
+                request=request,
+                supabase=supabase
+            )
 
     except HTTPException:
         raise
@@ -1244,6 +1137,362 @@ async def publish_article(
             article_id=article_id
         )
         raise HTTPException(status_code=500, detail="Failed to publish article")
+
+
+async def _publish_with_target_schedules(
+    article_id: str,
+    article: Dict,
+    company_id: str,
+    target_schedules: List[Dict],
+    social_hooks: Optional[Dict],
+    publish_as_draft: bool,
+    supabase
+) -> Dict:
+    """Handle publication with new target_schedules format."""
+
+    # Check article state
+    if article['estado'] not in ['borrador', 'programado']:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Article cannot be published. Current state: {article['estado']}"
+        )
+
+    # Get target details
+    target_ids = [ts['target_id'] for ts in target_schedules]
+    targets_result = supabase.client.table("press_publication_targets")\
+        .select("id, platform_type, name, base_url, credentials_encrypted")\
+        .eq("company_id", company_id)\
+        .eq("is_active", True)\
+        .in_("id", target_ids)\
+        .execute()
+
+    targets_by_id = {t['id']: t for t in (targets_result.data or [])}
+
+    # Update social_hooks in working_json if provided
+    if social_hooks:
+        working_json = article.get('working_json') or {}
+        working_json['social_hooks'] = social_hooks
+        supabase.client.table("press_articles")\
+            .update({"working_json": working_json, "updated_at": datetime.utcnow().isoformat()})\
+            .eq("id", article_id)\
+            .execute()
+        article['working_json'] = working_json
+
+    # Mapping: platform -> hook type
+    PLATFORM_HOOK_MAP = {
+        'twitter': 'direct',
+        'linkedin': 'professional',
+        'facebook': 'emotional',
+        'instagram': 'emotional'
+    }
+
+    # Get hooks from working_json or request
+    hooks = social_hooks or (article.get('working_json') or {}).get('social_hooks') or {}
+    fallback_hook = article.get('titulo', '')[:147] + "..." if len(article.get('titulo', '')) > 150 else article.get('titulo', '')
+
+    # Separate immediate vs scheduled
+    immediate_targets = []
+    scheduled_targets = []
+
+    for ts in target_schedules:
+        target_id = ts['target_id']
+        schedule_time = ts.get('schedule_time')
+
+        if target_id not in targets_by_id:
+            logger.warn("target_not_found", target_id=target_id)
+            continue
+
+        target = targets_by_id[target_id]
+
+        if schedule_time is None:
+            # Immediate publication
+            immediate_targets.append(target)
+        else:
+            # Scheduled publication
+            try:
+                scheduled_dt = datetime.fromisoformat(schedule_time.replace('Z', '+00:00'))
+                if scheduled_dt <= datetime.utcnow():
+                    # Time in past, publish immediately instead
+                    immediate_targets.append(target)
+                else:
+                    scheduled_targets.append({
+                        'target': target,
+                        'schedule_time': scheduled_dt
+                    })
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid schedule_time format for target {target_id}")
+
+    publications = []
+    publication_results = {}
+
+    # Handle immediate publications
+    if immediate_targets:
+        if publish_as_draft:
+            # Only publish WordPress targets as draft, skip social
+            wp_targets = [t for t in immediate_targets if t['platform_type'] == 'wordpress']
+            immediate_targets = wp_targets
+
+        if immediate_targets:
+            # Use existing publish_to_platforms for immediate
+            immediate_target_ids = [t['id'] for t in immediate_targets]
+            publication_results = await publish_to_platforms(
+                article,
+                company_id,
+                immediate_target_ids,
+                publish_as_draft=publish_as_draft
+            )
+
+            for target_id, result in publication_results.items():
+                target = targets_by_id.get(target_id, {})
+                publications.append({
+                    "target_id": target_id,
+                    "platform_type": target.get('platform_type'),
+                    "target_name": target.get('name'),
+                    "status": "published" if result.get('success') else "failed",
+                    "url": result.get('url'),
+                    "error": result.get('error')
+                })
+
+    # Handle scheduled publications
+    for scheduled in scheduled_targets:
+        target = scheduled['target']
+        schedule_time = scheduled['schedule_time']
+
+        # Get hook for this platform
+        hook_type = PLATFORM_HOOK_MAP.get(target['platform_type'], 'direct')
+        hook_text = hooks.get(hook_type) or fallback_hook
+
+        # Create scheduled_publication record
+        try:
+            insert_result = supabase.client.table("scheduled_publications")\
+                .upsert({
+                    "article_id": article_id,
+                    "target_id": target['id'],
+                    "company_id": company_id,
+                    "platform_type": target['platform_type'],
+                    "scheduled_for": schedule_time.isoformat(),
+                    "status": "scheduled",
+                    "social_hook": hook_text if target['platform_type'] != 'wordpress' else None,
+                    "created_at": datetime.utcnow().isoformat()
+                }, on_conflict="article_id,target_id")\
+                .execute()
+
+            publications.append({
+                "target_id": target['id'],
+                "platform_type": target['platform_type'],
+                "target_name": target['name'],
+                "status": "scheduled",
+                "scheduled_for": schedule_time.isoformat() + "Z"
+            })
+
+            logger.info("publication_scheduled",
+                article_id=article_id,
+                target_id=target['id'],
+                platform=target['platform_type'],
+                scheduled_for=schedule_time.isoformat()
+            )
+        except Exception as e:
+            logger.error("schedule_publication_failed",
+                article_id=article_id,
+                target_id=target['id'],
+                error=str(e)
+            )
+            publications.append({
+                "target_id": target['id'],
+                "platform_type": target['platform_type'],
+                "target_name": target['name'],
+                "status": "failed",
+                "error": str(e)
+            })
+
+    # Update article state based on results
+    has_published = any(p['status'] == 'published' for p in publications)
+    has_scheduled = any(p['status'] == 'scheduled' for p in publications)
+
+    if has_published and has_scheduled:
+        new_status = "mixed"
+        article_estado = "programado"  # Keep as programado if there are pending schedules
+    elif has_published:
+        new_status = "published"
+        article_estado = "publicado"
+    elif has_scheduled:
+        new_status = "scheduled"
+        article_estado = "programado"
+    else:
+        new_status = "failed"
+        article_estado = article['estado']  # Keep current state
+
+    # Update article
+    update_data = {
+        "estado": article_estado,
+        "updated_at": datetime.utcnow().isoformat()
+    }
+
+    # Update publication_status with immediate results
+    if publication_results:
+        existing_status = article.get('publication_status') or {}
+        for target_id, result in publication_results.items():
+            existing_status[target_id] = {
+                **result,
+                "published_at": datetime.utcnow().isoformat()
+            }
+        update_data["publication_status"] = existing_status
+
+        # Update published_url if WordPress succeeded
+        for target_id, result in publication_results.items():
+            if result.get("success") and result.get("platform") == "wordpress" and result.get("url"):
+                update_data["published_url"] = result["url"]
+                update_data["fecha_publicacion"] = datetime.utcnow().isoformat()
+                break
+
+    supabase.client.table("press_articles")\
+        .update(update_data)\
+        .eq("id", article_id)\
+        .execute()
+
+    logger.info("publish_with_schedules_completed",
+        article_id=article_id,
+        immediate_count=len(immediate_targets),
+        scheduled_count=len(scheduled_targets),
+        status=new_status
+    )
+
+    return {
+        "success": True,
+        "article_id": article_id,
+        "status": new_status,
+        "publications": publications,
+        "message": f"Article processed: {len([p for p in publications if p['status'] == 'published'])} published, {len([p for p in publications if p['status'] == 'scheduled'])} scheduled"
+    }
+
+
+async def _publish_legacy_format(
+    article_id: str,
+    article: Dict,
+    company_id: str,
+    request: Dict,
+    supabase
+) -> Dict:
+    """Handle publication with legacy format (backwards compatible)."""
+
+    publish_now = request.get('publish_now', False)
+    preserve_original_date = request.get('preserve_original_date', False)
+    publish_as_draft = request.get('publish_as_draft', False)
+
+    # Check article state
+    if article['estado'] == 'borrador':
+        pass
+    elif article['estado'] == 'programado' and publish_now:
+        pass
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Article cannot be processed. Current state: {article['estado']}, publish_now: {publish_now}"
+        )
+
+    schedule_time = request.get('schedule_time')
+    publication_results = {}
+
+    if publish_now:
+        publication_results = await publish_to_platforms(
+            article,
+            company_id,
+            request.get('targets', []),
+            publish_as_draft=publish_as_draft
+        )
+
+    if publish_now:
+        existing_date = article.get('fecha_publicacion')
+
+        if preserve_original_date and existing_date:
+            publication_date = existing_date
+        else:
+            publication_date = datetime.utcnow().isoformat()
+
+        existing_status = article.get('publication_status') or {}
+        for target_id, result in publication_results.items():
+            existing_status[target_id] = {
+                **result,
+                "published_at": datetime.utcnow().isoformat()
+            }
+
+        current_published_url = article.get('published_url')
+        new_published_url = current_published_url
+
+        for target_id, result in publication_results.items():
+            if result.get("success") and result.get("url"):
+                is_wordpress = result.get("platform") == "wordpress"
+                if not new_published_url or is_wordpress:
+                    new_published_url = result["url"]
+                    if is_wordpress:
+                        break
+
+        update_data = {
+            "estado": "publicado",
+            "fecha_publicacion": publication_date,
+            "published_url": new_published_url,
+            "publication_status": existing_status,
+            "published_date": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat()
+        }
+        scheduled_for = None
+        new_status = "publicado"
+    else:
+        if schedule_time:
+            try:
+                scheduled_datetime = datetime.fromisoformat(
+                    schedule_time.replace('Z', '+00:00')
+                )
+                if scheduled_datetime <= datetime.utcnow():
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Schedule time must be in the future"
+                    )
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid datetime format"
+                )
+        else:
+            scheduled_datetime = await calculate_optimal_schedule_time(company_id)
+
+        update_data = {
+            "estado": "programado",
+            "to_publish_at": scheduled_datetime.isoformat(),
+            "updated_at": datetime.utcnow().isoformat()
+        }
+        scheduled_for = scheduled_datetime.isoformat()
+        new_status = "programado"
+
+    update_result = supabase.client.table("press_articles")\
+        .update(update_data)\
+        .eq("id", article_id)\
+        .eq("company_id", company_id)\
+        .execute()
+
+    if not update_result.data:
+        raise HTTPException(status_code=500, detail="Failed to update article")
+
+    logger.info("article_published_legacy",
+        article_id=article_id,
+        company_id=company_id,
+        new_status=new_status,
+        scheduled_for=scheduled_for
+    )
+
+    response = {
+        "success": True,
+        "article_id": article_id,
+        "status": new_status,
+        "scheduled_for": scheduled_for,
+        "message": f"Article {'published as draft' if (publish_now and publish_as_draft) else 'published' if publish_now else 'scheduled for publication'}",
+        "published_as_draft": publish_as_draft if publish_now else None
+    }
+
+    if publish_now and publication_results:
+        response["publication_results"] = publication_results
+
+    return response
 
 
 async def calculate_optimal_schedule_time(company_id: str) -> datetime:
@@ -1309,6 +1558,279 @@ async def calculate_optimal_schedule_time(company_id: str) -> datetime:
 
     # If no optimal slot found, use the backup or start_time
     return backup_time if backup_time else start_time
+
+
+# ============================================
+# SCHEDULE PROPOSAL ENDPOINTS
+# ============================================
+
+# Configuration for schedule algorithm
+TIMEZONE = "Europe/Madrid"
+GAP_WP_MINUTES = 30        # Gap between WordPress publications
+GAP_SOCIAL_MINUTES = 15    # Gap between social media publications
+VALID_WINDOWS = [          # Valid audience windows (local time)
+    (8, 11),               # Morning
+    (13, 15),              # Midday
+    (19, 22)               # Evening
+]
+
+
+def _get_madrid_now() -> datetime:
+    """Get current time in Europe/Madrid timezone."""
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+
+    return datetime.now(ZoneInfo(TIMEZONE))
+
+
+def _to_utc(dt: datetime) -> datetime:
+    """Convert datetime to UTC."""
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo(TIMEZONE))
+    return dt.astimezone(ZoneInfo("UTC"))
+
+
+def _is_in_valid_window(hour: int) -> bool:
+    """Check if hour is in a valid audience window."""
+    for start, end in VALID_WINDOWS:
+        if start <= hour <= end:
+            return True
+    return False
+
+
+def _adjust_to_valid_window(dt: datetime) -> datetime:
+    """Adjust datetime to next valid audience window."""
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+
+    # Ensure we're working in Madrid timezone
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo(TIMEZONE))
+
+    hour = dt.hour
+
+    # Night hours (23:00 - 08:00) -> move to next morning 08:30
+    if hour >= 23 or hour < 8:
+        next_day = dt.date() + timedelta(days=1) if hour >= 23 else dt.date()
+        return datetime.combine(next_day, datetime.min.time().replace(hour=8, minute=30), tzinfo=dt.tzinfo)
+
+    # Lunch break (12:00 - 13:00) -> move to 13:30
+    if hour == 12:
+        return dt.replace(hour=13, minute=30, second=0, microsecond=0)
+
+    # If in valid window, return as-is
+    return dt
+
+
+def _adjust_to_work_hours(dt: datetime) -> datetime:
+    """Adjust datetime for LinkedIn (work hours Mon-Fri 08:00-18:00)."""
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo(TIMEZONE))
+
+    # Weekend -> move to Monday 09:00
+    if dt.weekday() >= 5:  # Saturday=5, Sunday=6
+        days_until_monday = 7 - dt.weekday()
+        return datetime.combine(
+            dt.date() + timedelta(days=days_until_monday),
+            datetime.min.time().replace(hour=9, minute=0),
+            tzinfo=dt.tzinfo
+        )
+
+    # Before work hours
+    if dt.hour < 8:
+        return dt.replace(hour=9, minute=0, second=0, microsecond=0)
+
+    # After work hours
+    if dt.hour >= 18:
+        next_day = dt.date() + timedelta(days=1)
+        # If Friday, skip to Monday
+        if dt.weekday() == 4:
+            next_day = dt.date() + timedelta(days=3)
+        return datetime.combine(next_day, datetime.min.time().replace(hour=9, minute=0), tzinfo=dt.tzinfo)
+
+    return dt
+
+
+async def _get_last_scheduled_wp(company_id: str) -> Optional[datetime]:
+    """Get the last scheduled WordPress publication for this company."""
+    try:
+        supabase = get_supabase_client()
+
+        # Check scheduled_publications table first
+        result = supabase.client.table("scheduled_publications")\
+            .select("scheduled_for")\
+            .eq("company_id", company_id)\
+            .eq("platform_type", "wordpress")\
+            .eq("status", "scheduled")\
+            .gt("scheduled_for", datetime.utcnow().isoformat())\
+            .order("scheduled_for", desc=True)\
+            .limit(1)\
+            .execute()
+
+        if result.data:
+            return datetime.fromisoformat(result.data[0]["scheduled_for"].replace("Z", "+00:00"))
+
+        # Also check articles with to_publish_at (legacy)
+        result = supabase.client.table("press_articles")\
+            .select("to_publish_at")\
+            .eq("company_id", company_id)\
+            .eq("estado", "programado")\
+            .gt("to_publish_at", datetime.utcnow().isoformat())\
+            .order("to_publish_at", desc=True)\
+            .limit(1)\
+            .execute()
+
+        if result.data and result.data[0].get("to_publish_at"):
+            return datetime.fromisoformat(result.data[0]["to_publish_at"].replace("Z", "+00:00"))
+
+        return None
+    except Exception as e:
+        logger.warn("get_last_scheduled_wp_error", error=str(e))
+        return None
+
+
+@router.post("/api/v1/articles/{article_id}/propose-schedule")
+async def propose_schedule(
+    article_id: str,
+    company_id: str = Depends(get_company_id_from_auth)
+) -> Dict:
+    """
+    Calculate optimal publication schedules for all available targets.
+
+    **Authentication**: Accepts either JWT or API Key
+
+    Returns proposed schedule times for each publication target,
+    considering:
+    - Valid audience windows (morning, midday, evening)
+    - Gap between WordPress publications (30 min)
+    - Gap between social media posts (15 min)
+    - LinkedIn work hours (Mon-Fri 08:00-18:00)
+
+    **Response**:
+        {
+            "schedules": [
+                {"target_id": "uuid", "platform_type": "wordpress", "schedule_time": "2024-01-29T14:00:00Z"},
+                {"target_id": "uuid", "platform_type": "twitter", "schedule_time": "2024-01-29T14:15:00Z"},
+                ...
+            ]
+        }
+    """
+    try:
+        supabase = get_supabase_client()
+
+        # Verify article exists
+        article_result = supabase.client.table("press_articles")\
+            .select("id")\
+            .eq("id", article_id)\
+            .eq("company_id", company_id)\
+            .single()\
+            .execute()
+
+        if not article_result.data:
+            raise HTTPException(status_code=404, detail="Article not found")
+
+        # Get all active publication targets for this company
+        targets_result = supabase.client.table("press_publication_targets")\
+            .select("id, platform_type, name, is_default")\
+            .eq("company_id", company_id)\
+            .eq("is_active", True)\
+            .order("is_default", desc=True)\
+            .order("created_at")\
+            .execute()
+
+        targets = targets_result.data or []
+
+        if not targets:
+            return {"schedules": []}
+
+        # Get current time in Madrid
+        now_madrid = _get_madrid_now()
+
+        # Get last scheduled WordPress publication
+        last_wp = await _get_last_scheduled_wp(company_id)
+
+        # Calculate base start time (at least 5 minutes from now, after last WP + gap)
+        min_start = now_madrid + timedelta(minutes=5)
+        if last_wp:
+            try:
+                from zoneinfo import ZoneInfo
+            except ImportError:
+                from backports.zoneinfo import ZoneInfo
+            last_wp_madrid = last_wp.astimezone(ZoneInfo(TIMEZONE))
+            wp_after_gap = last_wp_madrid + timedelta(minutes=GAP_WP_MINUTES)
+            min_start = max(min_start, wp_after_gap)
+
+        # Adjust to valid window
+        base_time = _adjust_to_valid_window(min_start)
+
+        # Calculate schedules for each target
+        schedules = []
+        wp_time = None
+        social_pointer = None
+
+        # Sort targets: WordPress first, then social media
+        wp_targets = [t for t in targets if t["platform_type"] == "wordpress"]
+        social_targets = [t for t in targets if t["platform_type"] != "wordpress"]
+
+        # WordPress targets get the base time
+        for target in wp_targets:
+            wp_time = base_time
+            schedules.append({
+                "target_id": target["id"],
+                "platform_type": target["platform_type"],
+                "name": target["name"],
+                "schedule_time": _to_utc(wp_time).strftime("%Y-%m-%dT%H:%M:%SZ")
+            })
+
+        # Social media targets get cascading times after WordPress
+        social_pointer = wp_time if wp_time else base_time
+
+        for target in social_targets:
+            social_pointer = social_pointer + timedelta(minutes=GAP_SOCIAL_MINUTES)
+
+            # Adjust for platform-specific rules
+            if target["platform_type"] == "linkedin":
+                schedule_time = _adjust_to_work_hours(social_pointer)
+            else:
+                schedule_time = _adjust_to_valid_window(social_pointer)
+
+            schedules.append({
+                "target_id": target["id"],
+                "platform_type": target["platform_type"],
+                "name": target["name"],
+                "schedule_time": _to_utc(schedule_time).strftime("%Y-%m-%dT%H:%M:%SZ")
+            })
+
+            # Update pointer for next social target
+            social_pointer = schedule_time
+
+        logger.info("schedule_proposed",
+            article_id=article_id,
+            company_id=company_id,
+            targets_count=len(schedules)
+        )
+
+        return {"schedules": schedules}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("propose_schedule_error", error=str(e), article_id=article_id)
+        raise HTTPException(status_code=500, detail="Failed to calculate schedule")
 
 
 # ============================================

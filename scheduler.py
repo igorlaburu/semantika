@@ -33,7 +33,8 @@ import aiohttp
 # Import article generation jobs
 from jobs.article_generator import (
     daily_article_generation,
-    publish_scheduled_articles
+    publish_scheduled_articles,
+    process_scheduled_publications
 )
 
 logger = get_logger("scheduler")
@@ -661,7 +662,7 @@ async def main():
         )
         logger.info("daily_article_generation_scheduled", time="08:00 UTC")
         
-        # Schedule publication check every 5 minutes
+        # Schedule publication check every 5 minutes (legacy - articles with to_publish_at)
         scheduler.add_job(
             publish_scheduled_articles,
             trigger=IntervalTrigger(minutes=5),
@@ -670,6 +671,16 @@ async def main():
             max_instances=1
         )
         logger.info("scheduled_publication_check_scheduled", interval_minutes=5)
+
+        # Schedule per-target publication processing every 2 minutes (new - scheduled_publications table)
+        scheduler.add_job(
+            process_scheduled_publications,
+            trigger=IntervalTrigger(minutes=2),
+            id="process_scheduled_publications",
+            replace_existing=True,
+            max_instances=1
+        )
+        logger.info("process_scheduled_publications_scheduled", interval_minutes=2)
 
         # Create tasks for monitors
         monitor_tasks = []
