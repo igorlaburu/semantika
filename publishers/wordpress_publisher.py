@@ -180,7 +180,8 @@ class WordPressPublisher(BasePublisher):
                 return cached_media_id
             
             # Get image from unified endpoint (internal docker network call, no auth needed)
-            unified_image_url = f"http://ekimen_semantika_semantika-api:8000/api/v1/images/{imagen_uuid}"
+            # Use docker-compose service name (not container name)
+            unified_image_url = f"http://semantika-api:8000/api/v1/images/{imagen_uuid}"
             
             async with session.get(unified_image_url) as img_response:
                 if img_response.status != 200:
