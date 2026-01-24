@@ -3,7 +3,7 @@
 Handles article CRUD, publishing to platforms, and related articles.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, Any, List
 import asyncio
 
@@ -1211,7 +1211,7 @@ async def _publish_with_target_schedules(
             # Scheduled publication
             try:
                 scheduled_dt = datetime.fromisoformat(schedule_time.replace('Z', '+00:00'))
-                if scheduled_dt <= datetime.utcnow():
+                if scheduled_dt <= datetime.now(timezone.utc):
                     # Time in past, publish immediately instead
                     immediate_targets.append(target)
                 else:
@@ -1443,7 +1443,7 @@ async def _publish_legacy_format(
                 scheduled_datetime = datetime.fromisoformat(
                     schedule_time.replace('Z', '+00:00')
                 )
-                if scheduled_datetime <= datetime.utcnow():
+                if scheduled_datetime <= datetime.now(timezone.utc):
                     raise HTTPException(
                         status_code=400,
                         detail="Schedule time must be in the future"
