@@ -441,6 +441,7 @@ async def process_redact_news_rich(
                 "raw_summary": raw_summary,
                 "raw_article": raw_article,
                 "image_prompt": data.get("image_prompt", ""),
+                "social_hooks": data.get("social_hooks", {}),
                 "tags": data.get("tags", []),
                 "generated_at": datetime.utcnow().isoformat() + "Z"
             }

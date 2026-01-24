@@ -1235,6 +1235,109 @@ Respond with ONLY the prompt text (no JSON, no markdown, no explanation).""")
             _log_llm_error("generate_image_prompt", e)
             return {"image_prompt": "", "error": str(e)}
 
+    def _truncate_hook(self, text: str, max_length: int = 150) -> str:
+        """Truncate hook to max_length, adding '...' if needed."""
+        text = text.strip()
+        if len(text) <= max_length:
+            return text
+        return text[:max_length - 3] + "..."
+
+    async def generate_social_hooks(
+        self,
+        title: str,
+        content: str,
+        organization_id: Optional[str] = None,
+        client_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Generate social media hooks for different platforms using Groq.
+
+        Generates 3 hooks:
+        - direct: Concise, impactful (Twitter/X style)
+        - professional: Formal, data-focused (LinkedIn style)
+        - emotional: Engaging, connects with reader (Facebook style)
+
+        Each hook is max 150 chars. Falls back to truncated title on error.
+        """
+        fallback_hook = self._truncate_hook(title, 150)
+        fallback_result = {
+            "social_hooks": {
+                "direct": fallback_hook,
+                "professional": fallback_hook,
+                "emotional": fallback_hook
+            },
+            "source": "fallback"
+        }
+
+        # Check if Groq is available
+        if not hasattr(self, 'llm_groq_fast') or not self.llm_groq_fast:
+            logger.warn("groq_not_available_using_fallback")
+            return fallback_result
+
+        try:
+            hooks_prompt = ChatPromptTemplate.from_messages([
+                ("system", "You are an expert social media copywriter. Generate engaging hooks for news articles."),
+                ("user", """Generate 3 social media hooks for this article. Each hook must be MAXIMUM 150 characters.
+
+Title: {title}
+
+Content summary: {content}
+
+Generate 3 hooks in JSON format:
+{{
+    "direct": "Concise, impactful hook for Twitter/X. No emojis. Max 150 chars.",
+    "professional": "Formal, data-focused hook for LinkedIn. No emojis. Max 150 chars.",
+    "emotional": "Engaging hook that connects with reader for Facebook. Can use 1-2 emojis. Max 150 chars."
+}}
+
+IMPORTANT:
+- Each hook must be UNDER 150 characters
+- Do NOT include hashtags or URLs (added automatically)
+- Do NOT repeat the exact title, rephrase it
+- Make each hook unique and platform-appropriate
+- Respond with ONLY valid JSON, no markdown""")
+            ])
+
+            hooks_chain = RunnableSequence(
+                hooks_prompt | self.llm_groq_fast | JsonOutputParser()
+            )
+
+            # Truncate content to avoid token overflow
+            content_preview = content[:1500] if len(content) > 1500 else content
+
+            hooks_result = await hooks_chain.ainvoke({
+                "title": title,
+                "content": content_preview
+            })
+
+            # Validate and truncate hooks if needed
+            social_hooks = {}
+            for hook_type in ["direct", "professional", "emotional"]:
+                hook_text = hooks_result.get(hook_type, "")
+                if hook_text:
+                    social_hooks[hook_type] = self._truncate_hook(hook_text, 150)
+                else:
+                    social_hooks[hook_type] = fallback_hook
+
+            logger.info("social_hooks_generated",
+                title=title[:50],
+                direct_len=len(social_hooks["direct"]),
+                professional_len=len(social_hooks["professional"]),
+                emotional_len=len(social_hooks["emotional"])
+            )
+
+            return {
+                "social_hooks": social_hooks,
+                "source": "groq"
+            }
+
+        except Exception as e:
+            logger.error("social_hooks_generation_failed",
+                error=str(e),
+                title=title[:50]
+            )
+            # Return fallback - don't break the flow
+            return fallback_result
+
     async def generate_style_guide(
         self,
         style_name: str,

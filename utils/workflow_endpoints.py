@@ -701,6 +701,42 @@ async def execute_redact_news_rich(
             logger.error("image_prompt_generation_failed", error=str(e))
             result["image_prompt"] = ""
 
+        # Generate social_hooks for RRSS (using Groq - free and fast)
+        try:
+            article_content = result.get("article", "")
+            article_title = result.get("title", "")
+
+            if article_content and article_title:
+                hooks_result = await openrouter.generate_social_hooks(
+                    title=article_title,
+                    content=article_content,
+                    organization_id=organization_id,
+                    client_id=client["client_id"]
+                )
+                result["social_hooks"] = hooks_result.get("social_hooks", {})
+                logger.info("social_hooks_generated",
+                    source=hooks_result.get("source", "unknown"),
+                    hooks_preview={k: v[:50] + "..." if len(v) > 50 else v
+                                   for k, v in result["social_hooks"].items()}
+                )
+            else:
+                # Fallback to truncated title
+                fallback = article_title[:147] + "..." if len(article_title) > 150 else article_title
+                result["social_hooks"] = {
+                    "direct": fallback,
+                    "professional": fallback,
+                    "emotional": fallback
+                }
+        except Exception as e:
+            logger.error("social_hooks_generation_failed", error=str(e))
+            # Fallback - don't break the flow
+            fallback = article_title[:147] + "..." if len(article_title) > 150 else article_title
+            result["social_hooks"] = {
+                "direct": fallback,
+                "professional": fallback,
+                "emotional": fallback
+            }
+
         # Auto-assign featured_image from first context unit (if available)
         imagen_url = None
         image_info = None

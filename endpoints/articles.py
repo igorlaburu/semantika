@@ -64,11 +64,13 @@ async def list_articles(
         total = result.count if hasattr(result, 'count') else 0
         items = result.data or []
 
-        # Extract image_prompt from working_json for each article
+        # Extract image_prompt and social_hooks from working_json for each article
         for article in items:
             if article.get("working_json") and isinstance(article["working_json"], dict):
                 if "image_prompt" in article["working_json"]:
                     article["image_prompt"] = article["working_json"]["image_prompt"]
+                if "social_hooks" in article["working_json"]:
+                    article["social_hooks"] = article["working_json"]["social_hooks"]
 
         return {
             "items": items,
@@ -106,11 +108,13 @@ async def get_article_by_slug(
         if not result.data:
             raise HTTPException(status_code=404, detail="Article not found")
 
-        # Extract image_prompt from working_json if available
+        # Extract image_prompt and social_hooks from working_json if available
         article = result.data
         if article.get("working_json") and isinstance(article["working_json"], dict):
             if "image_prompt" in article["working_json"]:
                 article["image_prompt"] = article["working_json"]["image_prompt"]
+            if "social_hooks" in article["working_json"]:
+                article["social_hooks"] = article["working_json"]["social_hooks"]
 
         return article
 
@@ -239,11 +243,13 @@ async def get_article(
         if not result.data:
             raise HTTPException(status_code=404, detail="Article not found")
 
-        # Extract image_prompt from working_json if available
+        # Extract image_prompt and social_hooks from working_json if available
         article = result.data
         if article.get("working_json") and isinstance(article["working_json"], dict):
             if "image_prompt" in article["working_json"]:
                 article["image_prompt"] = article["working_json"]["image_prompt"]
+            if "social_hooks" in article["working_json"]:
+                article["social_hooks"] = article["working_json"]["social_hooks"]
 
         return article
 
@@ -708,43 +714,39 @@ async def publish_to_platforms(
                 )
                 await asyncio.sleep(2)
 
-            # Format hashtags from tags
-            hashtags = ""
-            if tags:
-                import re
-                formatted_tags = []
-                for tag in tags[:5]:  # Limit to 5 hashtags
-                    clean_tag = re.sub(r'[^a-zA-Z0-9áéíóúñüÁÉÍÓÚÑÜ]', '', str(tag))
-                    if clean_tag and len(clean_tag) > 1:
-                        formatted_tags.append(f"#{clean_tag}")
-                hashtags = " ".join(formatted_tags)
+            # Get social_hooks from working_json (platform-specific hooks)
+            working_json = article.get('working_json') or {}
+            social_hooks = working_json.get('social_hooks') or {}
 
-            # Build social media content (max 280 chars for Twitter)
-            # Format: title + url + hashtags (NO excerpt, hashtags only if they fit, title truncated if needed)
-            MAX_TWEET_LENGTH = 280
+            # Mapping: platform -> hook type
+            PLATFORM_HOOK_MAP = {
+                'twitter': 'direct',
+                'linkedin': 'professional',
+                'facebook': 'emotional',
+                'instagram': 'emotional'  # Same as Facebook
+            }
 
-            # Get URL: published article URL or fallback to WordPress base URL
-            # Priority: 1) Just published WP URL, 2) Previously published URL, 3) WP base URL
-            tweet_url = wordpress_url
+            # Fallback hook (truncated title)
+            fallback_hook = title[:147] + "..." if len(title) > 150 else title
 
-            # Check for previously published URL if not publishing to WP now
-            if not tweet_url and article.get('published_url'):
-                tweet_url = article['published_url']
+            # Get URL: published article URL or fallback
+            social_url = wordpress_url
+
+            if not social_url and article.get('published_url'):
+                social_url = article['published_url']
                 logger.info("social_using_previous_published_url",
                     article_id=article['id'],
-                    published_url=tweet_url
+                    published_url=social_url
                 )
 
-            if not tweet_url and wordpress_targets:
-                # Use first WordPress target's base_url as fallback
-                tweet_url = wordpress_targets[0].get('base_url', '')
+            if not social_url and wordpress_targets:
+                social_url = wordpress_targets[0].get('base_url', '')
                 logger.info("social_using_fallback_base_url",
                     article_id=article['id'],
-                    fallback_url=tweet_url
+                    fallback_url=social_url
                 )
 
-            # If still no URL, try to get default WordPress from company
-            if not tweet_url:
+            if not social_url:
                 try:
                     default_wp = supabase.client.table("press_publication_targets")\
                         .select("base_url")\
@@ -755,10 +757,10 @@ async def publish_to_platforms(
                         .limit(1)\
                         .execute()
                     if default_wp.data:
-                        tweet_url = default_wp.data[0].get('base_url', '')
+                        social_url = default_wp.data[0].get('base_url', '')
                         logger.info("social_using_default_wordpress_url",
                             article_id=article['id'],
-                            default_url=tweet_url
+                            default_url=social_url
                         )
                 except Exception as e:
                     logger.warn("social_failed_to_get_default_wordpress",
@@ -766,44 +768,32 @@ async def publish_to_platforms(
                         error=str(e)
                     )
 
-            # Calculate available space for title
-            # Format: "title\n\nurl\n\nhashtags" or "title\n\nurl" if hashtags don't fit
-            url_length = len(tweet_url) if tweet_url else 23  # Twitter shortens URLs to 23 chars
-            base_length = url_length + 4  # 4 = two "\n\n" separators
-
-            # Try with hashtags first
-            if hashtags:
-                available_for_title = MAX_TWEET_LENGTH - base_length - len(hashtags) - 2  # -2 for extra \n\n
-                if available_for_title < 50:  # If not enough space, drop hashtags
-                    hashtags = ""
-                    available_for_title = MAX_TWEET_LENGTH - base_length
-            else:
-                available_for_title = MAX_TWEET_LENGTH - base_length
-
-            # Truncate title if needed
-            truncated_title = title
-            if len(title) > available_for_title:
-                truncated_title = title[:available_for_title - 3] + "..."
-
-            # Build final tweet content
-            if hashtags:
-                social_content = f"{truncated_title}\n\n{tweet_url}\n\n{hashtags}"
-            else:
-                social_content = f"{truncated_title}\n\n{tweet_url}"
-
-            logger.info("social_content_prepared",
-                article_id=article['id'],
-                content_length=len(social_content),
-                has_hashtags=bool(hashtags),
-                truncated=len(title) > available_for_title
-            )
-
             for target in social_targets:
                 target_id = target['id']
+                platform = target['platform_type']
 
                 try:
+                    # Get platform-specific hook
+                    hook_type = PLATFORM_HOOK_MAP.get(platform, 'direct')
+                    hook_text = social_hooks.get(hook_type) or fallback_hook
+
+                    # Ensure hook is within limits (150 chars max)
+                    if len(hook_text) > 150:
+                        hook_text = hook_text[:147] + "..."
+
+                    # Build social content: hook + URL (no hashtags)
+                    social_content = f"{hook_text}\n\n{social_url}" if social_url else hook_text
+
+                    logger.info("social_content_prepared",
+                        article_id=article['id'],
+                        platform=platform,
+                        hook_type=hook_type,
+                        content_length=len(social_content),
+                        hook_preview=hook_text[:50]
+                    )
+
                     publisher = PublisherFactory.create_publisher(
-                        target['platform_type'],
+                        platform,
                         target.get('base_url', ''),
                         target['credentials_encrypted']
                     )
@@ -811,15 +801,15 @@ async def publish_to_platforms(
                     # Social media publish - different method than WordPress
                     result = await publisher.publish_social(
                         content=social_content,
-                        url=tweet_url,
+                        url=social_url,
                         image_uuid=imagen_uuid,
-                        tags=tags[:5] if tags else [],
+                        tags=[],  # No hashtags
                         temp_image_path=temp_image_path
                     )
 
                     publication_results[target_id] = {
                         "success": result.success,
-                        "platform": target['platform_type'],
+                        "platform": platform,
                         "target_name": target['name'],
                         "url": result.url,
                         "external_id": result.external_id,
@@ -831,7 +821,8 @@ async def publish_to_platforms(
                     logger.info("article_published_to_social",
                         article_id=article['id'],
                         target_id=target_id,
-                        platform=target['platform_type'],
+                        platform=platform,
+                        hook_type=hook_type,
                         success=result.success,
                         url=result.url
                     )
@@ -839,7 +830,7 @@ async def publish_to_platforms(
                 except Exception as e:
                     publication_results[target_id] = {
                         "success": False,
-                        "platform": target['platform_type'],
+                        "platform": platform,
                         "target_name": target['name'],
                         "error": f"Social publication error: {str(e)}"
                     }
@@ -847,7 +838,7 @@ async def publish_to_platforms(
                     logger.error("social_platform_publication_failed",
                         article_id=article['id'],
                         target_id=target_id,
-                        platform=target['platform_type'],
+                        platform=platform,
                         error=str(e)
                     )
 
