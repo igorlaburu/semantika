@@ -527,8 +527,8 @@ async def extract_publication_date(
     # Parse HTML
     soup = BeautifulSoup(html, 'html.parser')
 
-    # Cutoff for "recent" dates (7 days - only last week's content)
-    recent_cutoff = datetime.now() - timedelta(days=7)
+    # Cutoff for "recent" dates (30 days - last month's content)
+    recent_cutoff = datetime.now() - timedelta(days=30)
 
     def filter_recent(dates_list):
         """Filter to only keep recent dates (within 2 years)."""
