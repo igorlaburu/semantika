@@ -1750,19 +1750,29 @@ async def _get_last_scheduled_wp(company_id: str) -> Optional[datetime]:
 async def get_scheduled_publications(
     company_id: str = Depends(get_company_id_from_auth),
     status: Optional[str] = None,
+    previous_hours: int = 24,
     limit: int = 50
 ) -> Dict:
-    """Get all scheduled publications for the company.
+    """Get scheduled publications for the company.
 
-    Returns all publications ordered by scheduled_for time.
-    Optionally filter by status: 'scheduled', 'published', 'failed'
+    Returns publications from the last N hours (default 24) ordered by scheduled_for.
+    This includes both future scheduled items and recently published/failed ones.
+
+    Args:
+        status: Optional filter - 'scheduled', 'published', 'failed'
+        previous_hours: Hours to look back (default 24). Use 0 for only future scheduled.
+        limit: Max results (default 50)
     """
     supabase = get_supabase_client()
+
+    # Calculate time threshold
+    from_time = datetime.now(timezone.utc) - timedelta(hours=previous_hours)
 
     # Build query
     query = supabase.client.table("scheduled_publications")\
         .select("id, article_id, target_id, platform_type, scheduled_for, status, published_at, social_hook, error_message, publication_result, press_articles!inner(titulo)")\
         .eq("company_id", company_id)\
+        .gte("scheduled_for", from_time.isoformat())\
         .order("scheduled_for", desc=False)\
         .limit(limit)
 
@@ -1788,10 +1798,11 @@ async def get_scheduled_publications(
             "published_url": pub.get('publication_result', {}).get('url') if pub.get('publication_result') else None
         })
 
-    # Summary counts (from all, not just filtered)
+    # Summary counts (within same time window)
     all_pubs = supabase.client.table("scheduled_publications")\
         .select("status")\
         .eq("company_id", company_id)\
+        .gte("scheduled_for", from_time.isoformat())\
         .execute()
 
     total = len(all_pubs.data or [])
@@ -1804,7 +1815,8 @@ async def get_scheduled_publications(
             "total": total,
             "scheduled": scheduled_count,
             "published": published_count,
-            "failed": failed_count
+            "failed": failed_count,
+            "previous_hours": previous_hours
         },
         "publications": publications
     }
