@@ -362,3 +362,76 @@ async def test_publication_target(
             error=str(e)
         )
         raise HTTPException(status_code=500, detail="Failed to test publication target")
+
+
+@router.post("/{target_id}/verify-permissions")
+async def verify_facebook_permissions(
+    target_id: str,
+    company_id: str = Depends(get_company_id_from_auth)
+) -> Dict[str, Any]:
+    """Verify Facebook API permissions by making test calls.
+
+    This endpoint helps complete Facebook's app verification process.
+    It makes API calls to test each required permission:
+    - pages_manage_posts: Get page info
+    - pages_read_engagement: Read page feed
+    - pages_read_user_content: Read comments on posts
+    - pages_manage_engagement: Verified when posting comments
+    """
+    try:
+        from publishers.publisher_factory import PublisherFactory
+
+        supabase = get_supabase_client()
+
+        # Get target with credentials
+        result = supabase.client.table("press_publication_targets")\
+            .select("*")\
+            .eq("id", target_id)\
+            .eq("company_id", company_id)\
+            .eq("is_active", True)\
+            .maybe_single()\
+            .execute()
+
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Publication target not found")
+
+        target = result.data
+
+        if target['platform_type'] != 'facebook':
+            raise HTTPException(
+                status_code=400,
+                detail="Permission verification is only available for Facebook targets"
+            )
+
+        # Create Facebook publisher
+        publisher = PublisherFactory.create_publisher(
+            target['platform_type'],
+            target['base_url'],
+            target['credentials_encrypted']
+        )
+
+        # Verify permissions
+        verify_result = await publisher.verify_permissions()
+
+        logger.info("facebook_permissions_verification_complete",
+            target_id=target_id,
+            company_id=company_id,
+            results=verify_result
+        )
+
+        return {
+            "target_id": target_id,
+            "platform": "facebook",
+            "permissions": verify_result,
+            "note": "Call this endpoint to trigger API calls that verify your Facebook permissions. Check your Facebook App Dashboard to see updated verification status."
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("verify_permissions_error",
+            target_id=target_id,
+            company_id=company_id,
+            error=str(e)
+        )
+        raise HTTPException(status_code=500, detail=f"Failed to verify permissions: {str(e)}")

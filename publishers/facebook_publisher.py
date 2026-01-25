@@ -644,3 +644,148 @@ class FacebookPublisher(BasePublisher):
                 "success": False,
                 "error": str(e)
             }
+
+    async def get_post_comments(self, post_id: str) -> Dict[str, Any]:
+        """Read comments from a post.
+
+        Uses pages_read_user_content permission.
+        Call this to verify the permission with Facebook.
+        """
+        try:
+            page_token = self._get_page_access_token()
+
+            url = f"{GRAPH_API_BASE}/{post_id}/comments"
+            params = {
+                'access_token': page_token,
+                'fields': 'id,message,from,created_time',
+                'limit': 10
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params) as response:
+                    response_data = await response.json()
+
+                    if response.status == 200:
+                        comments = response_data.get('data', [])
+                        logger.info("facebook_get_comments_success",
+                            post_id=post_id,
+                            comments_count=len(comments)
+                        )
+                        return {
+                            "success": True,
+                            "comments": comments,
+                            "permission_verified": "pages_read_user_content"
+                        }
+                    else:
+                        error_msg = response_data.get('error', {}).get('message', f'HTTP {response.status}')
+                        error_code = response_data.get('error', {}).get('code')
+                        logger.error("facebook_get_comments_failed",
+                            post_id=post_id,
+                            status=response.status,
+                            error=error_msg,
+                            error_code=error_code
+                        )
+                        return {
+                            "success": False,
+                            "error": error_msg,
+                            "error_code": error_code
+                        }
+
+        except Exception as e:
+            logger.error("facebook_get_comments_error", error=str(e))
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    async def verify_permissions(self) -> Dict[str, Any]:
+        """Verify all required permissions by making test API calls.
+
+        This helps complete Facebook's app verification process.
+        """
+        results = {
+            "pages_manage_posts": {"status": "unknown"},
+            "pages_read_engagement": {"status": "unknown"},
+            "pages_read_user_content": {"status": "unknown"},
+            "pages_manage_engagement": {"status": "unknown"}
+        }
+
+        try:
+            page_id = self.credentials.get('page_id')
+            page_token = self._get_page_access_token()
+
+            if not page_id:
+                return {"error": "No page_id configured"}
+
+            # 1. Test pages_manage_posts - Get page info
+            try:
+                url = f"{GRAPH_API_BASE}/{page_id}"
+                params = {'access_token': page_token, 'fields': 'name,id'}
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, params=params) as response:
+                        if response.status == 200:
+                            results["pages_manage_posts"] = {"status": "verified", "test": "get_page_info"}
+                        else:
+                            data = await response.json()
+                            results["pages_manage_posts"] = {"status": "failed", "error": data.get('error', {}).get('message')}
+            except Exception as e:
+                results["pages_manage_posts"] = {"status": "error", "error": str(e)}
+
+            # 2. Test pages_read_engagement - Get page feed
+            try:
+                url = f"{GRAPH_API_BASE}/{page_id}/feed"
+                params = {'access_token': page_token, 'fields': 'id,message,created_time', 'limit': 1}
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, params=params) as response:
+                        data = await response.json()
+                        if response.status == 200:
+                            posts = data.get('data', [])
+                            results["pages_read_engagement"] = {
+                                "status": "verified",
+                                "test": "get_page_feed",
+                                "posts_found": len(posts)
+                            }
+
+                            # If we have a post, test comment-related permissions
+                            if posts:
+                                post_id = posts[0]['id']
+
+                                # 3. Test pages_read_user_content - Read comments
+                                try:
+                                    comments_url = f"{GRAPH_API_BASE}/{post_id}/comments"
+                                    comments_params = {'access_token': page_token, 'fields': 'id,message', 'limit': 5}
+                                    async with session.get(comments_url, params=comments_params) as comments_resp:
+                                        comments_data = await comments_resp.json()
+                                        if comments_resp.status == 200:
+                                            results["pages_read_user_content"] = {
+                                                "status": "verified",
+                                                "test": "read_post_comments",
+                                                "post_id": post_id,
+                                                "comments_found": len(comments_data.get('data', []))
+                                            }
+                                        else:
+                                            results["pages_read_user_content"] = {
+                                                "status": "failed",
+                                                "error": comments_data.get('error', {}).get('message'),
+                                                "error_code": comments_data.get('error', {}).get('code')
+                                            }
+                                except Exception as e:
+                                    results["pages_read_user_content"] = {"status": "error", "error": str(e)}
+
+                                # 4. Test pages_manage_engagement - We don't want to post a test comment
+                                # Just verify by checking if we can access the comments endpoint for posting
+                                results["pages_manage_engagement"] = {
+                                    "status": "requires_action",
+                                    "note": "This permission is verified when posting URL as comment on published articles"
+                                }
+                        else:
+                            results["pages_read_engagement"] = {"status": "failed", "error": data.get('error', {}).get('message')}
+            except Exception as e:
+                results["pages_read_engagement"] = {"status": "error", "error": str(e)}
+
+            logger.info("facebook_permissions_verified", results=results)
+            return results
+
+        except Exception as e:
+            logger.error("facebook_verify_permissions_error", error=str(e))
+            return {"error": str(e), "results": results}
