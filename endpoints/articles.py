@@ -1777,24 +1777,33 @@ async def _get_last_scheduled_wp(company_id: str) -> Optional[datetime]:
 async def get_scheduled_publications(
     company_id: str = Depends(get_company_id_from_auth),
     status: Optional[str] = None,
-    previous_hours: int = 24,
+    previous_hours: Optional[int] = None,
+    previous_days: Optional[int] = None,
     limit: int = 50
 ) -> Dict:
     """Get all publications (scheduled + immediate) for the company.
 
-    Returns publications from the last N hours (default 24).
+    Returns publications from the specified time window.
     - Scheduled: filtered by scheduled_for >= from_time
     - Immediate: filtered by published_at >= from_time (scheduled_for is NULL)
 
     Args:
         status: Optional filter - 'scheduled', 'published', 'failed'
-        previous_hours: Hours to look back (default 24). Use 0 for only future scheduled.
+        previous_hours: Hours to look back. Default 24 if neither hours nor days specified.
+        previous_days: Days to look back. Takes precedence over previous_hours.
         limit: Max results (default 50)
     """
     supabase = get_supabase_client()
 
-    # Calculate time threshold
-    from_time = datetime.now(timezone.utc) - timedelta(hours=previous_hours)
+    # Calculate time threshold (previous_days takes precedence)
+    if previous_days is not None:
+        hours_back = previous_days * 24
+    elif previous_hours is not None:
+        hours_back = previous_hours
+    else:
+        hours_back = 24  # Default
+
+    from_time = datetime.now(timezone.utc) - timedelta(hours=hours_back)
     from_time_iso = from_time.isoformat()
 
     # Build query with OR condition:
@@ -1848,7 +1857,8 @@ async def get_scheduled_publications(
             "scheduled": scheduled_count,
             "published": published_count,
             "failed": failed_count,
-            "previous_hours": previous_hours
+            "lookback_hours": hours_back,
+            "lookback_days": hours_back / 24
         },
         "publications": publications
     }
