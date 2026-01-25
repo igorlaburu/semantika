@@ -12,7 +12,7 @@ Strategy: Extract dates from all sources, take the OLDEST (avoids detecting rede
 
 import re
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Tuple
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
@@ -24,10 +24,12 @@ logger = get_logger("date_extractor")
 # Common date patterns
 DATE_PATTERNS = {
     'iso8601': r'\d{4}-\d{2}-\d{2}',
+    'iso_slash': r'\d{4}/\d{2}/\d{2}',  # YYYY/MM/DD (Vidrala style)
     'slash': r'\d{1,2}/\d{1,2}/\d{4}',
     'dot': r'\d{1,2}\.\d{1,2}\.\d{4}',
     'spanish': r'\d{1,2}\s+(?:de\s+)?(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\s+(?:de\s+)?\d{4}',
-    'english': r'(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}'
+    'english': r'(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}',
+    'english_day_month': r'\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}'  # 11 December 2025
 }
 
 # Month name mappings
@@ -46,18 +48,18 @@ ENGLISH_MONTHS = {
 
 def parse_date_string(date_str: str) -> Optional[datetime]:
     """Parse date string to datetime object.
-    
+
     Args:
         date_str: Date string in various formats
-        
+
     Returns:
         datetime object or None if parsing fails
     """
     if not date_str:
         return None
-    
+
     date_str = date_str.strip()
-    
+
     # Try ISO 8601 format first (most common in meta tags)
     iso_match = re.search(r'(\d{4}-\d{2}-\d{2})', date_str)
     if iso_match:
@@ -65,7 +67,7 @@ def parse_date_string(date_str: str) -> Optional[datetime]:
             return datetime.strptime(iso_match.group(1), '%Y-%m-%d')
         except ValueError:
             pass
-    
+
     # Try ISO 8601 with time
     iso_time_match = re.search(r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})', date_str)
     if iso_time_match:
@@ -73,7 +75,15 @@ def parse_date_string(date_str: str) -> Optional[datetime]:
             return datetime.strptime(iso_time_match.group(1), '%Y-%m-%dT%H:%M:%S')
         except ValueError:
             pass
-    
+
+    # Try YYYY/MM/DD format (Vidrala style)
+    iso_slash_match = re.search(r'(\d{4})/(\d{2})/(\d{2})', date_str)
+    if iso_slash_match:
+        try:
+            return datetime.strptime(iso_slash_match.group(0), '%Y/%m/%d')
+        except ValueError:
+            pass
+
     # Try slash format (MM/DD/YYYY or DD/MM/YYYY)
     slash_match = re.search(r'(\d{1,2})/(\d{1,2})/(\d{4})', date_str)
     if slash_match:
@@ -86,7 +96,7 @@ def parse_date_string(date_str: str) -> Optional[datetime]:
                 return datetime.strptime(slash_match.group(0), '%m/%d/%Y')
             except ValueError:
                 pass
-    
+
     # Try Spanish month names
     spanish_match = re.search(
         r'(\d{1,2})\s+(?:de\s+)?(' + '|'.join(SPANISH_MONTHS.keys()) + r')\s+(?:de\s+)?(\d{4})',
@@ -100,8 +110,8 @@ def parse_date_string(date_str: str) -> Optional[datetime]:
             return datetime(year, month, day)
         except (ValueError, KeyError):
             pass
-    
-    # Try English month names
+
+    # Try English month names: "January 15, 2025" or "January 15 2025"
     english_match = re.search(
         r'(' + '|'.join(ENGLISH_MONTHS.keys()) + r')\s+(\d{1,2}),?\s+(\d{4})',
         date_str.lower()
@@ -114,7 +124,21 @@ def parse_date_string(date_str: str) -> Optional[datetime]:
             return datetime(year, month, day)
         except (ValueError, KeyError):
             pass
-    
+
+    # Try English format: "15 January 2025" (day month year)
+    english_dmy_match = re.search(
+        r'(\d{1,2})\s+(' + '|'.join(ENGLISH_MONTHS.keys()) + r')\s+(\d{4})',
+        date_str.lower()
+    )
+    if english_dmy_match:
+        try:
+            day = int(english_dmy_match.group(1))
+            month = ENGLISH_MONTHS[english_dmy_match.group(2)]
+            year = int(english_dmy_match.group(3))
+            return datetime(year, month, day)
+        except (ValueError, KeyError):
+            pass
+
     return None
 
 
@@ -317,6 +341,93 @@ def extract_from_css_selectors(soup: BeautifulSoup) -> List[Tuple[datetime, str,
     return dates
 
 
+def extract_flexible_date(text: str) -> List[Tuple[datetime, str, float]]:
+    """Flexible date extraction - looks for year + month patterns nearby (70% confidence).
+
+    Strategy: Find recent years (2024-2026), then look for month indicators nearby.
+    More permissive than strict pattern matching.
+
+    Args:
+        text: Plain text content
+
+    Returns:
+        List of (datetime, source, confidence) tuples
+    """
+    dates = []
+    now = datetime.now()
+    text_lower = text.lower()
+
+    # All month names (Spanish + English)
+    all_months = {**SPANISH_MONTHS, **ENGLISH_MONTHS}
+
+    # Find all year occurrences (2024, 2025, 2026)
+    year_pattern = r'\b(202[4-6])\b'
+    for year_match in re.finditer(year_pattern, text):
+        year = int(year_match.group(1))
+        year_pos = year_match.start()
+
+        # Look in a window around the year (100 chars before and after)
+        window_start = max(0, year_pos - 100)
+        window_end = min(len(text), year_pos + 100)
+        window = text_lower[window_start:window_end]
+
+        month = None
+        day = None
+
+        # Try to find month name in window
+        for month_name, month_num in all_months.items():
+            if month_name in window:
+                month = month_num
+                # Try to find day near the month name
+                month_pos = window.find(month_name)
+                day_window = window[max(0, month_pos-20):month_pos+len(month_name)+20]
+                day_match = re.search(r'\b(\d{1,2})\b', day_window)
+                if day_match:
+                    potential_day = int(day_match.group(1))
+                    if 1 <= potential_day <= 31:
+                        day = potential_day
+                break
+
+        # Try numeric month (01-12) if no month name found
+        if not month:
+            # Look for patterns like /01/, -01-, .01. near the year
+            month_patterns = [
+                r'[/\-\.](\d{2})[/\-\.]',  # /01/ or -01- or .01.
+                r'\b(\d{2})\b'  # Just a two-digit number
+            ]
+            for mp in month_patterns:
+                month_match = re.search(mp, window)
+                if month_match:
+                    potential_month = int(month_match.group(1))
+                    if 1 <= potential_month <= 12:
+                        month = potential_month
+                        # Look for day
+                        remaining = window.replace(month_match.group(0), '', 1)
+                        day_match = re.search(r'\b(\d{1,2})\b', remaining)
+                        if day_match:
+                            potential_day = int(day_match.group(1))
+                            if 1 <= potential_day <= 31:
+                                day = potential_day
+                        break
+
+        # If we found year and month, create a date
+        if month:
+            try:
+                if not day:
+                    day = 1  # Default to first of month
+                dt = datetime(year, month, day)
+                if dt <= now:
+                    dates.append((dt, 'flexible_pattern', 0.70))
+                    logger.debug("date_from_flexible_pattern",
+                        year=year, month=month, day=day,
+                        date=dt.isoformat()
+                    )
+            except ValueError:
+                pass
+
+    return dates
+
+
 async def extract_from_llm(html: str, title: str) -> List[Tuple[datetime, str, float]]:
     """Extract date using LLM fallback (60% confidence).
     
@@ -410,67 +521,91 @@ async def extract_publication_date(
         - all_dates: List of all dates found
     """
     logger.debug("extract_publication_date_start", url=url)
-    
+
     # Parse HTML
     soup = BeautifulSoup(html, 'html.parser')
-    
+
+    # Cutoff for "recent" dates (2 years ago)
+    recent_cutoff = datetime.now() - timedelta(days=730)
+
+    def filter_recent(dates_list):
+        """Filter to only keep recent dates (within 2 years)."""
+        return [(dt, src, conf) for dt, src, conf in dates_list if dt >= recent_cutoff]
+
     # Collect dates from all sources
     all_dates = []
-    
+
     # 1. Meta tags (95% confidence)
     all_dates.extend(extract_from_meta_tags(soup))
-    
+
     # 2. JSON-LD (95% confidence)
     all_dates.extend(extract_from_jsonld(soup))
-    
+
     # 3. URL patterns (80% confidence)
     all_dates.extend(extract_from_url(url))
-    
+
     # 4. CSS selectors (75% confidence)
     all_dates.extend(extract_from_css_selectors(soup))
-    
-    # 5. LLM fallback (60% confidence) - only if other methods failed
-    if not all_dates and use_llm_fallback and title:
+
+    # 5. Flexible pattern matching (70% confidence) - before LLM
+    if not filter_recent(all_dates):
+        # Only try flexible if no recent structured dates found
+        text_content = soup.get_text(separator=' ', strip=True)[:5000]
+        all_dates.extend(extract_flexible_date(text_content))
+
+    # Filter to only recent dates before deciding on LLM
+    recent_dates = filter_recent(all_dates)
+
+    # 6. LLM fallback (60% confidence) - only if NO recent dates found
+    if not recent_dates and use_llm_fallback and title:
         llm_dates = await extract_from_llm(html, title)
-        all_dates.extend(llm_dates)
-    
+        # Also filter LLM results for recency
+        recent_llm = filter_recent(llm_dates)
+        all_dates.extend(recent_llm)
+        recent_dates = filter_recent(all_dates)
+
     logger.info("dates_extracted",
         url=url,
-        total_dates_found=len(all_dates)
+        total_dates_found=len(all_dates),
+        recent_dates_found=len(recent_dates)
     )
     
-    # No dates found
-    if not all_dates:
-        logger.warn("no_publication_date_found", url=url)
+    # No recent dates found
+    if not recent_dates:
+        logger.warn("no_publication_date_found", url=url,
+            old_dates_found=len(all_dates),
+            reason="no_recent_dates" if all_dates else "no_dates_at_all"
+        )
         return {
             "published_at": None,
             "date_source": "unknown",
             "date_confidence": 0.0,
             "all_dates": []
         }
-    
-    # Select OLDEST date (strategy: oldest date is most likely original publication)
-    # This prevents treating content redesigns/updates as new articles
-    oldest_date = min(all_dates, key=lambda x: x[0])
-    
+
+    # Select MOST RECENT date from recent_dates
+    # Changed strategy: for news, we want the most recent date (not oldest)
+    selected_date = max(recent_dates, key=lambda x: x[0])
+
     # If multiple sources agree on same date, boost confidence
-    same_date_count = sum(1 for dt, _, _ in all_dates if dt.date() == oldest_date[0].date())
+    same_date_count = sum(1 for dt, _, _ in recent_dates if dt.date() == selected_date[0].date())
     confidence_boost = min(0.05 * same_date_count, 0.10)  # Max +10% boost
-    
-    final_confidence = min(1.0, oldest_date[2] + confidence_boost)
-    
+
+    final_confidence = min(1.0, selected_date[2] + confidence_boost)
+
     logger.info("publication_date_selected",
         url=url,
-        date=oldest_date[0].isoformat(),
-        source=oldest_date[1],
+        date=selected_date[0].isoformat(),
+        source=selected_date[1],
         confidence=final_confidence,
         total_dates_found=len(all_dates),
+        recent_dates_found=len(recent_dates),
         agreement_count=same_date_count
     )
-    
+
     return {
-        "published_at": oldest_date[0],
-        "date_source": oldest_date[1].split(':')[0],  # Extract source type (meta_tag, jsonld, etc.)
+        "published_at": selected_date[0],
+        "date_source": selected_date[1].split(':')[0],  # Extract source type (meta_tag, jsonld, etc.)
         "date_confidence": final_confidence,
         "all_dates": [
             {
