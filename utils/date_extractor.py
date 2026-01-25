@@ -360,10 +360,9 @@ def extract_flexible_date(text: str) -> List[Tuple[datetime, str, float]]:
     # All month names (Spanish + English)
     all_months = {**SPANISH_MONTHS, **ENGLISH_MONTHS}
 
-    # Dynamic years: current year and previous year only
+    # Only current year (after Jan 7, no previous year content)
     current_year = now.year
-    valid_years = [current_year, current_year - 1]
-    year_pattern = r'\b(' + '|'.join(str(y) for y in valid_years) + r')\b'
+    year_pattern = r'\b(' + str(current_year) + r')\b'
 
     for year_match in re.finditer(year_pattern, text):
         year = int(year_match.group(1))
@@ -528,8 +527,8 @@ async def extract_publication_date(
     # Parse HTML
     soup = BeautifulSoup(html, 'html.parser')
 
-    # Cutoff for "recent" dates (1 year ago - no 2024 content if we're in 2026)
-    recent_cutoff = datetime.now() - timedelta(days=365)
+    # Cutoff for "recent" dates (7 days - only last week's content)
+    recent_cutoff = datetime.now() - timedelta(days=7)
 
     def filter_recent(dates_list):
         """Filter to only keep recent dates (within 2 years)."""
