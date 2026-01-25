@@ -1193,8 +1193,8 @@ async def _publish_with_target_schedules(
         ]
     )
 
-    # Check article state
-    if article['estado'] not in ['borrador', 'programado']:
+    # Check article state - allow republishing to additional targets
+    if article['estado'] not in ['borrador', 'programado', 'publicado']:
         raise HTTPException(
             status_code=400,
             detail=f"Article cannot be published. Current state: {article['estado']}"
