@@ -1131,8 +1131,8 @@ async def scrape_articles_from_index(
                     if published_at:
                         date_source = "text_pattern"
 
-                # Filter out articles older than 7 days or without date
-                max_age_days = 7
+                # Filter out articles older than 30 days or without date
+                max_age_days = 30
                 if published_at:
                     article_age = (datetime.utcnow() - published_at).days
                     if article_age > max_age_days:
