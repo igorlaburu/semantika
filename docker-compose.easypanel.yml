@@ -20,6 +20,7 @@ services:
       - FACEBOOK_APP_ID
       - FACEBOOK_APP_SECRET
       - LOG_LEVEL=INFO
+      - SCRAPER_ENGINE=${SCRAPER_ENGINE:-aiohttp}
     volumes:
       - fastembed_cache:/root/.cache/fastembed  # Cache FastEmbed models
       - whisper_cache:/root/.cache/whisper  # Cache Whisper models
@@ -52,6 +53,7 @@ services:
       - FACEBOOK_APP_ID
       - FACEBOOK_APP_SECRET
       - LOG_LEVEL=INFO
+      - SCRAPER_ENGINE=${SCRAPER_ENGINE:-aiohttp}
     volumes:
       - fastembed_cache:/root/.cache/fastembed  # Cache FastEmbed models
       - whisper_cache:/root/.cache/whisper  # Cache Whisper models

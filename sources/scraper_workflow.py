@@ -19,12 +19,21 @@ Supports:
 from typing import Dict, Any, List, Optional, TypedDict
 from datetime import datetime
 import asyncio
+import os
 
 from langgraph.graph import StateGraph, END
 from bs4 import BeautifulSoup
 import aiohttp
 
 from utils.logger import get_logger
+
+# Scraper engine configuration
+# Values: 'aiohttp' (default) or 'playwright'
+SCRAPER_ENGINE = os.getenv("SCRAPER_ENGINE", "aiohttp").lower()
+
+# Playwright browser instance (lazy loaded, reused across requests)
+_playwright_instance = None
+_browser_instance = None
 from utils.content_hasher import compute_content_hashes, normalize_html
 from utils.change_detector import get_change_detector
 from utils.date_extractor import extract_publication_date
@@ -144,62 +153,130 @@ class ScraperState(TypedDict):
     error: Optional[str]
 
 
+async def _fetch_with_aiohttp(url: str) -> tuple[Optional[str], Optional[str]]:
+    """Fetch URL using aiohttp (fast, no JS rendering).
+
+    Returns:
+        Tuple of (html, error)
+    """
+    import ssl
+    ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    ssl_context.set_ciphers('DEFAULT@SECLEVEL=1')
+
+    connector = aiohttp.TCPConnector(ssl=ssl_context, limit=100)
+    async with aiohttp.ClientSession(connector=connector) as session:
+        async with session.get(
+            url,
+            timeout=aiohttp.ClientTimeout(total=30),
+            headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+            }
+        ) as response:
+            if response.status != 200:
+                return None, f"HTTP {response.status}"
+            html = await response.text()
+            return html, None
+
+
+async def _get_playwright_browser():
+    """Get or create persistent Playwright browser instance."""
+    global _playwright_instance, _browser_instance
+
+    if _browser_instance is None:
+        from playwright.async_api import async_playwright
+        _playwright_instance = await async_playwright().start()
+        _browser_instance = await _playwright_instance.chromium.launch(
+            headless=True,
+            args=[
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu'
+            ]
+        )
+        logger.info("playwright_browser_started")
+
+    return _browser_instance
+
+
+async def _fetch_with_playwright(url: str) -> tuple[Optional[str], Optional[str]]:
+    """Fetch URL using Playwright (renders JavaScript).
+
+    Returns:
+        Tuple of (html, error)
+    """
+    try:
+        browser = await _get_playwright_browser()
+        page = await browser.new_page(
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+        )
+
+        try:
+            # Navigate and wait for network to be mostly idle
+            await page.goto(url, wait_until='networkidle', timeout=30000)
+
+            # Extra wait for JS frameworks to render
+            await page.wait_for_timeout(2000)
+
+            html = await page.content()
+            return html, None
+
+        finally:
+            await page.close()
+
+    except Exception as e:
+        return None, f"Playwright error: {str(e)}"
+
+
 async def fetch_url(state: ScraperState) -> ScraperState:
     """Fetch URL content (Node 1).
-    
+
+    Uses SCRAPER_ENGINE env var to determine method:
+    - 'aiohttp': Fast HTTP requests (default)
+    - 'playwright': Headless browser with JS rendering
+
     Args:
         state: Workflow state
-        
+
     Returns:
         Updated state with HTML or error
     """
     url = state["url"]
-    
-    logger.info("fetch_url_start", url=url)
-    
+
+    logger.info("fetch_url_start", url=url, engine=SCRAPER_ENGINE)
+
     try:
-        import ssl
-        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
-        ssl_context.set_ciphers('DEFAULT@SECLEVEL=1')
-        
-        connector = aiohttp.TCPConnector(ssl=ssl_context, limit=100)
-        async with aiohttp.ClientSession(connector=connector) as session:
-            async with session.get(
-                url,
-                timeout=aiohttp.ClientTimeout(total=30),
-                headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-                }
-            ) as response:
-                if response.status != 200:
-                    error_msg = f"HTTP {response.status}"
-                    logger.error("fetch_url_failed", url=url, status=response.status)
-                    state["fetch_error"] = error_msg
-                    state["error"] = error_msg
-                    return state
-                
-                html = await response.text()
-                state["html"] = html
-                
-                logger.info("fetch_url_success", 
-                    url=url, 
-                    html_length=len(html)
-                )
-                
-                return state
-                
+        if SCRAPER_ENGINE == "playwright":
+            html, error = await _fetch_with_playwright(url)
+        else:
+            html, error = await _fetch_with_aiohttp(url)
+
+        if error:
+            logger.error("fetch_url_failed", url=url, error=error, engine=SCRAPER_ENGINE)
+            state["fetch_error"] = error
+            state["error"] = error
+            return state
+
+        state["html"] = html
+        logger.info("fetch_url_success",
+            url=url,
+            html_length=len(html) if html else 0,
+            engine=SCRAPER_ENGINE
+        )
+        return state
+
     except asyncio.TimeoutError:
         error_msg = "Timeout fetching URL"
-        logger.error("fetch_url_timeout", url=url)
+        logger.error("fetch_url_timeout", url=url, engine=SCRAPER_ENGINE)
         state["fetch_error"] = error_msg
         state["error"] = error_msg
         return state
-        
+
     except Exception as e:
         error_msg = f"Fetch error: {str(e)}"
-        logger.error("fetch_url_error", url=url, error=str(e))
+        logger.error("fetch_url_error", url=url, error=str(e), engine=SCRAPER_ENGINE)
         state["fetch_error"] = error_msg
         state["error"] = error_msg
         return state

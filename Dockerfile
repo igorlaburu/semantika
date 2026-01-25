@@ -10,12 +10,29 @@ ENV PYTHONUNBUFFERED=1 \
 # Install system dependencies
 # ffmpeg needed for Whisper audio processing
 # wget and curl needed for Piper TTS download
+# Playwright dependencies for headless browser scraping
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     gcc \
     g++ \
     wget \
     curl \
+    # Playwright/Chromium dependencies
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libasound2 \
+    libpango-1.0-0 \
+    libcairo2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -26,6 +43,10 @@ COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Install Playwright browsers (only Chromium to save space)
+# Must run as root before switching to non-root user
+RUN playwright install chromium
 
 # NOTE: ML models (FastEmbed, Whisper) are downloaded at runtime
 # and stored in /app/.cache volume (shared between containers)
