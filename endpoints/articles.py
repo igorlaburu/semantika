@@ -1287,11 +1287,38 @@ async def _publish_with_target_schedules(
 
             for target_id, result in publication_results.items():
                 target = targets_by_id.get(target_id, {})
+                pub_status = "published" if result.get('success') else "failed"
+
+                # Get hook for this platform (for logging purposes)
+                hook_type = PLATFORM_HOOK_MAP.get(target.get('platform_type'), 'direct')
+                hook_text = hooks.get(hook_type) or fallback_hook if target.get('platform_type') != 'wordpress' else None
+
+                # Log immediate publication to scheduled_publications table
+                try:
+                    supabase.client.table("scheduled_publications")\
+                        .upsert({
+                            "article_id": article_id,
+                            "target_id": target_id,
+                            "company_id": company_id,
+                            "platform_type": target.get('platform_type'),
+                            "scheduled_for": None,  # Immediate = no scheduled time
+                            "status": pub_status,
+                            "published_at": datetime.now(timezone.utc).isoformat(),
+                            "social_hook": hook_text,
+                            "publication_result": result,
+                            "error_message": result.get('error') if not result.get('success') else None,
+                            "created_at": datetime.utcnow().isoformat()
+                        }, on_conflict="article_id,target_id")\
+                        .execute()
+                except Exception as log_err:
+                    logger.warn("immediate_publication_log_failed",
+                        article_id=article_id, target_id=target_id, error=str(log_err))
+
                 publications.append({
                     "target_id": target_id,
                     "platform_type": target.get('platform_type'),
                     "target_name": target.get('name'),
-                    "status": "published" if result.get('success') else "failed",
+                    "status": pub_status,
                     "url": result.get('url'),
                     "error": result.get('error')
                 })
@@ -1753,10 +1780,11 @@ async def get_scheduled_publications(
     previous_hours: int = 24,
     limit: int = 50
 ) -> Dict:
-    """Get scheduled publications for the company.
+    """Get all publications (scheduled + immediate) for the company.
 
-    Returns publications from the last N hours (default 24) ordered by scheduled_for.
-    This includes both future scheduled items and recently published/failed ones.
+    Returns publications from the last N hours (default 24).
+    - Scheduled: filtered by scheduled_for >= from_time
+    - Immediate: filtered by published_at >= from_time (scheduled_for is NULL)
 
     Args:
         status: Optional filter - 'scheduled', 'published', 'failed'
@@ -1767,13 +1795,16 @@ async def get_scheduled_publications(
 
     # Calculate time threshold
     from_time = datetime.now(timezone.utc) - timedelta(hours=previous_hours)
+    from_time_iso = from_time.isoformat()
 
-    # Build query
+    # Build query with OR condition:
+    # - scheduled_for >= from_time (scheduled publications)
+    # - OR scheduled_for IS NULL AND published_at >= from_time (immediate publications)
     query = supabase.client.table("scheduled_publications")\
         .select("id, article_id, target_id, platform_type, scheduled_for, status, published_at, social_hook, error_message, publication_result, press_articles!inner(titulo)")\
         .eq("company_id", company_id)\
-        .gte("scheduled_for", from_time.isoformat())\
-        .order("scheduled_for", desc=False)\
+        .or_(f"scheduled_for.gte.{from_time_iso},and(scheduled_for.is.null,published_at.gte.{from_time_iso})")\
+        .order("published_at", desc=True, nullsfirst=False)\
         .limit(limit)
 
     # Filter by status if provided
@@ -1790,7 +1821,8 @@ async def get_scheduled_publications(
             "article_titulo": pub.get('press_articles', {}).get('titulo'),
             "target_id": pub['target_id'],
             "platform_type": pub['platform_type'],
-            "scheduled_for": pub['scheduled_for'],
+            "publication_type": "scheduled" if pub.get('scheduled_for') else "immediate",
+            "scheduled_for": pub.get('scheduled_for'),
             "status": pub['status'],
             "published_at": pub.get('published_at'),
             "social_hook": pub.get('social_hook'),
@@ -1798,11 +1830,11 @@ async def get_scheduled_publications(
             "published_url": pub.get('publication_result', {}).get('url') if pub.get('publication_result') else None
         })
 
-    # Summary counts (within same time window)
+    # Summary counts (within same time window, same OR logic)
     all_pubs = supabase.client.table("scheduled_publications")\
         .select("status")\
         .eq("company_id", company_id)\
-        .gte("scheduled_for", from_time.isoformat())\
+        .or_(f"scheduled_for.gte.{from_time_iso},and(scheduled_for.is.null,published_at.gte.{from_time_iso})")\
         .execute()
 
     total = len(all_pubs.data or [])
