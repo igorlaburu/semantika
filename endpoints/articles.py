@@ -558,21 +558,30 @@ async def publish_to_platforms(
                 from pathlib import Path
                 import os
 
-                # Read image from cache using same logic as GET /api/v1/images/{image_id}
-                # The imagen_uuid from frontend already includes _0 suffix when needed
+                # Read image from cache
+                # Try both UUID as-is and with _0 suffix (context unit featured images use _0)
                 cache_dir = Path("/app/cache/images")
                 extensions = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"]
                 original_image_data = None
 
-                for ext in extensions:
-                    cache_file = cache_dir / f"{imagen_uuid}{ext}"
-                    if cache_file.exists():
-                        original_image_data = cache_file.read_bytes()
-                        logger.debug("publication_image_cache_hit",
-                            imagen_uuid=imagen_uuid,
-                            extension=ext,
-                            cache_file=str(cache_file)
-                        )
+                # Build list of UUIDs to try: original, then with _0 if not already present
+                uuids_to_try = [imagen_uuid]
+                if not imagen_uuid.endswith('_0'):
+                    uuids_to_try.append(f"{imagen_uuid}_0")
+
+                for uuid_try in uuids_to_try:
+                    for ext in extensions:
+                        cache_file = cache_dir / f"{uuid_try}{ext}"
+                        if cache_file.exists():
+                            original_image_data = cache_file.read_bytes()
+                            logger.debug("publication_image_cache_hit",
+                                imagen_uuid=imagen_uuid,
+                                found_as=uuid_try,
+                                extension=ext,
+                                cache_file=str(cache_file)
+                            )
+                            break
+                    if original_image_data:
                         break
 
                 if original_image_data:
