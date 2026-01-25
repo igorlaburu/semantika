@@ -5,7 +5,8 @@ FROM python:3.10-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/app/playwright-browsers
 
 # Install system dependencies
 # ffmpeg needed for Whisper audio processing
@@ -44,9 +45,10 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright browsers (only Chromium to save space)
-# Must run as root before switching to non-root user
-RUN playwright install chromium
+# Install Playwright browsers to shared location (PLAYWRIGHT_BROWSERS_PATH)
+# Directory will be chowned to semantika user later
+RUN mkdir -p /app/playwright-browsers && \
+    playwright install chromium
 
 # NOTE: ML models (FastEmbed, Whisper) are downloaded at runtime
 # and stored in /app/.cache volume (shared between containers)
@@ -64,8 +66,9 @@ RUN mkdir -p /app/models && \
     wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/carlfm/x_low/es_ES-carlfm-x_low.onnx.json
 
 # Create non-root user BEFORE copying code (avoids duplicating layers)
+# Also chown playwright-browsers so the user can access chromium
 RUN useradd -m -u 1000 semantika && \
-    chown -R semantika:semantika /app
+    chown -R semantika:semantika /app /app/playwright-browsers
 
 # Copy application code with correct ownership (after ML models to preserve cache)
 COPY --chown=semantika:semantika . .
