@@ -32,17 +32,28 @@ DATE_PATTERNS = {
     'english_day_month': r'\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}'  # 11 December 2025
 }
 
-# Month name mappings
+# Month name mappings (full names and abbreviations)
 SPANISH_MONTHS = {
     'enero': 1, 'febrero': 2, 'marzo': 3, 'abril': 4,
     'mayo': 5, 'junio': 6, 'julio': 7, 'agosto': 8,
-    'septiembre': 9, 'octubre': 10, 'noviembre': 11, 'diciembre': 12
+    'septiembre': 9, 'octubre': 10, 'noviembre': 11, 'diciembre': 12,
+    # Abbreviations (with and without dot)
+    'ene': 1, 'ene.': 1, 'feb': 2, 'feb.': 2, 'mar': 3, 'mar.': 3,
+    'abr': 4, 'abr.': 4, 'may': 5, 'may.': 5, 'jun': 6, 'jun.': 6,
+    'jul': 7, 'jul.': 7, 'ago': 8, 'ago.': 8, 'sep': 9, 'sep.': 9,
+    'sept': 9, 'sept.': 9, 'oct': 10, 'oct.': 10, 'nov': 11, 'nov.': 11,
+    'dic': 12, 'dic.': 12
 }
 
 ENGLISH_MONTHS = {
     'january': 1, 'february': 2, 'march': 3, 'april': 4,
     'may': 5, 'june': 6, 'july': 7, 'august': 8,
-    'september': 9, 'october': 10, 'november': 11, 'december': 12
+    'september': 9, 'october': 10, 'november': 11, 'december': 12,
+    # Abbreviations (with and without dot)
+    'jan': 1, 'jan.': 1, 'feb': 2, 'feb.': 2, 'mar': 3, 'mar.': 3,
+    'apr': 4, 'apr.': 4, 'jun': 6, 'jun.': 6, 'jul': 7, 'jul.': 7,
+    'aug': 8, 'aug.': 8, 'sep': 9, 'sep.': 9, 'sept': 9, 'sept.': 9,
+    'oct': 10, 'oct.': 10, 'nov': 11, 'nov.': 11, 'dec': 12, 'dec.': 12
 }
 
 
@@ -97,46 +108,52 @@ def parse_date_string(date_str: str) -> Optional[datetime]:
             except ValueError:
                 pass
 
-    # Try Spanish month names
+    # Try Spanish month names (escape dots in abbreviations like "ene.")
+    spanish_months_pattern = '|'.join(re.escape(m) for m in SPANISH_MONTHS.keys())
     spanish_match = re.search(
-        r'(\d{1,2})\s+(?:de\s+)?(' + '|'.join(SPANISH_MONTHS.keys()) + r')\s+(?:de\s+)?(\d{4})',
+        r'(\d{1,2})\s+(?:de\s+)?(' + spanish_months_pattern + r')\.?\s+(?:de\s+)?(\d{4})',
         date_str.lower()
     )
     if spanish_match:
         try:
             day = int(spanish_match.group(1))
-            month = SPANISH_MONTHS[spanish_match.group(2)]
+            month_key = spanish_match.group(2).rstrip('.')
+            month = SPANISH_MONTHS.get(month_key) or SPANISH_MONTHS.get(spanish_match.group(2))
             year = int(spanish_match.group(3))
             return datetime(year, month, day)
-        except (ValueError, KeyError):
+        except (ValueError, KeyError, TypeError):
             pass
 
-    # Try English month names: "January 15, 2025" or "January 15 2025"
+    # Try English month names: "January 15, 2025" or "January 15 2025" (escape dots in abbreviations)
+    english_months_pattern = '|'.join(re.escape(m) for m in ENGLISH_MONTHS.keys())
     english_match = re.search(
-        r'(' + '|'.join(ENGLISH_MONTHS.keys()) + r')\s+(\d{1,2}),?\s+(\d{4})',
+        r'(' + english_months_pattern + r')\.?\s+(\d{1,2}),?\s+(\d{4})',
         date_str.lower()
     )
     if english_match:
         try:
-            month = ENGLISH_MONTHS[english_match.group(1)]
+            # Remove trailing dot if present for lookup
+            month_key = english_match.group(1).rstrip('.')
+            month = ENGLISH_MONTHS.get(month_key) or ENGLISH_MONTHS.get(english_match.group(1))
             day = int(english_match.group(2))
             year = int(english_match.group(3))
             return datetime(year, month, day)
-        except (ValueError, KeyError):
+        except (ValueError, KeyError, TypeError):
             pass
 
     # Try English format: "15 January 2025" (day month year)
     english_dmy_match = re.search(
-        r'(\d{1,2})\s+(' + '|'.join(ENGLISH_MONTHS.keys()) + r')\s+(\d{4})',
+        r'(\d{1,2})\s+(' + english_months_pattern + r')\.?\s+(\d{4})',
         date_str.lower()
     )
     if english_dmy_match:
         try:
             day = int(english_dmy_match.group(1))
-            month = ENGLISH_MONTHS[english_dmy_match.group(2)]
+            month_key = english_dmy_match.group(2).rstrip('.')
+            month = ENGLISH_MONTHS.get(month_key) or ENGLISH_MONTHS.get(english_dmy_match.group(2))
             year = int(english_dmy_match.group(3))
             return datetime(year, month, day)
-        except (ValueError, KeyError):
+        except (ValueError, KeyError, TypeError):
             pass
 
     return None
