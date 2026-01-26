@@ -93,13 +93,29 @@ class LinkedInPublisher(BasePublisher):
     ) -> PublicationResult:
         """Publish article to LinkedIn as a post."""
         try:
-            organization_id = self.credentials.get('organization_id')
+            # Determine author URN (organization or personal profile)
+            post_as = self.credentials.get('post_as', 'organization')
 
-            if not organization_id:
-                return PublicationResult(
-                    success=False,
-                    error="No organization_id configured. LinkedIn requires a company page to publish."
-                )
+            if post_as == 'member':
+                # Personal profile
+                member_urn = self.credentials.get('member_urn')
+                if not member_urn:
+                    return PublicationResult(
+                        success=False,
+                        error="No member_urn configured for personal profile posting."
+                    )
+                author_urn = member_urn
+                logger.info("linkedin_posting_as_member", member_urn=member_urn)
+            else:
+                # Organization (company page)
+                organization_id = self.credentials.get('organization_id')
+                if not organization_id:
+                    return PublicationResult(
+                        success=False,
+                        error="No organization_id configured. LinkedIn requires a company page to publish."
+                    )
+                author_urn = f"urn:li:organization:{organization_id}"
+                logger.info("linkedin_posting_as_organization", organization_id=organization_id)
 
             # Check if content is pre-formatted (from chained publication)
             is_preformatted = content.startswith("📰") and "http" in content
@@ -124,7 +140,7 @@ class LinkedInPublisher(BasePublisher):
 
             # Build the post payload for LinkedIn API
             post_data = {
-                "author": f"urn:li:organization:{organization_id}",
+                "author": author_urn,
                 "lifecycleState": "PUBLISHED",
                 "specificContent": {
                     "com.linkedin.ugc.ShareContent": {
@@ -232,7 +248,9 @@ class LinkedInPublisher(BasePublisher):
             'client_id': client_id,
             'redirect_uri': redirect_uri,
             'state': state,
-            'scope': 'openid profile email w_member_social r_organization_social w_organization_social r_basicprofile'
+            # Basic scopes (always available)
+            # For company pages, add r_organization_social w_organization_social after Community Management API approval
+            'scope': 'openid profile email w_member_social'
         }
         return f"https://www.linkedin.com/oauth/v2/authorization?{urlencode(params)}"
 
@@ -287,6 +305,43 @@ class LinkedInPublisher(BasePublisher):
                 "success": False,
                 "error": str(e)
             }
+
+    @staticmethod
+    async def get_user_profile(access_token: str) -> Dict[str, Any]:
+        """Get authenticated user's profile info."""
+        try:
+            headers = {
+                'Authorization': f'Bearer {access_token}'
+            }
+
+            async with aiohttp.ClientSession() as session:
+                # Get user info from OpenID Connect userinfo endpoint
+                async with session.get(
+                    'https://api.linkedin.com/v2/userinfo',
+                    headers=headers
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return {
+                            "success": True,
+                            "sub": data.get('sub'),  # Member URN like "urn:li:person:xxx"
+                            "name": data.get('name'),
+                            "given_name": data.get('given_name'),
+                            "family_name": data.get('family_name'),
+                            "email": data.get('email'),
+                            "picture": data.get('picture')
+                        }
+                    else:
+                        error_text = await response.text()
+                        logger.error("linkedin_userinfo_failed",
+                            status=response.status,
+                            error=error_text[:200]
+                        )
+                        return {"success": False, "error": f"HTTP {response.status}"}
+
+        except Exception as e:
+            logger.error("linkedin_userinfo_error", error=str(e))
+            return {"success": False, "error": str(e)}
 
     @staticmethod
     async def get_user_organizations(access_token: str) -> Dict[str, Any]:

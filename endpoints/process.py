@@ -423,12 +423,18 @@ async def process_redact_news_rich(
                 for i in range(image_count):
                     source_images.append(f"{cu_id}_{i}")
 
-                # Set imagen_uuid to first context unit with featured_image
+                # Set imagen_uuid to first context unit with valid featured_image
                 if imagen_uuid is None:
                     source_metadata = cu.get("source_metadata") or {}
                     featured_image = source_metadata.get("featured_image")
                     if featured_image and featured_image.get("url"):
-                        imagen_uuid = cu_id
+                        # Validate URL is a real image path, not just a domain
+                        img_url = featured_image.get("url", "")
+                        from urllib.parse import urlparse
+                        parsed = urlparse(img_url)
+                        # Must have a path with extension or significant path (not just "/")
+                        if parsed.path and len(parsed.path) > 5:
+                            imagen_uuid = f"{cu_id}_0"  # Use _0 suffix for featured image
 
             # 7. Build working_json structure
             working_json = {

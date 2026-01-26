@@ -1,17 +1,18 @@
 # Documento de Arquitectura: semantika
 
-**Versión:** 2.0
-**Fecha:** 9 de diciembre de 2024
+**Versión:** 3.0
+**Fecha:** 26 de enero de 2026
 
 ---
 
 ## 1. Visión General del Proyecto
 
-`semantika` es un pipeline de datos semánticos *multi-tenant* diseñado para operar como servicio headless. Su propósito es agregar, procesar y unificar información de múltiples fuentes en bases de datos vectoriales para búsquedas semánticas híbridas, alertas y agregación.
+`semantika` es un pipeline de datos semánticos *multi-tenant* diseñado para operar como servicio headless. Su propósito es agregar, procesar y unificar información de múltiples fuentes en PostgreSQL+pgvector para búsquedas semánticas híbridas, alertas y agregación.
 
-**Arquitectura dual de bases de datos:**
-- **PostgreSQL + pgvector** (actual): BD única para config + vectores con RLS multi-tenant
-- **Qdrant** (futuro): Migración planificada para escala masiva y búsqueda híbrida avanzada
+**Arquitectura unificada:**
+- **PostgreSQL + pgvector**: BD única para config + vectores 768d con RLS multi-tenant
+- **FastEmbed local**: Embeddings multilingües sin coste API
+- **Búsqueda híbrida**: Semantic (0.7) + Keyword (0.3) con re-ranking
 
 El sistema se despliega en **EasyPanel** (VPS) con contenedores Docker. La gestión multi-tenant se implementa vía **Supabase** (PostgreSQL + Auth) con Row-Level Security.
 
@@ -48,11 +49,11 @@ El sistema es capaz de ingerir datos de las siguientes fuentes, asociando cada d
     * Keyword: PostgreSQL full-text search (Spanish config)
     * Re-ranking: 0.7 * semantic + 0.3 * keyword
 
-**Sistema futuro (Qdrant):**
-* **Sparse vectors** (BM25) + **Dense vectors** (semántica) nativos
-* Mejor rendimiento en escala masiva (millones de vectores)
-* Búsqueda híbrida nativa optimizada
-* Migración planificada cuando volumen justifique infraestructura
+**Características actuales:**
+* **Embeddings 768d**: FastEmbed local multilingual (50+ idiomas)
+* **Deduplicación**: Similarity > 0.98 pre-insert
+* **Quality gate**: atomic_statements >= 2 para pasar filtro
+* **Imágenes destacadas**: Extracción automática (og:image, twitter:image, JSON-LD, content)
 
 ### 2.3. Recuperación y Agregación (Retrieval)
 
@@ -70,9 +71,9 @@ El sistema es capaz de ingerir datos de las siguientes fuentes, asociando cada d
     1.  **Programada (Cron):** Un servicio `scheduler` lee una tabla `tasks` en Supabase y ejecuta trabajos de ingesta periódicos (scrapers, APIs) para cada cliente.
     2.  **Bajo Demanda (Webhook):** Un servidor `api` escucha peticiones HTTP para ingesta en tiempo real (audio, texto manual) y para todas las consultas.
 * **Multi-Tenancy (Separación de Clientes):**
-    1.  **Configuración (Supabase):** Las tablas `clients`, `tasks` y `api_credentials` gestionan qué cliente puede hacer qué.
-    2.  **Datos (Qdrant):** Todos los vectores de todos los clientes coexisten en una única colección, pero están estrictamente particionados por el `client_id` en el *payload*.
-    3.  **Seguridad:** El servidor API **fuerza** la inclusión del `client_id` (verificado desde la API Key) en *todos* los filtros de búsqueda y escritura de Qdrant.
+    1.  **Configuración (Supabase):** Las tablas `companies`, `sources` y `api_keys` gestionan qué cliente puede hacer qué.
+    2.  **Datos (PostgreSQL):** Todos los vectores coexisten en tablas con `company_id` como columna de partición.
+    3.  **Seguridad:** Row-Level Security (RLS) en Supabase filtra automáticamente por `company_id` según el JWT del usuario.
 
 ---
 
@@ -88,10 +89,9 @@ El sistema es capaz de ingerir datos de las siguientes fuentes, asociando cada d
 * **CI/CD:** GitHub Actions (auto-deploy a VPS)
 
 **Bases de Datos:**
-* **PostgreSQL + pgvector:** Supabase (config + vectores 768d) - **ACTUAL**
-* **Qdrant:** Contenedor Docker local / Qdrant Cloud - **FUTURO**
+* **PostgreSQL + pgvector:** Supabase (config + vectores 768d)
 * **Cliente Supabase:** `supabase-py`
-* **Cliente Qdrant:** `qdrant-client` (preparado para migración)
+* **Tablas principales:** `press_context_units`, `press_articles`, `sources`, `companies`
 
 **Embeddings y LLM:**
 * **Embeddings:** FastEmbed local (`paraphrase-multilingual-mpnet-base-v2`, 768d)
@@ -111,9 +111,9 @@ El sistema es capaz de ingerir datos de las siguientes fuentes, asociando cada d
 * **Groq:** Llama 3.3 70B para análisis rápido (gratis)
 
 **Opcionales:**
-* **Qdrant:** Futuro storage vectorial (migración planificada)
 * **GNews API:** Discovery automático de fuentes pool
 * **ScraperTech:** Twitter scraping (si configurado por cliente)
+* **Playwright:** Scraping de sitios SPA (Single Page Applications)
 
 ---
 
@@ -127,7 +127,7 @@ El sistema se despliega como un conjunto de servicios gestionados por `docker-co
 * **Funciones:**
     * **Autenticación:** Valida las `API Key` (X-API-Key) contra la tabla `clients` de Supabase.
     * **Ingesta (POST):** Recibe peticiones de ingesta bajo demanda (manual, audio, webhooks genéricos) y las pasa al `core_ingest`.
-    * **Recuperación (GET):** Expone los endpoints `GET /search` y `GET /aggregate` que consultan Qdrant (forzando el `client_id`).
+    * **Recuperación (GET):** Expone los endpoints de búsqueda híbrida que consultan PostgreSQL+pgvector (filtrado por RLS).
 * **Ejecutable (interno):** `uvicorn server:app --host 0.0.0.0 --port 8000`
 
 ### 4.2. `semantika-scheduler` (Planificador APScheduler)
@@ -140,9 +140,9 @@ El sistema se despliega como un conjunto de servicios gestionados por `docker-co
     4.  Ejecuta una tarea diaria de limpieza (TTL).
 * **Ejecutable (interno):** `python scheduler.py`
 
-### 4.3. `qdrant` (Base de Datos Vectorial)
+### 4.3. PostgreSQL + pgvector (Base de Datos Vectorial)
 
-* **Descripción:** Contenedor oficial de Qdrant.
+* **Descripción:** Extensión pgvector en Supabase PostgreSQL.
 * **Función:** Almacena los vectores y sus *payloads*. Expone su API en el puerto `6333` (solo a la red interna de Docker).
 
 ### 4.4. OpenRouter (Servicio LLM Externo)
@@ -153,7 +153,7 @@ El sistema se despliega como un conjunto de servicios gestionados por `docker-co
 ### 4.5. `dozzle` (Visor de Logs)
 
 * **Descripción:** Contenedor ligero para monitorización.
-* **Función:** Proporciona una interfaz web simple (en el puerto `8081`) que se conecta al socket de Docker y muestra los logs (`stdout`) en tiempo real de todos los contenedores (`api`, `scheduler`, `qdrant`), permitiendo la depuración desde fuera del servidor.
+* **Función:** Proporciona una interfaz web simple (en el puerto `8081`) que se conecta al socket de Docker y muestra los logs (`stdout`) en tiempo real de todos los contenedores (`api`, `scheduler`), permitiendo la depuración desde fuera del servidor.
 
 ---
 
@@ -179,7 +179,7 @@ Supabase actúa como la base de datos de "configuración".
     * `service_name` (text): "scraper_tech", "api_efe", etc.
     * `credentials` (jsonb): Objeto JSON con las claves de API del cliente.
 
-### 5.2. Modelo de Datos Vectorial (Qdrant)
+### 5.2. Modelo de Datos Vectorial (PostgreSQL + pgvector)
 
 Una única colección (`semantika_prod`) almacena los vectores.
 
@@ -191,7 +191,7 @@ Una única colección (`semantika_prod`) almacena los vectores.
     * `title` (string): Título o texto corto (para desduplicación).
     * `text` (string): El contenido textual completo del chunk.
     * `event_time` (timestamp): Cuándo ocurrió el evento.
-    * `loaded_at` (timestamp): Cuándo se cargó en Qdrant.
+    * `loaded_at` (timestamp): Cuándo se cargó en la BD.
     * `special_info` (boolean): `false` (borrado a 30 días) o `true` (permanente, ej. WordPress).
 
 ---
@@ -210,16 +210,16 @@ Una única colección (`semantika_prod`) almacena los vectores.
     * c. Divide el texto (`RecursiveCharacterTextSplitter`).
     * d. **Guardrail (PII):** Pasa el texto por una cadena LLM/regex. Si detecta PII, lo anonimiza (`[REDACTED]`) y loguea el hallazgo.
     * e. **Guardrail (Copyright):** Pasa el texto por una cadena LLM. Si detecta copyright estricto, descarta el documento y loguea el rechazo. 
-    * f. **Desduplicación:** Para cada chunk, busca en Qdrant por `client_id` y similitud de `title`. Si es duplicado, lo descarta y loguea.
-    * g. **Carga:** Inserta los chunks únicos en Qdrant con `client_id` y `special_info=false`.
-    * h. Loguea los `qdrant_id` de los documentos añadidos.
+    * f. **Desduplicación:** Para cada chunk, busca en PostgreSQL por `company_id` y similitud de embedding > 0.98. Si es duplicado, lo descarta y loguea.
+    * g. **Carga:** Inserta los chunks únicos en `press_context_units` con `company_id`.
+    * h. Loguea los IDs de los documentos añadidos.
 
 ### 6.2. Flujo de Recuperación (API)
 
 1.  Petición `GET /search?query=IA` llega a `semantika-api` con `X-API-Key: "sk-cliente-A"`.
 2.  `server.py` valida la API Key contra la tabla `clients` de Supabase y obtiene `client_id = 'uuid-A'`.
-3.  Construye el filtro de Qdrant: `filter = must=[{"key": "client_id", "match": {"value": "uuid-A"}}]`.
-4.  Realiza la búsqueda híbrida (semántica + keyword) con el `query` y el `filter`.
+3.  RLS (Row-Level Security) filtra automáticamente por `company_id` según el JWT.
+4.  Realiza la búsqueda híbrida (semántica pgvector + keyword full-text) con el `query`.
 5.  Devuelve los resultados (los *payloads* de los documentos) como JSON.
 
 ---
@@ -248,19 +248,13 @@ La información genérica (noticias, tuits) caduca para mantener la base de dato
 * **Implementación:** Se añade un *job* diario al `semantika-scheduler`.
 * **Función de Limpieza:**
     1.  Calcula `timestamp_limite = now() - 30 days`.
-    2.  Define un filtro de Qdrant:
-        ```json
-        {
-          "filter": {
-            "must": [
-              { "key": "loaded_at", "range": { "lt": timestamp_limite } },
-              { "key": "special_info", "match": { "value": false } }
-            ]
-          }
-        }
+    2.  Ejecuta query SQL:
+        ```sql
+        DELETE FROM press_context_units
+        WHERE created_at < timestamp_limite
+        AND special_info = false
         ```
-    3.  Llama a `qdrant.delete(collection_name="semantika_prod", points_selector={"filter": filter})`.
-    4.  Loguea el resultado (`action: "ttl_cleanup", deleted_count: ...`).
+    3.  Loguea el resultado (`action: "ttl_cleanup", deleted_count: ...`).
 
 ---
 
@@ -276,7 +270,7 @@ La información genérica (noticias, tuits) caduca para mantener la base de dato
     {"level": "INFO", "timestamp": "...", "service": "core_ingest", "action": "copyright_rejected", "source_id": "..."}
     {"level": "DEBUG", "timestamp": "...", "service": "core_ingest", "action": "llm_extraction_result", "source_id": "...", "output_units": 3}
     {"level": "ERROR", "timestamp": "...", "service": "core_ingest", "action": "llm_extraction_error", "error": "JSON parse error"}
-    {"level": "INFO", "timestamp": "...", "service": "core_ingest", "action": "document_added", "qdrant_id": "uuid-qdrant-1", "client_id": "uuid-A"}
+    {"level": "INFO", "timestamp": "...", "service": "core_ingest", "action": "document_added", "context_unit_id": "uuid-1", "company_id": "uuid-A"}
     {"level": "INFO", "timestamp": "...", "service": "scheduler", "action": "ttl_cleanup", "deleted_count": 150}
     {"level": "INFO", "timestamp": "...", "service": "api", "action": "search_request", "client_id": "uuid-A", "query": "IA"}
     ```
@@ -313,7 +307,8 @@ La información genérica (noticias, tuits) caduca para mantener la base de dato
 ├── scheduler.py          # Demonio Cron (APScheduler)
 ├── core_ingest.py        # Lógica de ingesta (Guardrails, Dedupe, Carga)
 ├── cli.py                # Herramienta de admin (crear clientes/tareas en Supabase)
-├── /qdrant_storage/      # (Directorio para datos persistentes de Qdrant)
+├── /endpoints/           # Módulos de API (articles.py, context_units.py, etc.)
+├── /workflows/           # Flujos de procesamiento (discovery, ingestion)
 └── .gitignore            # Excluir .env y directorios de datos
 ```
 
@@ -345,18 +340,18 @@ COPY . .
 fastapi
 uvicorn
 apscheduler
-supabase-py
-qdrant-client
+supabase
 fastembed
 langchain
 langchain-openai
-openai-whisper
 openai
 requests
 beautifulsoup4
 python-dotenv
 pydantic
 pydantic-settings
+aiohttp
+playwright  # Para sitios SPA
 ```
 
 #### `docker-compose.yml`

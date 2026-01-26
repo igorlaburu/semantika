@@ -290,23 +290,71 @@ async def linkedin_oauth_callback(
             """
 
         else:
-            # No organizations - user needs to create a company page
-            logger.warn("linkedin_oauth_no_organizations", company_id=company_id)
+            # No organizations - use personal profile instead
+            logger.info("linkedin_oauth_no_organizations_using_personal", company_id=company_id)
 
-            html_content = """
+            # Get user profile
+            user_profile = await LinkedInPublisher.get_user_profile(access_token)
+            user_name = user_profile.get('name', 'Personal Profile')
+            user_sub = user_profile.get('sub', '')  # urn:li:person:xxx
+
+            credentials = {
+                'access_token': access_token,
+                'expires_in': expires_in,
+                'post_as': 'member',  # Personal profile
+                'member_urn': user_sub,
+                'member_name': user_name
+            }
+
+            credentials_encrypted = CredentialManager.encrypt_credentials(credentials)
+
+            # Check if LinkedIn target already exists
+            existing = supabase.client.table('press_publication_targets')\
+                .select('id')\
+                .eq('company_id', company_id)\
+                .eq('platform_type', 'linkedin')\
+                .execute()
+
+            if existing.data:
+                supabase.client.table('press_publication_targets').update({
+                    'credentials_encrypted': credentials_encrypted.hex(),
+                    'is_active': True,
+                    'name': f"LinkedIn ({user_name})",
+                    'base_url': 'https://linkedin.com/in/me'
+                }).eq('id', existing.data[0]['id']).execute()
+                target_id = existing.data[0]['id']
+            else:
+                new_target = supabase.client.table('press_publication_targets').insert({
+                    'company_id': company_id,
+                    'platform_type': 'linkedin',
+                    'name': f"LinkedIn ({user_name})",
+                    'base_url': 'https://linkedin.com/in/me',
+                    'credentials_encrypted': credentials_encrypted.hex(),
+                    'is_active': True,
+                    'is_default': False
+                }).execute()
+                target_id = new_target.data[0]['id']
+
+            logger.info("linkedin_oauth_personal_success",
+                company_id=company_id,
+                user_name=user_name,
+                target_id=target_id
+            )
+
+            html_content = f"""
             <html><body>
-                <h1>No Company Pages Found</h1>
-                <p>You need to be an admin of a LinkedIn Company Page to publish.</p>
-                <p>Please create a Company Page on LinkedIn first, then try again.</p>
+                <h1>LinkedIn Connected!</h1>
+                <p>Connected as {user_name} (personal profile)</p>
+                <p><small>For company page posting, request Community Management API access in LinkedIn Developer Console.</small></p>
                 <script>
-                    if (window.opener) {
-                        window.opener.postMessage({
-                            type: 'linkedin_oauth_error',
-                            error: 'no_organizations',
-                            message: 'No company pages found. Please create one first.'
-                        }, '*');
-                    }
-                    setTimeout(() => window.close(), 5000);
+                    if (window.opener) {{
+                        window.opener.postMessage({{
+                            type: 'linkedin_oauth_success',
+                            post_as: 'member',
+                            user_name: '{user_name}'
+                        }}, '*');
+                    }}
+                    setTimeout(() => window.close(), 3000);
                 </script>
             </body></html>
             """
