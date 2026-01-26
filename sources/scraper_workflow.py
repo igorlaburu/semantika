@@ -1200,9 +1200,9 @@ async def scrape_articles_from_index(
                     if css_dates:
                         published_at, date_source, _ = css_dates[0]
 
-                # Try text patterns as fallback
+                # Try text patterns as fallback (check full content, cookies can be 5000+ chars)
                 if not published_at:
-                    published_at = extract_date_from_text(semantic_content[:2000])
+                    published_at = extract_date_from_text(semantic_content)
                     if published_at:
                         date_source = "text_pattern"
 
