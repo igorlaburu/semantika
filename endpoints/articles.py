@@ -718,7 +718,17 @@ async def publish_to_platforms(
 
             # Get social_hooks from working_json (platform-specific hooks)
             working_json = article.get('working_json') or {}
-            social_hooks = working_json.get('social_hooks') or {}
+            raw_hooks = working_json.get('social_hooks') or {}
+
+            # Fallback hook (truncated title)
+            fallback_hook = title[:147] + "..." if len(title) > 150 else title
+
+            # SAFEGUARD: Ensure all hook types exist with fallback to title
+            social_hooks = {
+                'direct': raw_hooks.get('direct') or fallback_hook,
+                'professional': raw_hooks.get('professional') or fallback_hook,
+                'emotional': raw_hooks.get('emotional') or fallback_hook
+            }
 
             # Mapping: platform -> hook type
             PLATFORM_HOOK_MAP = {
@@ -727,9 +737,6 @@ async def publish_to_platforms(
                 'facebook': 'emotional',
                 'instagram': 'emotional'  # Same as Facebook
             }
-
-            # Fallback hook (truncated title)
-            fallback_hook = title[:147] + "..." if len(title) > 150 else title
 
             # Get URL: published article URL or fallback
             # Priority: wordpress_url (if valid) > published_url (if valid) > base_url
@@ -1232,8 +1239,15 @@ async def _publish_with_target_schedules(
     }
 
     # Get hooks from working_json or request
-    hooks = social_hooks or (article.get('working_json') or {}).get('social_hooks') or {}
+    raw_hooks = social_hooks or (article.get('working_json') or {}).get('social_hooks') or {}
     fallback_hook = article.get('titulo', '')[:147] + "..." if len(article.get('titulo', '')) > 150 else article.get('titulo', '')
+
+    # SAFEGUARD: Ensure all 3 hook types exist with fallback to title
+    hooks = {
+        'direct': raw_hooks.get('direct') or fallback_hook,
+        'professional': raw_hooks.get('professional') or fallback_hook,
+        'emotional': raw_hooks.get('emotional') or fallback_hook
+    }
 
     # Separate immediate vs scheduled
     immediate_targets = []
