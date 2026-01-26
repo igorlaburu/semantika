@@ -303,10 +303,26 @@ def extract_first_article_image(soup: BeautifulSoup, page_url: str) -> Optional[
         
         for img in images:
             src = img['src'].strip()
-            
+
             # Skip data URIs
             if src.startswith('data:'):
                 continue
+
+            # If src is just a domain (Angular/lazy-load pattern), try srcset
+            parsed_src = urlparse(src)
+            if parsed_src.path in ('', '/') and img.get('srcset'):
+                # Extract largest image from srcset (format: "url1 64w, url2 128w, ...")
+                srcset = img.get('srcset', '')
+                srcset_urls = []
+                for part in srcset.split(','):
+                    part = part.strip()
+                    if ' ' in part:
+                        url_part = part.rsplit(' ', 1)[0].strip()
+                        srcset_urls.append(url_part)
+                # Use largest (last) URL from srcset
+                if srcset_urls:
+                    src = srcset_urls[-1]
+                    logger.debug("image_using_srcset", original_src=img['src'][:50], srcset_url=src[:100])
             
             # Skip common icon/logo patterns in URL
             if any(skip in src.lower() for skip in ['icon', 'logo', 'avatar', 'pixel', '1x1', 'back.png']):
