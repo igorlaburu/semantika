@@ -534,7 +534,9 @@ async def publish_to_platforms(
         title = article.get('titulo', 'Untitled')
         content = article.get('contenido', '')
         excerpt = article.get('excerpt', '')
-        tags = article.get('tags', [])
+        working_json = article.get('working_json') or {}
+        # Tags: prefer column, fallback to working_json
+        tags = article.get('tags') or working_json.get('tags') or working_json.get('article', {}).get('tags') or []
         category = article.get('category', None)
 
         # Use article slug (required field in press_articles)
