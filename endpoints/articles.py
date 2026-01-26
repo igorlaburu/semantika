@@ -1636,13 +1636,22 @@ async def calculate_optimal_schedule_time(company_id: str) -> datetime:
 
 # Configuration for schedule algorithm
 TIMEZONE = "Europe/Madrid"
-GAP_WP_MINUTES = 30        # Gap between WordPress publications
-GAP_SOCIAL_MINUTES = 15    # Gap between social media publications
-VALID_WINDOWS = [          # Valid audience windows (local time)
-    (8, 11),               # Morning
-    (13, 15),              # Midday
-    (19, 22)               # Evening
-]
+MIN_GAP_MINUTES = 10  # Minimum gap between any two publications
+
+# Optimal hours per platform (hora Madrid, ordenadas por engagement)
+# Basado en estudios de engagement por plataforma
+PLATFORM_OPTIMAL_HOURS = {
+    "wordpress": [7, 8, 9, 10],                    # SEO: mañana temprano, indexación Google
+    "twitter": [9, 12, 17, 18, 21],                # Picos: mañana, mediodía, salida trabajo, noche
+    "facebook": [13, 14, 19, 20, 21],              # Post-comida y tarde-noche
+    "linkedin": [10, 11, 8, 9],                    # Mid-morning laboral (solo L-V)
+    "instagram": [12, 13, 19, 20, 21, 11],         # Mediodía y noche
+    "bluesky": [9, 12, 17, 18, 21],                # Similar a Twitter
+    "tiktok": [19, 20, 21, 12, 13],                # Tarde-noche principalmente
+}
+
+# Fallback para plataformas no definidas
+DEFAULT_OPTIMAL_HOURS = [9, 13, 19]
 
 
 def _get_madrid_now() -> datetime:
@@ -1667,72 +1676,83 @@ def _to_utc(dt: datetime) -> datetime:
     return dt.astimezone(ZoneInfo("UTC"))
 
 
-def _is_in_valid_window(hour: int) -> bool:
-    """Check if hour is in a valid audience window."""
-    for start, end in VALID_WINDOWS:
-        if start <= hour <= end:
-            return True
-    return False
+def _is_workday(dt: datetime) -> bool:
+    """Check if datetime is a workday (Mon-Fri)."""
+    return dt.weekday() < 5
 
 
-def _adjust_to_valid_window(dt: datetime) -> datetime:
-    """Adjust datetime to next valid audience window."""
+def _next_workday(dt: datetime) -> datetime:
+    """Get next workday from given datetime."""
+    while dt.weekday() >= 5:  # Saturday=5, Sunday=6
+        dt = dt + timedelta(days=1)
+    return dt
+
+
+def _find_next_optimal_slot(
+    platform: str,
+    min_time: datetime,
+    taken_slots: list,
+    check_workday: bool = False
+) -> datetime:
+    """Find next optimal publication slot for a platform.
+
+    Args:
+        platform: Platform type (wordpress, twitter, etc.)
+        min_time: Minimum datetime (must be after this)
+        taken_slots: List of already scheduled datetimes to avoid
+        check_workday: If True, only schedule on workdays (for LinkedIn)
+
+    Returns:
+        Next optimal datetime for this platform
+    """
     try:
         from zoneinfo import ZoneInfo
     except ImportError:
         from backports.zoneinfo import ZoneInfo
 
-    # Ensure we're working in Madrid timezone
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=ZoneInfo(TIMEZONE))
+    tz = ZoneInfo(TIMEZONE)
+    if min_time.tzinfo is None:
+        min_time = min_time.replace(tzinfo=tz)
 
-    hour = dt.hour
+    optimal_hours = PLATFORM_OPTIMAL_HOURS.get(platform, DEFAULT_OPTIMAL_HOURS)
 
-    # Night hours (23:00 - 08:00) -> move to next morning 08:30
-    if hour >= 23 or hour < 8:
-        next_day = dt.date() + timedelta(days=1) if hour >= 23 else dt.date()
-        return datetime.combine(next_day, datetime.min.time().replace(hour=8, minute=30), tzinfo=dt.tzinfo)
+    # Try today and next 7 days
+    current_date = min_time.date()
+    for day_offset in range(8):
+        check_date = current_date + timedelta(days=day_offset)
 
-    # Lunch break (12:00 - 13:00) -> move to 13:30
-    if hour == 12:
-        return dt.replace(hour=13, minute=30, second=0, microsecond=0)
+        # Skip weekends for LinkedIn
+        if check_workday:
+            check_dt = datetime.combine(check_date, datetime.min.time(), tzinfo=tz)
+            if not _is_workday(check_dt):
+                continue
 
-    # If in valid window, return as-is
-    return dt
+        for hour in optimal_hours:
+            candidate = datetime.combine(
+                check_date,
+                datetime.min.time().replace(hour=hour, minute=0),
+                tzinfo=tz
+            )
 
+            # Must be in the future (at least min_time)
+            if candidate <= min_time:
+                continue
 
-def _adjust_to_work_hours(dt: datetime) -> datetime:
-    """Adjust datetime for LinkedIn (work hours Mon-Fri 08:00-18:00)."""
-    try:
-        from zoneinfo import ZoneInfo
-    except ImportError:
-        from backports.zoneinfo import ZoneInfo
+            # Check it doesn't conflict with taken slots (MIN_GAP_MINUTES apart)
+            conflict = False
+            for taken in taken_slots:
+                if taken.tzinfo is None:
+                    taken = taken.replace(tzinfo=tz)
+                gap = abs((candidate - taken).total_seconds() / 60)
+                if gap < MIN_GAP_MINUTES:
+                    conflict = True
+                    break
 
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=ZoneInfo(TIMEZONE))
+            if not conflict:
+                return candidate
 
-    # Weekend -> move to Monday 09:00
-    if dt.weekday() >= 5:  # Saturday=5, Sunday=6
-        days_until_monday = 7 - dt.weekday()
-        return datetime.combine(
-            dt.date() + timedelta(days=days_until_monday),
-            datetime.min.time().replace(hour=9, minute=0),
-            tzinfo=dt.tzinfo
-        )
-
-    # Before work hours
-    if dt.hour < 8:
-        return dt.replace(hour=9, minute=0, second=0, microsecond=0)
-
-    # After work hours
-    if dt.hour >= 18:
-        next_day = dt.date() + timedelta(days=1)
-        # If Friday, skip to Monday
-        if dt.weekday() == 4:
-            next_day = dt.date() + timedelta(days=3)
-        return datetime.combine(next_day, datetime.min.time().replace(hour=9, minute=0), tzinfo=dt.tzinfo)
-
-    return dt
+    # Fallback: just add 1 hour to min_time if no optimal slot found
+    return min_time + timedelta(hours=1)
 
 
 async def _get_last_scheduled_wp(company_id: str) -> Optional[datetime]:
@@ -2012,11 +2032,13 @@ async def propose_schedule(
     **Authentication**: Accepts either JWT or API Key
 
     Returns proposed schedule times for each publication target,
-    considering:
-    - Valid audience windows (morning, midday, evening)
-    - Gap between WordPress publications (30 min)
-    - Gap between social media posts (15 min)
-    - LinkedIn work hours (Mon-Fri 08:00-18:00)
+    considering platform-specific optimal hours based on engagement data:
+    - WordPress: 7-10h (SEO/indexación Google)
+    - Twitter/Bluesky: 9, 12, 17-18, 21h (picos de actividad)
+    - Facebook: 13-14, 19-21h (post-comida y noche)
+    - LinkedIn: 8-11h solo días laborables
+    - Instagram: 11-13, 19-21h (mediodía y noche)
+    - TikTok: 12-13, 19-21h (tarde-noche)
 
     **Response**:
         {
@@ -2055,66 +2077,50 @@ async def propose_schedule(
         if not targets:
             return {"schedules": []}
 
-        # Get current time in Madrid
+        # Get current time in Madrid (min 5 minutes from now)
         now_madrid = _get_madrid_now()
-
-        # Get last scheduled WordPress publication
-        last_wp = await _get_last_scheduled_wp(company_id)
-
-        # Calculate base start time (at least 5 minutes from now, after last WP + gap)
         min_start = now_madrid + timedelta(minutes=5)
+
+        # Track already scheduled slots to avoid conflicts
+        taken_slots = []
+
+        # Get existing scheduled publications to avoid conflicts
+        last_wp = await _get_last_scheduled_wp(company_id)
         if last_wp:
-            try:
-                from zoneinfo import ZoneInfo
-            except ImportError:
-                from backports.zoneinfo import ZoneInfo
-            last_wp_madrid = last_wp.astimezone(ZoneInfo(TIMEZONE))
-            wp_after_gap = last_wp_madrid + timedelta(minutes=GAP_WP_MINUTES)
-            min_start = max(min_start, wp_after_gap)
+            taken_slots.append(last_wp)
 
-        # Adjust to valid window
-        base_time = _adjust_to_valid_window(min_start)
-
-        # Calculate schedules for each target
+        # Calculate optimal schedule for each target
         schedules = []
-        wp_time = None
-        social_pointer = None
 
-        # Sort targets: WordPress first, then social media
-        wp_targets = [t for t in targets if t["platform_type"] == "wordpress"]
-        social_targets = [t for t in targets if t["platform_type"] != "wordpress"]
+        # Sort targets: WordPress first (SEO needs early publication)
+        sorted_targets = sorted(
+            targets,
+            key=lambda t: (0 if t["platform_type"] == "wordpress" else 1, t.get("name", ""))
+        )
 
-        # WordPress targets get the base time
-        for target in wp_targets:
-            wp_time = base_time
-            schedules.append({
-                "target_id": target["id"],
-                "platform_type": target["platform_type"],
-                "name": target["name"],
-                "schedule_time": _to_utc(wp_time).strftime("%Y-%m-%dT%H:%M:%SZ")
-            })
+        for target in sorted_targets:
+            platform = target["platform_type"]
 
-        # Social media targets get cascading times after WordPress
-        social_pointer = wp_time if wp_time else base_time
+            # LinkedIn only on workdays
+            check_workday = (platform == "linkedin")
 
-        for target in social_targets:
-            social_pointer = social_pointer + timedelta(minutes=GAP_SOCIAL_MINUTES)
-
-            # Adjust for platform-specific rules
-            if target["platform_type"] == "linkedin":
-                schedule_time = _adjust_to_work_hours(social_pointer)
-            else:
-                schedule_time = _adjust_to_valid_window(social_pointer)
+            # Find optimal slot for this platform
+            schedule_time = _find_next_optimal_slot(
+                platform=platform,
+                min_time=min_start,
+                taken_slots=taken_slots,
+                check_workday=check_workday
+            )
 
             schedules.append({
                 "target_id": target["id"],
-                "platform_type": target["platform_type"],
+                "platform_type": platform,
                 "name": target["name"],
                 "schedule_time": _to_utc(schedule_time).strftime("%Y-%m-%dT%H:%M:%SZ")
             })
 
-            # Update pointer for next social target
-            social_pointer = schedule_time
+            # Add to taken slots to avoid conflicts
+            taken_slots.append(schedule_time)
 
         logger.info("schedule_proposed",
             article_id=article_id,
