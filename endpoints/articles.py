@@ -1643,7 +1643,9 @@ MIN_GAP_MINUTES = 10  # Minimum gap between any two publications
 # Optimal hours per platform (hora Madrid, ordenadas por engagement)
 # Basado en estudios de engagement por plataforma
 PLATFORM_OPTIMAL_HOURS = {
-    "wordpress": [7, 8, 9, 10],                    # SEO: mañana temprano, indexación Google
+    # WordPress: preferencia mañana (SEO), pero puede publicar todo el día
+    # Importante: publicar ANTES que RRSS para que tengan el link
+    "wordpress": [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18],  # Todo el día hasta las 18h
     "twitter": [9, 12, 17, 18, 21],                # Picos: mañana, mediodía, salida trabajo, noche
     "facebook": [13, 14, 19, 20, 21],              # Post-comida y tarde-noche
     "linkedin": [10, 11, 8, 9],                    # Mid-morning laboral (solo L-V)
@@ -2094,11 +2096,14 @@ async def propose_schedule(
         # Calculate optimal schedule for each target
         schedules = []
 
-        # Sort targets: WordPress first (SEO needs early publication)
+        # Sort targets: WordPress first (must publish before social media for link)
         sorted_targets = sorted(
             targets,
             key=lambda t: (0 if t["platform_type"] == "wordpress" else 1, t.get("name", ""))
         )
+
+        # Track WordPress schedule time - social media must be AFTER this
+        wordpress_schedule_time = None
 
         for target in sorted_targets:
             platform = target["platform_type"]
@@ -2106,13 +2111,26 @@ async def propose_schedule(
             # LinkedIn only on workdays
             check_workday = (platform == "linkedin")
 
+            # IMPORTANT: Social media must be scheduled AFTER WordPress
+            # Otherwise they publish without the article link
+            if platform != "wordpress" and wordpress_schedule_time:
+                # Social media min time = WordPress time + 15 min gap
+                social_min_time = wordpress_schedule_time + timedelta(minutes=15)
+                effective_min_time = max(min_start, social_min_time)
+            else:
+                effective_min_time = min_start
+
             # Find optimal slot for this platform
             schedule_time = _find_next_optimal_slot(
                 platform=platform,
-                min_time=min_start,
+                min_time=effective_min_time,
                 taken_slots=taken_slots,
                 check_workday=check_workday
             )
+
+            # Track WordPress time for social media scheduling
+            if platform == "wordpress":
+                wordpress_schedule_time = schedule_time
 
             schedules.append({
                 "target_id": target["id"],
