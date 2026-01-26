@@ -1095,21 +1095,19 @@ async def scrape_articles_from_index(
                     position=position
                 )
                 
-                # Fetch article HTML
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        article_url,
-                        timeout=aiohttp.ClientTimeout(total=30),
-                        headers={'User-Agent': 'Mozilla/5.0 (compatible; SemantikaScraper/1.0)'}
-                    ) as response:
-                        if response.status != 200:
-                            logger.warn("article_fetch_failed",
-                                url=article_url,
-                                status=response.status
-                            )
-                            return None
-                        
-                        article_html = await response.text()
+                # Fetch article HTML using same engine as index
+                if SCRAPER_ENGINE == "playwright":
+                    article_html, fetch_error = await _fetch_with_playwright(article_url)
+                else:
+                    article_html, fetch_error = await _fetch_with_aiohttp(article_url)
+
+                if fetch_error or not article_html:
+                    logger.warn("article_fetch_failed",
+                        url=article_url,
+                        error=fetch_error,
+                        engine=SCRAPER_ENGINE
+                    )
+                    return None
                 
                 # Parse with LLM via unified enricher
                 from utils.content_hasher import normalize_html
