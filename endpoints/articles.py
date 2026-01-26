@@ -1864,6 +1864,143 @@ async def get_scheduled_publications(
     }
 
 
+@router.patch("/api/v1/scheduled-publications/{publication_id}")
+async def update_scheduled_publication(
+    publication_id: str,
+    company_id: str = Depends(get_company_id_from_auth),
+    scheduled_for: Optional[str] = None,
+    social_hook: Optional[str] = None,
+    status: Optional[str] = None
+) -> Dict:
+    """Update a scheduled publication.
+
+    **Authentication**: Accepts either JWT or API Key
+
+    Args:
+        publication_id: UUID of the scheduled publication
+        scheduled_for: New schedule time (ISO-8601 format, e.g., "2026-01-26T07:00:00+01:00")
+        social_hook: New social media text/hook
+        status: New status ('scheduled', 'cancelled')
+
+    **Response**:
+        {
+            "id": "uuid",
+            "scheduled_for": "2026-01-26T06:00:00+00:00",
+            "status": "scheduled",
+            "message": "Publication updated"
+        }
+    """
+    supabase = get_supabase_client()
+
+    # Verify publication exists and belongs to company
+    pub_result = supabase.client.table("scheduled_publications")\
+        .select("id, status, scheduled_for")\
+        .eq("id", publication_id)\
+        .eq("company_id", company_id)\
+        .single()\
+        .execute()
+
+    if not pub_result.data:
+        raise HTTPException(status_code=404, detail="Scheduled publication not found")
+
+    current_status = pub_result.data.get('status')
+    if current_status == 'published':
+        raise HTTPException(status_code=400, detail="Cannot modify already published publication")
+
+    # Build update data
+    update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
+
+    if scheduled_for is not None:
+        # Parse and validate the datetime
+        try:
+            parsed_dt = datetime.fromisoformat(scheduled_for.replace('Z', '+00:00'))
+            if parsed_dt <= datetime.now(timezone.utc):
+                raise HTTPException(status_code=400, detail="scheduled_for must be in the future")
+            update_data["scheduled_for"] = parsed_dt.isoformat()
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid datetime format: {str(e)}")
+
+    if social_hook is not None:
+        update_data["social_hook"] = social_hook
+
+    if status is not None:
+        if status not in ['scheduled', 'cancelled']:
+            raise HTTPException(status_code=400, detail="status must be 'scheduled' or 'cancelled'")
+        update_data["status"] = status
+
+    # Update
+    result = supabase.client.table("scheduled_publications")\
+        .update(update_data)\
+        .eq("id", publication_id)\
+        .execute()
+
+    logger.info("scheduled_publication_updated",
+        publication_id=publication_id,
+        company_id=company_id,
+        updates=list(update_data.keys())
+    )
+
+    return {
+        "id": publication_id,
+        "scheduled_for": update_data.get("scheduled_for", pub_result.data.get("scheduled_for")),
+        "status": update_data.get("status", current_status),
+        "message": "Publication updated"
+    }
+
+
+@router.delete("/api/v1/scheduled-publications/{publication_id}")
+async def delete_scheduled_publication(
+    publication_id: str,
+    company_id: str = Depends(get_company_id_from_auth)
+) -> Dict:
+    """Delete/cancel a scheduled publication.
+
+    **Authentication**: Accepts either JWT or API Key
+
+    Note: This permanently deletes the publication record. Use PATCH with status='cancelled'
+    to keep the record but prevent publication.
+
+    **Response**:
+        {
+            "id": "uuid",
+            "message": "Publication deleted"
+        }
+    """
+    supabase = get_supabase_client()
+
+    # Verify publication exists and belongs to company
+    pub_result = supabase.client.table("scheduled_publications")\
+        .select("id, status, platform_type, article_id")\
+        .eq("id", publication_id)\
+        .eq("company_id", company_id)\
+        .single()\
+        .execute()
+
+    if not pub_result.data:
+        raise HTTPException(status_code=404, detail="Scheduled publication not found")
+
+    if pub_result.data.get('status') == 'published':
+        raise HTTPException(status_code=400, detail="Cannot delete already published publication")
+
+    # Delete
+    supabase.client.table("scheduled_publications")\
+        .delete()\
+        .eq("id", publication_id)\
+        .execute()
+
+    logger.info("scheduled_publication_deleted",
+        publication_id=publication_id,
+        company_id=company_id,
+        platform_type=pub_result.data.get('platform_type'),
+        article_id=pub_result.data.get('article_id')
+    )
+
+    return {
+        "id": publication_id,
+        "message": "Publication deleted"
+    }
+
+
 @router.post("/api/v1/articles/{article_id}/propose-schedule")
 async def propose_schedule(
     article_id: str,
