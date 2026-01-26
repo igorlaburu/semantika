@@ -248,9 +248,9 @@ class LinkedInPublisher(BasePublisher):
             'client_id': client_id,
             'redirect_uri': redirect_uri,
             'state': state,
-            # Basic scopes (always available)
-            # For company pages, add r_organization_social w_organization_social after Community Management API approval
-            'scope': 'openid profile email w_member_social'
+            # Basic scopes - only w_member_social needed for posting
+            # Share on LinkedIn product must be enabled in Developer Console
+            'scope': 'w_member_social'
         }
         return f"https://www.linkedin.com/oauth/v2/authorization?{urlencode(params)}"
 
@@ -308,39 +308,50 @@ class LinkedInPublisher(BasePublisher):
 
     @staticmethod
     async def get_user_profile(access_token: str) -> Dict[str, Any]:
-        """Get authenticated user's profile info."""
+        """Get authenticated user's profile info using /me endpoint."""
         try:
             headers = {
-                'Authorization': f'Bearer {access_token}'
+                'Authorization': f'Bearer {access_token}',
+                'X-Restli-Protocol-Version': '2.0.0'
             }
 
             async with aiohttp.ClientSession() as session:
-                # Get user info from OpenID Connect userinfo endpoint
+                # Get user info from /me endpoint (works with w_member_social)
                 async with session.get(
-                    'https://api.linkedin.com/v2/userinfo',
+                    'https://api.linkedin.com/v2/me',
                     headers=headers
                 ) as response:
                     if response.status == 200:
                         data = await response.json()
+                        # Extract name from localized fields
+                        first_name = ""
+                        last_name = ""
+                        if 'localizedFirstName' in data:
+                            first_name = data['localizedFirstName']
+                        if 'localizedLastName' in data:
+                            last_name = data['localizedLastName']
+
+                        full_name = f"{first_name} {last_name}".strip() or "LinkedIn User"
+                        member_id = data.get('id', '')
+
                         return {
                             "success": True,
-                            "sub": data.get('sub'),  # Member URN like "urn:li:person:xxx"
-                            "name": data.get('name'),
-                            "given_name": data.get('given_name'),
-                            "family_name": data.get('family_name'),
-                            "email": data.get('email'),
-                            "picture": data.get('picture')
+                            "sub": f"urn:li:person:{member_id}",
+                            "name": full_name,
+                            "given_name": first_name,
+                            "family_name": last_name,
+                            "member_id": member_id
                         }
                     else:
                         error_text = await response.text()
-                        logger.error("linkedin_userinfo_failed",
+                        logger.error("linkedin_me_failed",
                             status=response.status,
                             error=error_text[:200]
                         )
                         return {"success": False, "error": f"HTTP {response.status}"}
 
         except Exception as e:
-            logger.error("linkedin_userinfo_error", error=str(e))
+            logger.error("linkedin_me_error", error=str(e))
             return {"success": False, "error": str(e)}
 
     @staticmethod
