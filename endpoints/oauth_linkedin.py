@@ -17,7 +17,10 @@ from publishers.linkedin_publisher import LinkedInPublisher
 logger = get_logger("api.oauth.linkedin")
 router = APIRouter(prefix="/oauth/linkedin", tags=["oauth-linkedin"])
 
-@router.get("/oauth/linkedin/start")
+# Module-level cache for OAuth state tokens (temporary, for the OAuth flow)
+_oauth_states_cache = {}
+
+@router.get("/start")
 async def linkedin_oauth_start(
     token: Optional[str] = Query(None, description="JWT token (for popup flow)"),
     authorization: Optional[str] = Header(None)
@@ -71,12 +74,10 @@ async def linkedin_oauth_start(
         state = f"{company_id}:{uuid.uuid4()}"
 
         # Store state temporarily
-        oauth_states_cache = getattr(app.state, 'linkedin_oauth_states', {})
-        oauth_states_cache[state] = {
+        _oauth_states_cache[state] = {
             'company_id': company_id,
             'timestamp': datetime.utcnow().timestamp()
         }
-        app.state.linkedin_oauth_states = oauth_states_cache
 
         # Generate callback URL
         callback_url = f"{os.getenv('API_BASE_URL', 'https://api.ekimen.ai')}/oauth/linkedin/callback"
@@ -119,7 +120,7 @@ async def linkedin_oauth_start(
         )
 
 
-@router.get("/oauth/linkedin/callback")
+@router.get("/callback")
 async def linkedin_oauth_callback(
     code: str = Query(None, description="Authorization code from LinkedIn"),
     state: str = Query(None, description="State parameter"),
@@ -168,8 +169,7 @@ async def linkedin_oauth_callback(
 
     try:
         # Validate state
-        oauth_states_cache = getattr(app.state, 'linkedin_oauth_states', {})
-        state_data = oauth_states_cache.get(state)
+        state_data = _oauth_states_cache.get(state)
 
         if not state_data:
             # Try to extract company_id from state format "company_id:uuid"
@@ -184,7 +184,7 @@ async def linkedin_oauth_callback(
                 )
         else:
             company_id = state_data['company_id']
-            del oauth_states_cache[state]  # Consume state
+            del _oauth_states_cache[state]  # Consume state
 
         client_id = os.getenv('LINKEDIN_CLIENT_ID')
         client_secret = os.getenv('LINKEDIN_CLIENT_SECRET')
@@ -321,7 +321,7 @@ async def linkedin_oauth_callback(
         )
 
 
-@router.get("/oauth/linkedin/status")
+@router.get("/status")
 async def linkedin_oauth_status(
     company_id: str = Depends(get_company_id_from_auth)
 ) -> Dict:
@@ -369,7 +369,7 @@ async def linkedin_oauth_status(
         return {"connected": False, "error": str(e)}
 
 
-@router.delete("/oauth/linkedin")
+@router.delete("")
 async def linkedin_oauth_disconnect(
     company_id: str = Depends(get_company_id_from_auth)
 ) -> Dict:
