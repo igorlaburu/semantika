@@ -1251,14 +1251,14 @@ Respond with ONLY the prompt text (no JSON, no markdown, no explanation).""")
     ) -> Dict[str, Any]:
         """Generate social media hooks for different platforms using Groq.
 
-        Generates 3 hooks:
-        - direct: Concise, impactful (Twitter/X style)
-        - professional: Formal, data-focused (LinkedIn style)
-        - emotional: Engaging, connects with reader (Facebook style)
+        Generates 3 hooks with platform-appropriate lengths:
+        - direct: Twitter/X/Bluesky (max 250 chars) - concise, impactful
+        - professional: LinkedIn (max 400 chars) - adds context and value
+        - emotional: Facebook (max 400 chars) - engaging, storytelling
 
-        Each hook is max 150 chars. Falls back to truncated title on error.
+        Falls back to truncated title on error.
         """
-        fallback_hook = self._truncate_hook(title, 150)
+        fallback_hook = self._truncate_hook(title, 200)
         fallback_result = {
             "social_hooks": {
                 "direct": fallback_hook,
@@ -1276,7 +1276,7 @@ Respond with ONLY the prompt text (no JSON, no markdown, no explanation).""")
         try:
             hooks_prompt = ChatPromptTemplate.from_messages([
                 ("system", "You are an expert social media copywriter. Generate engaging hooks for news articles. ALWAYS write in the SAME LANGUAGE as the original article."),
-                ("user", """Generate 3 social media hooks for this article. Each hook must be MAXIMUM 150 characters.
+                ("user", """Generate 3 social media hooks for this article with DIFFERENT lengths per platform.
 
 Title: {title}
 
@@ -1284,16 +1284,18 @@ Content summary: {content}
 
 Generate 3 hooks in JSON format:
 {{
-    "direct": "Concise, impactful hook for Twitter/X. No emojis. Max 150 chars.",
-    "professional": "Formal, data-focused hook for LinkedIn. No emojis. Max 150 chars.",
-    "emotional": "Engaging hook that connects with reader for Facebook. Can use 1-2 emojis. Max 150 chars."
+    "direct": "For Twitter/X/Bluesky. Concise and impactful. No emojis. MAX 250 chars.",
+    "professional": "For LinkedIn. Add context, data or insight that provides value to readers. No emojis. MAX 400 chars.",
+    "emotional": "For Facebook. Engaging storytelling that connects emotionally with readers. Can use 1-2 emojis. MAX 400 chars."
 }}
 
 IMPORTANT:
 - WRITE IN THE SAME LANGUAGE AS THE TITLE AND CONTENT (Spanish, Basque, etc.)
-- Each hook must be UNDER 150 characters
+- direct: MAX 250 characters (short, punchy)
+- professional: 200-400 characters (add context/value, not just headline)
+- emotional: 200-400 characters (tell a mini-story, connect emotionally)
 - Do NOT include hashtags or URLs (added automatically)
-- Do NOT repeat the exact title, rephrase it
+- Do NOT repeat the exact title, rephrase and expand
 - Make each hook unique and platform-appropriate
 - Respond with ONLY valid JSON, no markdown""")
             ])
@@ -1310,12 +1312,17 @@ IMPORTANT:
                 "content": content_preview
             })
 
-            # Validate and truncate hooks if needed
+            # Validate and truncate hooks if needed (platform-specific limits)
+            hook_limits = {
+                "direct": 250,       # Twitter/X/Bluesky
+                "professional": 400, # LinkedIn
+                "emotional": 400     # Facebook
+            }
             social_hooks = {}
             for hook_type in ["direct", "professional", "emotional"]:
                 hook_text = hooks_result.get(hook_type, "")
                 if hook_text:
-                    social_hooks[hook_type] = self._truncate_hook(hook_text, 150)
+                    social_hooks[hook_type] = self._truncate_hook(hook_text, hook_limits[hook_type])
                 else:
                     social_hooks[hook_type] = fallback_hook
 
