@@ -639,18 +639,69 @@ async def extract_publication_date(
 
 def extract_date_from_text(text: str) -> Optional[datetime]:
     """Quick date extraction from plain text.
-    
+
+    Uses dynamic pattern based on current date to find recent dates.
+    Searches for year (2 digits) near month abbreviation (ES/EN/EU) within 15 chars.
+
     Args:
         text: Plain text content
-        
+
     Returns:
         datetime object or None
     """
-    for pattern in DATE_PATTERNS.values():
-        match = re.search(pattern, text)
-        if match:
-            dt = parse_date_string(match.group(0))
-            if dt:
-                return dt
-    
+    now = datetime.now()
+    year_2d = str(now.year)[-2:]  # "26"
+    prev_year_2d = str(now.year - 1)[-2:]  # "25" (for articles from last year)
+
+    # Month abbreviations (3 letters) in Spanish, English, Basque
+    MONTHS_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
+                 "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+    MONTHS_EN = ["january", "february", "march", "april", "may", "june",
+                 "july", "august", "september", "october", "november", "december"]
+    MONTHS_EU = ["urtarrila", "otsaila", "martxoa", "apirila", "maiatza", "ekaina",
+                 "uztaila", "abuztua", "iraila", "urria", "azaroa", "abendua"]
+
+    # Current month + previous month (for early-month edge cases)
+    months_to_check = [now.month - 1]
+    if now.day <= 7:  # First week, also check previous month
+        months_to_check.append((now.month - 2) % 12)
+
+    month_abbrevs = []
+    for m in months_to_check:
+        month_abbrevs.extend([
+            MONTHS_ES[m][:3],  # ene, feb, etc.
+            MONTHS_EN[m][:3],  # jan, feb, etc.
+            MONTHS_EU[m][:3],  # urt, ots, etc.
+        ])
+
+    # Remove duplicates (mar = march = martxoa)
+    month_abbrevs = list(set(month_abbrevs))
+    months_pattern = '|'.join(month_abbrevs)
+
+    # Pattern: year near month abbrev (max 15 chars), either order
+    # Matches: "25 ene. 2026", "ene 26", "2026 ene", "jan 2026", etc.
+    pattern = rf'({year_2d}|{prev_year_2d}).{{0,15}}({months_pattern})|({months_pattern}).{{0,15}}({year_2d}|{prev_year_2d})'
+
+    text_lower = text.lower()
+    match = re.search(pattern, text_lower, re.IGNORECASE)
+
+    if match:
+        # Found date-like pattern, extract surrounding context and parse
+        start = max(0, match.start() - 10)
+        end = min(len(text), match.end() + 10)
+        context = text[start:end]
+
+        # Try to parse the context with existing patterns
+        for p in DATE_PATTERNS.values():
+            date_match = re.search(p, context, re.IGNORECASE)
+            if date_match:
+                dt = parse_date_string(date_match.group(0))
+                if dt:
+                    return dt
+
+        # If patterns didn't work, try parse_date_string directly on context
+        dt = parse_date_string(context)
+        if dt:
+            return dt
+
     return None
