@@ -325,15 +325,15 @@ def extract_first_article_image(soup: BeautifulSoup, page_url: str) -> Optional[
                     logger.debug("image_using_srcset", original_src=img['src'][:50], srcset_url=src[:100])
             
             # Skip common icon/logo patterns in URL
-            if any(skip in src.lower() for skip in ['icon', 'logo', 'avatar', 'pixel', '1x1', 'back.png']):
+            if any(skip in src.lower() for skip in ['icon', 'logo', 'avatar', 'pixel', '1x1', 'back.png', 'escudo', 'badge', 'crest', 'shield']):
                 continue
-            
+
             # Skip common icon/logo patterns in alt text
             alt = img.get('alt', '').strip().lower()
-            if any(skip in alt for skip in ['icono', 'icon', 'logo', 'avatar', 'ver más', 'ver mas', 'back', 'arrow']):
+            if any(skip in alt for skip in ['icono', 'icon', 'logo', 'avatar', 'ver más', 'ver mas', 'back', 'arrow', 'escudo', 'badge']):
                 continue
-            
-            # Skip tiny images (likely icons)
+
+            # Skip tiny images (likely icons) - require minimum 150px
             width = img.get('width')
             height = img.get('height')
             w, h = None, None
@@ -341,7 +341,12 @@ def extract_first_article_image(soup: BeautifulSoup, page_url: str) -> Optional[
                 try:
                     w = int(width)
                     h = int(height)
-                    if w < 100 or h < 100:
+                    # Skip small images
+                    if w < 150 or h < 150:
+                        continue
+                    # Skip small square images (likely logos/avatars)
+                    if w < 300 and h < 300 and 0.8 < (w/h) < 1.2:
+                        logger.debug("skipping_small_square_image", url=src[:50], width=w, height=h)
                         continue
                 except (ValueError, TypeError):
                     pass
@@ -358,27 +363,45 @@ def extract_first_article_image(soup: BeautifulSoup, page_url: str) -> Optional[
             
             # Calculate score for image selection priority
             score = 0
-            
-            # Same domain gets major bonus (prevents cross-site images)
+
+            # Same domain gets bonus (prevents cross-site images)
             if is_same_domain:
-                score += 100
+                score += 50
             else:
                 # Log cross-domain images for debugging
-                logger.debug("content_image_cross_domain", 
+                logger.debug("content_image_cross_domain",
                     page_domain=page_domain,
                     image_domain=image_domain,
                     image_url=image_url[:100]
                 )
                 # Still allow, but with lower score
-                score += 10
-            
-            # Size bonus (larger images preferred)
+                score += 5
+
+            # Size bonus - HEAVILY favor larger images
             if w and h:
-                score += min(w + h, 50)  # Cap bonus at 50
-            
-            # Alt text bonus (indicates meaningful image) - already extracted above
+                # Area-based scoring (larger images = much higher score)
+                area = w * h
+                if area >= 400000:  # 800x500 or larger
+                    score += 200
+                elif area >= 200000:  # 500x400 or larger
+                    score += 150
+                elif area >= 100000:  # 400x250 or larger
+                    score += 100
+                elif area >= 50000:  # 250x200 or larger
+                    score += 50
+                else:
+                    score += 10
+
+                # Horizontal aspect ratio bonus (typical article images: 16:9, 1.91:1)
+                aspect = w / h if h > 0 else 1
+                if 1.3 < aspect < 2.5:  # Horizontal rectangle
+                    score += 30
+                elif 0.8 < aspect < 1.2:  # Square-ish (less preferred)
+                    score -= 20
+
+            # Alt text bonus (indicates meaningful image)
             if alt and len(alt) > 10:
-                score += 20
+                score += 15
             
             candidate_images.append({
                 "url": image_url,
