@@ -88,14 +88,25 @@ async def auth_signup(request: SignupRequest) -> Dict:
                 detail="Una empresa con este CIF ya está registrada. Por ahora solo permitimos nuevas empresas."
             )
 
-        # Create company first
+        # Create company first with default settings
         logger.debug("creating_company", cif=cif_normalized, name=request.company_name)
+
+        # Default settings including configurable social hook prompts
+        default_settings = {
+            "social_hook_prompts": {
+                "direct": "For Twitter/X/Bluesky. Concise and impactful. No emojis. MAX 250 chars.",
+                "professional": "For LinkedIn. Add context, data or insight that provides value to readers. No emojis. MAX 400 chars.",
+                "emotional": "For Facebook. Engaging storytelling that connects emotionally with readers. Can use 1-2 emojis. MAX 400 chars."
+            }
+        }
+
         company_result = supabase.client.table("companies")\
             .insert({
                 "company_code": cif_normalized,
                 "company_name": request.company_name,
                 "tier": request.tier,
-                "is_active": True
+                "is_active": True,
+                "settings": default_settings
             })\
             .execute()
 

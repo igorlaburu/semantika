@@ -1242,12 +1242,50 @@ Respond with ONLY the prompt text (no JSON, no markdown, no explanation).""")
             return text
         return text[:max_length - 3] + "..."
 
+    # Default prompts for social hooks (used when company has no custom config)
+    DEFAULT_SOCIAL_HOOK_PROMPTS = {
+        "direct": "For Twitter/X/Bluesky. Concise and impactful. No emojis. MAX 250 chars.",
+        "professional": "For LinkedIn. Add context, data or insight that provides value to readers. No emojis. MAX 400 chars.",
+        "emotional": "For Facebook. Engaging storytelling that connects emotionally with readers. Can use 1-2 emojis. MAX 400 chars."
+    }
+
+    async def _get_company_hook_prompts(self, company_id: Optional[str]) -> Dict[str, str]:
+        """Get social hook prompts from company settings or use defaults."""
+        if not company_id:
+            return self.DEFAULT_SOCIAL_HOOK_PROMPTS
+
+        try:
+            from utils.supabase_client import get_supabase_client
+            supabase = get_supabase_client()
+
+            result = supabase.client.table("companies")\
+                .select("settings")\
+                .eq("id", company_id)\
+                .single()\
+                .execute()
+
+            if result.data and result.data.get("settings"):
+                settings = result.data["settings"]
+                custom_prompts = settings.get("social_hook_prompts", {})
+
+                # Merge with defaults (custom overrides default)
+                return {
+                    "direct": custom_prompts.get("direct") or self.DEFAULT_SOCIAL_HOOK_PROMPTS["direct"],
+                    "professional": custom_prompts.get("professional") or self.DEFAULT_SOCIAL_HOOK_PROMPTS["professional"],
+                    "emotional": custom_prompts.get("emotional") or self.DEFAULT_SOCIAL_HOOK_PROMPTS["emotional"]
+                }
+        except Exception as e:
+            logger.warn("failed_to_get_company_hook_prompts", company_id=company_id, error=str(e))
+
+        return self.DEFAULT_SOCIAL_HOOK_PROMPTS
+
     async def generate_social_hooks(
         self,
         title: str,
         content: str,
         organization_id: Optional[str] = None,
-        client_id: Optional[str] = None
+        client_id: Optional[str] = None,
+        company_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Generate social media hooks for different platforms using Groq.
 
@@ -1256,6 +1294,7 @@ Respond with ONLY the prompt text (no JSON, no markdown, no explanation).""")
         - professional: LinkedIn (max 400 chars) - adds context and value
         - emotional: Facebook (max 400 chars) - engaging, storytelling
 
+        Prompts are configurable per company via settings.social_hook_prompts.
         Falls back to truncated title on error.
         """
         fallback_hook = self._truncate_hook(title, 200)
@@ -1274,6 +1313,9 @@ Respond with ONLY the prompt text (no JSON, no markdown, no explanation).""")
             return fallback_result
 
         try:
+            # Get company-specific prompts or defaults
+            hook_prompts = await self._get_company_hook_prompts(company_id)
+
             hooks_prompt = ChatPromptTemplate.from_messages([
                 ("system", "You are an expert social media copywriter. Generate engaging hooks for news articles. ALWAYS write in the SAME LANGUAGE as the original article."),
                 ("user", """Generate 3 social media hooks for this article with DIFFERENT lengths per platform.
@@ -1284,9 +1326,9 @@ Content summary: {content}
 
 Generate 3 hooks in JSON format:
 {{
-    "direct": "For Twitter/X/Bluesky. Concise and impactful. No emojis. MAX 250 chars.",
-    "professional": "For LinkedIn. Add context, data or insight that provides value to readers. No emojis. MAX 400 chars.",
-    "emotional": "For Facebook. Engaging storytelling that connects emotionally with readers. Can use 1-2 emojis. MAX 400 chars."
+    "direct": "{prompt_direct}",
+    "professional": "{prompt_professional}",
+    "emotional": "{prompt_emotional}"
 }}
 
 IMPORTANT:
@@ -1309,7 +1351,10 @@ IMPORTANT:
 
             hooks_result = await hooks_chain.ainvoke({
                 "title": title,
-                "content": content_preview
+                "content": content_preview,
+                "prompt_direct": hook_prompts["direct"],
+                "prompt_professional": hook_prompts["professional"],
+                "prompt_emotional": hook_prompts["emotional"]
             })
 
             # Validate and truncate hooks if needed (platform-specific limits)

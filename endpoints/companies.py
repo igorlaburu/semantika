@@ -14,6 +14,13 @@ logger = get_logger("api.companies")
 router = APIRouter(prefix="/api/v1/companies", tags=["companies"])
 
 
+class SocialHookPrompts(BaseModel):
+    """Model for social media hook prompts."""
+    direct: Optional[str] = Field(None, max_length=500, description="Prompt for Twitter/X/Bluesky hooks")
+    professional: Optional[str] = Field(None, max_length=500, description="Prompt for LinkedIn hooks")
+    emotional: Optional[str] = Field(None, max_length=500, description="Prompt for Facebook hooks")
+
+
 class CompanySettingsUpdate(BaseModel):
     """Model for updating company settings."""
     # Auto-generation settings
@@ -28,6 +35,8 @@ class CompanySettingsUpdate(BaseModel):
     disable_probabilistic_mark: Optional[bool] = None
     # Publication settings
     draft_publish_default: Optional[bool] = None  # Default to publish as draft (for frontend)
+    # Social media hook prompts (configurable per platform)
+    social_hook_prompts: Optional[SocialHookPrompts] = None
 
 
 # NOTE: /current/* routes MUST be defined BEFORE /{company_id}/* routes
@@ -124,6 +133,14 @@ async def update_current_company_settings(
 
         if not settings_dict:
             raise HTTPException(status_code=400, detail="No settings provided for update")
+
+        # Deep merge for nested objects (social_hook_prompts)
+        if 'social_hook_prompts' in settings_dict:
+            current_prompts = current_settings.get('social_hook_prompts', {})
+            new_prompts = settings_dict['social_hook_prompts']
+            # Filter out None values from new prompts
+            new_prompts = {k: v for k, v in new_prompts.items() if v is not None}
+            settings_dict['social_hook_prompts'] = {**current_prompts, **new_prompts}
 
         # Merge with current settings
         updated_settings = {**current_settings, **settings_dict}
@@ -279,6 +296,14 @@ async def update_company_settings(
 
         if not settings_dict:
             raise HTTPException(status_code=400, detail="No settings provided for update")
+
+        # Deep merge for nested objects (social_hook_prompts)
+        if 'social_hook_prompts' in settings_dict:
+            current_prompts = current_settings.get('social_hook_prompts', {})
+            new_prompts = settings_dict['social_hook_prompts']
+            # Filter out None values from new prompts
+            new_prompts = {k: v for k, v in new_prompts.items() if v is not None}
+            settings_dict['social_hook_prompts'] = {**current_prompts, **new_prompts}
 
         # Merge with current settings
         updated_settings = {**current_settings, **settings_dict}

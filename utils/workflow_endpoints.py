@@ -711,7 +711,8 @@ async def execute_redact_news_rich(
                     title=article_title,
                     content=article_content,
                     organization_id=organization_id,
-                    client_id=client["client_id"]
+                    client_id=client["client_id"],
+                    company_id=client.get("company_id")
                 )
                 result["social_hooks"] = hooks_result.get("social_hooks", {})
                 logger.info("social_hooks_generated",
